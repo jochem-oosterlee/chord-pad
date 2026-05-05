@@ -591,8 +591,10 @@ select:hover { border-color: var(--accent); }
   gap: 0;
   align-items: stretch;
 }
-.control.grow { flex: 1 1 0; min-width: 100px; }
-.control.wide { flex: 2 1 0; min-width: 140px; }
+.control.grow { flex: 1 1 0; min-width: 100px; max-width: 10px; }
+.control.wide { flex: 2 1 0; min-width: 140px; max-width: 10px; }
+.control.grow input[type="range"],
+.control.wide input[type="range"] { min-width: 0; }
 .control + .control {
   border-left: 1px solid var(--panel-edge);
   padding-left: 16px;
@@ -968,7 +970,13 @@ input[type="range"]::-moz-range-thumb {
   .pad-button .pad-name { font-size: 17px; }
   .pad-roman, .pad-quality { font-size: 9px; }
   .pad-button .pad-key { font-size: 7px; padding: 1px 3px; }
-  .controls { grid-template-columns: 1fr 1fr 1fr; }
+  .controls { overflow-x: auto; }
+  .controls-body { flex-wrap: nowrap; min-width: max-content; }
+  .control + .control { padding-left: 12px; margin-left: 12px; }
+  .control.grow { flex: 0 0 auto; min-width: 70px; max-width: 90px; }
+  .control.wide { flex: 0 0 auto; min-width: 80px; max-width: 110px; }
+  .control.grow .control-row input[type="range"],
+  .control.wide .control-row input[type="range"] { min-width: 0; width: 100%; }
   .key-btn { font-size: 9px; padding: 6px 0; }
   select { min-width: 0; }
   .tab { padding: 10px 14px; font-size: 9px; }
@@ -981,6 +989,63 @@ input[type="range"]::-moz-range-thumb {
 
 @media (max-width: 600px) {
   .key-row { flex-direction: column; align-items: stretch; gap: 6px; }
+}
+
+/* ─── landscape mobile (phones in landscape, not tablets) ─── */
+@media (max-height: 520px) and (orientation: landscape) {
+  body { padding: 4px; }
+
+  .header { padding: 5px 14px; }
+  .brand { font-size: 13px; }
+  .midi-control label { display: none; }
+  select { font-size: 10px; min-width: 130px; padding: 3px 6px; }
+
+  .tab { padding: 6px 14px; font-size: 9px; }
+
+  .card { padding: 10px 14px 8px; min-height: 0; }
+  .key-row { margin-bottom: 10px; gap: 8px; }
+  .key-btn { padding: 4px 0; font-size: 9px; }
+  .key-row .key-label-text { display: none; }
+
+  .prog-section { margin-bottom: 8px; }
+  .dark-section { margin-bottom: 8px; }
+  .prog-flow-label, .dark-flow-label { padding-bottom: 4px; font-size: 7px; gap: 6px; }
+  .prog-flow-label .icon, .dark-flow-label .icon { width: 10px; height: 10px; }
+
+  .prog-row { gap: 5px; }
+  .prog-row .pad-cell { min-height: 48px; }
+  .dark-row { gap: 5px; }
+  .dark-row .pad-cell { min-height: 48px; }
+
+  .prog-row.secdom,
+  .prog-row.main,
+  .prog-row.modal,
+  .dark-row.sd_v,
+  .dark-row.main,
+  .dark-row.sd_iv { padding: 6px 10px; margin-left: 4px; margin-right: 4px; }
+
+  .pad-button { min-height: 38px; padding: 4px 3px; }
+  .pad-button .pad-name { font-size: 15px; }
+  .pad-button .pad-quality { font-size: 9px; }
+  .pad-button .pad-key { font-size: 6px; padding: 1px 3px; top: 2px; right: 2px; }
+  .pad-roman { font-size: 7px; }
+  .pad-ext { font-size: 8px; padding: 2px 3px; }
+
+  .controls { padding: 5px 12px 6px; gap: 3px; overflow-x: auto; }
+  .controls-body { flex-wrap: nowrap; min-width: max-content; }
+  .control + .control { padding-left: 8px; margin-left: 8px; }
+  .control.grow { min-width: 60px; }
+  .control.wide { min-width: 90px; }
+  .control-label { font-size: 7px; }
+  .btn { font-size: 10px; padding: 3px 7px; min-width: 22px; }
+  .control-value { font-size: 9px; min-width: 18px; }
+
+  .synth-controls { padding: 6px 14px 8px; }
+  .synth-sliders { grid-template-columns: repeat(6, 1fr); gap: 5px; }
+
+  .ver-toggle .ver-btn { font-size: 9px; padding: 4px 8px; }
+  .scale-type-row { gap: 4px; }
+  .scale-btn { font-size: 9px; padding: 5px 10px; }
 }
 </style>
 </head>
@@ -1107,6 +1172,12 @@ input[type="range"]::-moz-range-thumb {
           <button class="btn" id="bass-oct-down">▼</button>
           <span class="control-value" id="ctrl-bass-oct">2</span>
           <button class="btn" id="bass-oct-up">▲</button>
+        </div>
+      </div>
+      <div class="control">
+        <span class="control-label">Tooltip</span>
+        <div class="control-row">
+          <button class="btn" id="piano-hover-toggle">OFF</button>
         </div>
       </div>
       <div class="control">
@@ -1619,6 +1690,7 @@ const state = {
   rootPosition: false,
   version: { 'progressions': 2, 'dark-harmony': 2 },
   bassOctave: 2,
+  showPianoHover: false,
   synth: {
     waveform:      'sine',
     attack:        0.15,
@@ -2758,8 +2830,9 @@ function drawRowConnection(svg, fromEl, toEl, boardRect, type, fromYFraction = 0
   const tr = toEl.getBoundingClientRect();
   const fy = fr.top  + fr.height * fromYFraction - boardRect.top;
   const ty = tr.top  + tr.height / 2 - boardRect.top;
-  const xEnd = Math.min(fr.left, tr.left) - boardRect.left - 2;
-  const xArm = xEnd - 18;
+  const leftEdge = Math.min(fr.left, tr.left) - boardRect.left;
+  const xEnd = leftEdge - 2;
+  const xArm = Math.max(window.innerWidth > 1024 ? -20 : -8, leftEdge - 24);
   const r    = 6;
   const dir  = ty > fy ? 1 : -1;
 
@@ -3243,6 +3316,13 @@ scaleTonesToggleBtn.addEventListener('click', () => {
   scaleTonesToggleBtn.classList.toggle('active', state.showScaleTones);
 });
 
+const pianoHoverToggleBtn = document.getElementById('piano-hover-toggle');
+pianoHoverToggleBtn.addEventListener('click', () => {
+  state.showPianoHover = !state.showPianoHover;
+  pianoHoverToggleBtn.textContent = state.showPianoHover ? 'ON' : 'OFF';
+  pianoHoverToggleBtn.classList.toggle('active', state.showPianoHover);
+});
+
 const bassToggleBtn = document.getElementById('bass-toggle');
 bassToggleBtn.addEventListener('click', () => {
   state.bassEnabled = !state.bassEnabled;
@@ -3497,7 +3577,7 @@ function currentScaleAbsolute() {
   return new Set(intervals.map(i => (key + i) % 12));
 }
 
-function buildPianoSVG(rootPitch, chordQ, scaleOverride) {
+function buildPianoSVG(rootPitch, chordQ, scaleOverride, scale = 1) {
   const W = 22, H = 68, BW = 12, BH = 40;
   // white key layout: [pitchClass, xLeft]
   const whites = [[0,0],[2,22],[4,44],[5,66],[7,88],[9,110],[11,132]];
@@ -3522,7 +3602,7 @@ function buildPianoSVG(rootPitch, chordQ, scaleOverride) {
     return null;
   }
 
-  let s = `<svg width="${totalW}" height="${H}" xmlns="http://www.w3.org/2000/svg" style="display:block">
+  let s = `<svg width="${Math.round(totalW * scale)}" height="${Math.round(H * scale)}" viewBox="0 0 ${totalW} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block">
   <defs><filter id="ds"><feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-color="#000" flood-opacity="0.35"/></filter></defs>`;
 
   // White keys
@@ -3549,7 +3629,9 @@ function buildPianoSVG(rootPitch, chordQ, scaleOverride) {
 }
 
 function showPianoTooltip(padEl, rootPitch, chordQ, scaleOverride) {
-  pianoTooltipEl.innerHTML = buildPianoSVG(rootPitch, chordQ, scaleOverride);
+  if (!state.showPianoHover) return;
+  const scale = window.matchMedia('(hover: none)').matches ? 0.5 : 1;
+  pianoTooltipEl.innerHTML = buildPianoSVG(rootPitch, chordQ, scaleOverride, scale);
   pianoTooltipEl.style.display = 'block';
   const r  = padEl.getBoundingClientRect();
   const tw = pianoTooltipEl.offsetWidth;
