@@ -3419,9 +3419,15 @@ function flashHint(id) {
   setTimeout(() => el.classList.remove('active'), 300);
 }
 
+function getBaseKey(e) {
+  if (e.code.startsWith('Digit')) return e.code.replace('Digit', '');
+  if (e.code.startsWith('Key'))   return e.code.replace('Key', '').toLowerCase();
+  return e.key.toLowerCase();
+}
+
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  const key = e.key.toLowerCase();
+  const key = getBaseKey(e);
   if (heldKeys.has(key)) return;
   heldKeys.add(key);
   if (key === ' ') { e.preventDefault(); flashHint('hint-space'); panic(); return; }
@@ -3446,7 +3452,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('keyup', (e) => {
-  const key = e.key.toLowerCase();
+  const key = getBaseKey(e);
   heldKeys.delete(key);
   if (state.currentTemplate === 'scale-chords') {
     const sc = scaleKeymap[key];
