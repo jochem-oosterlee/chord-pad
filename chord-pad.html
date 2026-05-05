@@ -1157,12 +1157,10 @@ input[type="range"]::-moz-range-thumb {
           <button class="btn" id="sustain-toggle">OFF</button>
         </div>
       </div>
-      <div class="control wide">
+      <div class="control">
         <span class="control-label">Audio</span>
         <div class="control-row">
           <button class="btn active" id="audio-toggle">ON</button>
-          <input type="range" id="audio-vol" min="0" max="100" value="70">
-          <span class="control-value" id="ctrl-audio-vol">70</span>
         </div>
       </div>
       <div class="control">
@@ -3303,10 +3301,6 @@ audioToggleBtn.addEventListener('click', () => {
   state.audioEnabled = !state.audioEnabled;
   audioToggleBtn.textContent = state.audioEnabled ? 'ON' : 'OFF';
   audioToggleBtn.classList.toggle('active', state.audioEnabled);
-});
-document.getElementById('audio-vol').addEventListener('input', (e) => {
-  state.audioVolume = parseInt(e.target.value, 10) / 100;
-  document.getElementById('ctrl-audio-vol').textContent = e.target.value;
 });
 
 const scaleTonesToggleBtn = document.getElementById('scale-tones-toggle');
