@@ -2384,18 +2384,19 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
 
   const extQ = extQuality(chordSpec.q, chordSpec.ext);
 
-  const onDown = (e) => { e.preventDefault(); playChord(id, chordSpec.interval, chordSpec.q, chordSpec.bassInterval); };
+  const showMainTooltip = () => {
+    const keyRoot   = state.keys[state.currentTemplate];
+    const rootPitch = (keyRoot + chordSpec.interval) % 12;
+    showPianoTooltip(pad, rootPitch, chordSpec.q, chordSpec.pianoScale);
+  };
+  const onDown = (e) => { e.preventDefault(); showMainTooltip(); playChord(id, chordSpec.interval, chordSpec.q, chordSpec.bassInterval); };
   const onUp   = ()  => releaseChord(id);
   pad.addEventListener('mousedown', onDown);
   pad.addEventListener('mouseup',   onUp);
   pad.addEventListener('mouseleave', (e) => { onUp(); hidePianoTooltip(); });
   pad.addEventListener('touchstart', onDown, { passive: false });
-  pad.addEventListener('touchend',   onUp);
-  pad.addEventListener('mouseenter', () => {
-    const keyRoot   = state.keys[state.currentTemplate];
-    const rootPitch = (keyRoot + chordSpec.interval) % 12;
-    showPianoTooltip(pad, rootPitch, chordSpec.q, chordSpec.pianoScale);
-  });
+  pad.addEventListener('touchend',   () => { onUp(); hidePianoTooltip(); });
+  pad.addEventListener('mouseenter', showMainTooltip);
 
   const badge = pad.querySelector('.pad-ext');
   if (badge && extQ) {
@@ -2425,11 +2426,19 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
     });
     badge.addEventListener('touchstart', (e) => {
       e.stopPropagation(); e.preventDefault();
+      const keyRoot   = state.keys[state.currentTemplate];
+      const rootPitch = (keyRoot + chordSpec.interval) % 12;
+      let badgeScale = chordSpec.pianoScale;
+      if (badgeScale === undefined && chordSpec.q === 'dim') {
+        badgeScale = Array.from(currentScaleAbsolute()).map(p => (p - rootPitch + 12) % 12);
+      }
+      showPianoTooltip(pad, rootPitch, extQ, badgeScale);
       playChord(id, chordSpec.interval, extQ);
     }, { passive: false });
     badge.addEventListener('touchend', (e) => {
       e.stopPropagation();
       releaseChord(id);
+      hidePianoTooltip();
     });
   }
 
