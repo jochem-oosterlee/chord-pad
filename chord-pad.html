@@ -2399,20 +2399,18 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
 
   const badge = pad.querySelector('.pad-ext');
   if (badge && extQ) {
-    const extId = id + '-ext';
     badge.addEventListener('mousedown', (e) => {
       e.stopPropagation(); e.preventDefault();
-      playChord(extId, chordSpec.interval, extQ);
+      playChord(id, chordSpec.interval, extQ);
     });
     badge.addEventListener('mouseup', (e) => {
       e.stopPropagation();
-      releaseChord(extId);
+      releaseChord(id);
     });
     badge.addEventListener('mouseenter', (e) => {
       e.stopPropagation();
       const keyRoot   = state.keys[state.currentTemplate];
       const rootPitch = (keyRoot + chordSpec.interval) % 12;
-      // Diatonic dim triads inherit the key scale for the 7th badge too
       let badgeScale = chordSpec.pianoScale;
       if (badgeScale === undefined && chordSpec.q === 'dim') {
         badgeScale = Array.from(currentScaleAbsolute()).map(p => (p - rootPitch + 12) % 12);
@@ -2420,18 +2418,18 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
       showPianoTooltip(pad, rootPitch, extQ, badgeScale);
     });
     badge.addEventListener('mouseleave', () => {
-      releaseChord(extId);
+      releaseChord(id);
       const keyRoot   = state.keys[state.currentTemplate];
       const rootPitch = (keyRoot + chordSpec.interval) % 12;
       showPianoTooltip(pad, rootPitch, chordSpec.q, chordSpec.pianoScale);
     });
     badge.addEventListener('touchstart', (e) => {
       e.stopPropagation(); e.preventDefault();
-      playChord(extId, chordSpec.interval, extQ);
+      playChord(id, chordSpec.interval, extQ);
     }, { passive: false });
     badge.addEventListener('touchend', (e) => {
       e.stopPropagation();
-      releaseChord(extId);
+      releaseChord(id);
     });
   }
 
