@@ -123,7 +123,7 @@ select:hover { border-color: var(--accent); }
 .error-banner.show { display: block; }
 
 /* ─────────── tabs ─────────── */
-.tabs { display: flex; border-bottom: 1px solid var(--panel-edge); background: rgba(0,0,0,0.2); }
+.tabs { display: flex; align-items: stretch; border-bottom: 1px solid var(--panel-edge); background: rgba(0,0,0,0.2); }
 .tab {
   background: transparent; border: 0;
   border-right: 1px solid var(--panel-edge);
@@ -131,6 +131,7 @@ select:hover { border-color: var(--accent); }
   font-size: 10px; letter-spacing: 0.22em;
   text-transform: uppercase; padding: 12px 26px;
   cursor: pointer; transition: all 0.1s ease; position: relative;
+  display: flex; align-items: center; justify-content: center;
 }
 .tab:hover { color: var(--text); background: rgba(255,255,255,0.02); }
 .tab.active { color: var(--text); background: rgba(255,255,255,0.04); }
@@ -148,7 +149,6 @@ select:hover { border-color: var(--accent); }
 .card {
   position: relative;
   padding: 28px 36px 24px 36px;
-  min-height: 560px;
 }
 .card.prog {
   background-color: var(--prog-card);
@@ -293,7 +293,7 @@ select:hover { border-color: var(--accent); }
 .prog-row .pad-cell {
   display: flex; align-items: center; justify-content: center;
   position: relative;
-  min-height: 90px;
+  min-height: 50px;
 }
 .prog-row .pad-cell.empty { visibility: hidden; }
 
@@ -329,7 +329,7 @@ select:hover { border-color: var(--accent); }
   align-items: center;
   justify-content: center;
   position: relative;
-  min-height: 90px;
+  min-height: 50px;
 }
 .dark-row .pad-cell.empty { visibility: hidden; }
 .dark-row .pad-cell.neapolitan {
@@ -396,8 +396,8 @@ select:hover { border-color: var(--accent); }
   border: 1px solid rgba(0,0,0,0.55);
   border-radius: 5px;
   width: 100%;
-  min-height: 56px;
-  padding: 12px 6px;
+  min-height: 44px;
+  padding: 7px 6px;
   font-family: inherit;
   display: flex;
   flex-direction: column;
@@ -902,10 +902,10 @@ input[type="range"]::-moz-range-thumb {
 }
 .scale-row-label {
   font-size: 9px;
-  letter-spacing: 0.25em;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: rgba(255,255,255,0.55);
-  font-family: 'JetBrains Mono', monospace;
+  color: rgba(255,255,255,0.78);
+  font-weight: 500;
   margin-bottom: 6px;
 }
 .scale-row {
@@ -921,7 +921,7 @@ input[type="range"]::-moz-range-thumb {
   align-items: center;
   justify-content: center;
   position: relative;
-  min-height: 90px;
+  min-height: 50px;
 }
 .scale-cell-empty {
   visibility: hidden;
@@ -984,7 +984,24 @@ input[type="range"]::-moz-range-thumb {
   .prog-row .pad-cell { min-height: 70px; }
   .dark-row { gap: 6px; }
   .dark-row .pad-cell { min-height: 70px; }
-  .prog-flow-label, .dark-flow-label { font-size: 8px; letter-spacing: 0.18em; }
+  .prog-flow-label, .dark-flow-label, .scale-row-label { font-size: 8px; letter-spacing: 0.18em; }
+}
+
+@media (max-width: 880px) and (orientation: portrait) {
+  .pad-button .pad-chord { flex-direction: column; align-items: center; gap: 1px; }
+  .pad-button .pad-quality { font-size: 13px; text-align: center; }
+  .pad-key { display: none; }
+  .pad-ext { display: none; }
+  .tab { white-space: nowrap; padding: 10px 8px; letter-spacing: 0.1em; }
+  .help { display: none; }
+  .prog-row .pad-cell,
+  .dark-row .pad-cell,
+  .scale-cell { align-items: stretch; min-height: 0; }
+  .pad { justify-content: stretch; }
+  .pad-button { flex: 1; }
+  .pad-quality .q-dim,
+  .pad-quality .q-halfdim,
+  .pad-quality .q-aug { vertical-align: 0; }
 }
 
 @media (max-width: 600px) {
@@ -1425,7 +1442,7 @@ const CHORD_AVG_IV = Object.fromEntries(
 const CHORD_SUFFIX = {
   'maj': '', 'min': 'm', 'dim': '°', 'aug': '+',
   'sus2': 'sus2', 'sus4': 'sus4',
-  'dom7': '7', 'maj7': 'maj7', 'min7': 'm7', 'mmaj7': 'mmaj7',
+  'dom7': '7', 'maj7': 'maj7', 'min7': 'm7', 'mmaj7': 'mMaj7',
   'm7b5': 'ø', 'dim7': '°7', 'augmaj7': 'maj7+', 'aug7': '7+',
   'power': '5', 'sus24': 'sus24',
   'maj6': '6', 'min6': 'm6',
@@ -1439,7 +1456,7 @@ const CHORD_SUFFIX = {
 const QUALITY_GLYPH = {
   'maj': '', 'min': 'm', 'dim': '°', 'aug': '+',
   'sus2': 'sus2', 'sus4': 'sus4',
-  'dom7': '7', 'maj7': 'maj7', 'min7': 'm7', 'mmaj7': 'mmaj7',
+  'dom7': '7', 'maj7': 'maj7', 'min7': 'm7', 'mmaj7': 'mMaj7',
   'm7b5': 'ø', 'dim7': '°7', 'augmaj7': 'maj7+', 'aug7': '7+',
   'power': '5', 'sus24': 'sus24',
   'maj6': '6', 'min6': 'm6',
