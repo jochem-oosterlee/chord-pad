@@ -1208,6 +1208,12 @@ input[type="range"]::-moz-range-thumb {
         </div>
       </div>
       <div class="control">
+        <span class="control-label">MIDI</span>
+        <div class="control-row">
+          <button class="btn" id="midi-toggle">OFF</button>
+        </div>
+      </div>
+      <div class="control">
         <span class="control-label">Channel</span>
         <div class="control-row">
           <button class="btn" id="ch-down">◀</button>
@@ -1696,6 +1702,7 @@ const state = {
   octave: 4,
   velocity: 100,
   channel: 0,
+  midiEnabled: false,
   midiAccess: null,
   output: null,
   activeChords: new Map(),
@@ -2230,12 +2237,12 @@ function refreshOutputs() {
 }
 
 function sendNoteOn(note, velocity) {
-  if (!state.output) return;
+  if (!state.midiEnabled || !state.output) return;
   state.output.send([0x90 | state.channel, note & 0x7F, velocity & 0x7F]);
   blinkLed();
 }
 function sendNoteOff(note) {
-  if (!state.output) return;
+  if (!state.midiEnabled || !state.output) return;
   state.output.send([0x80 | state.channel, note & 0x7F, 0]);
 }
 function panic() {
@@ -3679,7 +3686,18 @@ function hidePianoTooltip() {
 buildKeyTracks();
 rebuildBoard();
 updateControlDisplays();
-initMIDI();
+
+const midiToggleBtn = document.getElementById('midi-toggle');
+const midiControl   = document.querySelector('.midi-control');
+midiControl.style.display = 'none';
+
+midiToggleBtn.addEventListener('click', async () => {
+  state.midiEnabled = !state.midiEnabled;
+  midiToggleBtn.textContent = state.midiEnabled ? 'ON' : 'OFF';
+  midiToggleBtn.classList.toggle('active', state.midiEnabled);
+  midiControl.style.display = state.midiEnabled ? '' : 'none';
+  if (state.midiEnabled && !state.midiAccess) await initMIDI();
+});
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
