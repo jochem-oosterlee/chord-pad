@@ -1,16 +1,13 @@
-const CACHE = 'chord-pad-v1';
-const ASSETS = [
+const CACHE = 'chord-pad-v2';
+const OFFLINE_ASSETS = [
   './chord-pad.html',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
-  'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Major+Mono+Display&family=Cormorant+Garamond:wght@500;600&display=swap'
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(ASSETS.filter(a => !a.startsWith('https'))))
-  );
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(OFFLINE_ASSETS)));
   self.skipWaiting();
 });
 
@@ -21,8 +18,15 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 
+// Network-first: always try the network, fall back to cache only when offline
 self.addEventListener('fetch', e => {
   e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request))
+    fetch(e.request)
+      .then(response => {
+        const clone = response.clone();
+        caches.open(CACHE).then(c => c.put(e.request, clone));
+        return response;
+      })
+      .catch(() => caches.match(e.request))
   );
 });
