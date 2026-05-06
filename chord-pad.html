@@ -1144,7 +1144,6 @@ input[type="range"]::-moz-range-thumb {
         <button class="scale-btn" data-scale="harmonic-minor">Harmonic Minor</button>
         <div class="rows-config-wrap" style="margin-left:auto">
           <button class="rows-config-btn" id="rows-config-btn">Rows</button>
-          <div class="rows-config-dropdown" id="rows-config-dropdown"></div>
         </div>
       </div>
       <div class="board" data-board="scale-chords"></div>
@@ -3154,7 +3153,10 @@ document.querySelectorAll('.scale-btn').forEach(btn => {
 // ROWS CONFIG DROPDOWN
 // ============================================================
 const rowsConfigBtn      = document.getElementById('rows-config-btn');
-const rowsConfigDropdown = document.getElementById('rows-config-dropdown');
+const rowsConfigDropdown = document.createElement('div');
+rowsConfigDropdown.className = 'rows-config-dropdown';
+rowsConfigDropdown.id = 'rows-config-dropdown';
+document.body.appendChild(rowsConfigDropdown);
 
 function renderRowsDropdown() {
   rowsConfigDropdown.innerHTML = '';
