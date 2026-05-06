@@ -1154,6 +1154,12 @@ input[type="range"]::-moz-range-thumb {
     <div class="synth-header" id="settings-header">Settings</div>
     <div class="controls-body">
       <div class="control">
+        <span class="control-label">Audio</span>
+        <div class="control-row">
+          <button class="btn active" id="audio-toggle">ON</button>
+        </div>
+      </div>
+      <div class="control">
         <span class="control-label">Voicing</span>
         <div class="control-row">
           <button class="btn active" id="voicing-toggle">Auto</button>
@@ -1167,23 +1173,10 @@ input[type="range"]::-moz-range-thumb {
           <button class="btn" id="oct-up">▲</button>
         </div>
       </div>
-      <div class="control grow">
-        <span class="control-label">Velocity</span>
-        <div class="control-row">
-          <input type="range" id="vel-slider" min="1" max="127" value="100">
-          <span class="control-value" id="ctrl-vel">100</span>
-        </div>
-      </div>
       <div class="control">
         <span class="control-label">Sustain</span>
         <div class="control-row">
           <button class="btn" id="sustain-toggle">OFF</button>
-        </div>
-      </div>
-      <div class="control">
-        <span class="control-label">Audio</span>
-        <div class="control-row">
-          <button class="btn active" id="audio-toggle">ON</button>
         </div>
       </div>
       <div class="control">
@@ -1213,7 +1206,7 @@ input[type="range"]::-moz-range-thumb {
           <button class="btn" id="midi-toggle">OFF</button>
         </div>
       </div>
-      <div class="control">
+      <div class="control" id="channel-control" style="display:none">
         <span class="control-label">Channel</span>
         <div class="control-row">
           <button class="btn" id="ch-down">◀</button>
@@ -3248,7 +3241,6 @@ renderRowsDropdown();
 // ============================================================
 function updateControlDisplays() {
   document.getElementById('ctrl-oct').textContent = state.octave;
-  document.getElementById('ctrl-vel').textContent = state.velocity;
   document.getElementById('ctrl-ch').textContent = state.channel + 1;
 }
 
@@ -3267,9 +3259,6 @@ document.getElementById('ch-down').addEventListener('click', () => {
 });
 document.getElementById('ch-up').addEventListener('click', () => {
   state.channel = Math.min(15, state.channel + 1); updateControlDisplays();
-});
-document.getElementById('vel-slider').addEventListener('input', (e) => {
-  state.velocity = parseInt(e.target.value, 10); updateControlDisplays();
 });
 // Pre-create audio graph at page load (context stays suspended until user gesture)
 getAudioCtx();
@@ -3687,15 +3676,17 @@ buildKeyTracks();
 rebuildBoard();
 updateControlDisplays();
 
-const midiToggleBtn = document.getElementById('midi-toggle');
-const midiControl   = document.querySelector('.midi-control');
+const midiToggleBtn  = document.getElementById('midi-toggle');
+const midiControl    = document.querySelector('.midi-control');
+const channelControl = document.getElementById('channel-control');
 midiControl.style.display = 'none';
 
 midiToggleBtn.addEventListener('click', async () => {
   state.midiEnabled = !state.midiEnabled;
   midiToggleBtn.textContent = state.midiEnabled ? 'ON' : 'OFF';
   midiToggleBtn.classList.toggle('active', state.midiEnabled);
-  midiControl.style.display = state.midiEnabled ? '' : 'none';
+  midiControl.style.display    = state.midiEnabled ? '' : 'none';
+  channelControl.style.display = state.midiEnabled ? '' : 'none';
   if (state.midiEnabled && !state.midiAccess) await initMIDI();
 });
 
