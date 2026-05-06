@@ -832,6 +832,8 @@ input[type="range"]::-moz-range-thumb {
   flex-direction: column;
   gap: 8px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
 }
 .rows-config-dropdown.open { display: flex; }
 .rows-config-dropdown label {
