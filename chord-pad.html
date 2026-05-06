@@ -96,11 +96,6 @@ body::before {
   color: var(--text); text-transform: lowercase;
 }
 
-.midi-control { display: flex; align-items: center; gap: 10px; font-size: 11px; }
-.midi-control label {
-  color: var(--text-dim); text-transform: uppercase;
-  letter-spacing: 0.18em; font-size: 9px;
-}
 
 select {
   background: var(--bg); color: var(--text);
@@ -1021,7 +1016,6 @@ input[type="range"]::-moz-range-thumb {
 
   .header { padding: 5px 14px; }
   .brand { font-size: 13px; }
-  .midi-control label { display: none; }
   select { font-size: 10px; min-width: 130px; padding: 3px 6px; }
 
   .tab { padding: 6px 14px; font-size: 9px; }
@@ -1077,11 +1071,7 @@ input[type="range"]::-moz-range-thumb {
 <div class="app">
   <header class="header">
     <span class="brand">chord pad</span>
-    <div class="midi-control">
-      <label>Output</label>
-      <select id="output-select"><option>— loading —</option></select>
-      <div class="led" id="midi-led" title="MIDI activity"></div>
-    </div>
+    <div class="led" id="midi-led" title="MIDI activity" style="display:none"></div>
   </header>
 
   <div class="error-banner" id="error-banner"></div>
@@ -1212,6 +1202,12 @@ input[type="range"]::-moz-range-thumb {
           <button class="btn" id="ch-down">◀</button>
           <span class="control-value" id="ctrl-ch">1</span>
           <button class="btn" id="ch-up">▶</button>
+        </div>
+      </div>
+      <div class="control wide" id="port-control" style="display:none">
+        <span class="control-label">Port</span>
+        <div class="control-row">
+          <select id="output-select"><option>— no MIDI port found —</option></select>
         </div>
       </div>
     </div>
@@ -3677,16 +3673,17 @@ rebuildBoard();
 updateControlDisplays();
 
 const midiToggleBtn  = document.getElementById('midi-toggle');
-const midiControl    = document.querySelector('.midi-control');
 const channelControl = document.getElementById('channel-control');
-midiControl.style.display = 'none';
+const portControl    = document.getElementById('port-control');
+const midiLed        = document.getElementById('midi-led');
 
 midiToggleBtn.addEventListener('click', async () => {
   state.midiEnabled = !state.midiEnabled;
   midiToggleBtn.textContent = state.midiEnabled ? 'ON' : 'OFF';
   midiToggleBtn.classList.toggle('active', state.midiEnabled);
-  midiControl.style.display    = state.midiEnabled ? '' : 'none';
   channelControl.style.display = state.midiEnabled ? '' : 'none';
+  portControl.style.display    = state.midiEnabled ? '' : 'none';
+  midiLed.style.display        = state.midiEnabled ? '' : 'none';
   if (state.midiEnabled && !state.midiAccess) await initMIDI();
 });
 
