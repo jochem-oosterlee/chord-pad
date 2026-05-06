@@ -2611,7 +2611,7 @@ function buildScaleChordsBoard() {
   const ROW_DEFS = {
     power:    { label: '5',          getQ: d => d.hasPower  ? 'power'  : null },
     sus2:     { label: 'Sus2',       getQ: d => d.hasSus2   ? 'sus2'   : null },
-    triad:    { label: 'Triads', flowText: 'START HERE', getQ: d => d.triadQ },
+    triad:    { label: 'Triads', getQ: d => d.triadQ },
     sus4:     { label: 'Sus4',       getQ: d => d.hasSus4   ? 'sus4'   : null },
     sus24:    { label: 'Sus24',      getQ: d => d.hasSus24  ? 'sus24'  : null },
     sixth:    { label: '6',          getQ: d => d.sixthQ },
