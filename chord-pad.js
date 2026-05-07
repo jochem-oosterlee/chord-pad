@@ -355,7 +355,7 @@ const state = {
   sustain: false,
   audioEnabled: true,
   audioVolume: 0.70,
-  instrument: 'synth',
+  instrument: 'epiano',
   bassEnabled: true,
   showScaleTones: false,
   visibleRows: new Set(['sus2', 'triad', 'sus4', 'seventh']),
@@ -364,6 +364,7 @@ const state = {
   voicing: 'auto',
   playStyle: 'off',
   tempo: 120,
+  beatsPerBar: 4,
   version: { 'progressions': 2, 'dark-harmony': 2 },
   bassOctave: 2,
   showPianoHover: false,
@@ -470,45 +471,64 @@ function qualityToHTML(glyph) {
 // ============================================================
 let audioCtx = null;
 
-function getAudioCtx() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const comp = audioCtx.createDynamicsCompressor();
-    comp.threshold.value = -6;
-    comp.ratio.value = 4;
-    comp.attack.value = 0.003;
-    comp.release.value = 0.25;
-    comp.connect(audioCtx.destination);
-    audioCtx._out = comp;
-    // Reverb (synthetic impulse response)
-    const sr = audioCtx.sampleRate;
-    const len = Math.floor(sr * 2.5);
-    const impulse = audioCtx.createBuffer(2, len, sr);
-    for (let ch = 0; ch < 2; ch++) {
-      const d = impulse.getChannelData(ch);
-      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
-    }
-    const conv = audioCtx.createConvolver();
-    conv.buffer = impulse;
-    const reverbWet = audioCtx.createGain();
-    reverbWet.gain.value = state.synth.reverb;
-    conv.connect(reverbWet);
-    reverbWet.connect(audioCtx._out);
-    audioCtx._reverb    = conv;
-    audioCtx._reverbWet = reverbWet;
-    // Delay
-    const delay = audioCtx.createDelay(2.0);
-    delay.delayTime.value = state.synth.delayTime;
-    const delayFb = audioCtx.createGain();
-    delayFb.gain.value = state.synth.delayFeedback;
-    const delayWet = audioCtx.createGain();
-    delayWet.gain.value = state.synth.delayWet;
-    delay.connect(delayFb); delayFb.connect(delay);
-    delay.connect(delayWet); delayWet.connect(audioCtx._out);
-    audioCtx._delay    = delay;
-    audioCtx._delayFb  = delayFb;
-    audioCtx._delayWet = delayWet;
+function _buildAudioCtx() {
+  // iOS: unlock audio stack before creating context
+  if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+    const dummy = document.createElement('audio');
+    dummy.src = 'data:audio/mpeg;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA//////////////////////////////////////////////////////////////////8AAABhTEFNRTMuMTAwA8MAAAAAAAAAABQgJAUHQQAB9AAAAnGMHkkIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//sQxAADgnABGiAAQBCqgCRMAAgEAH///////////////7+n/9FTuQsQH//////2NG0jWUGlio5gLQTOtIoeR2WX////X4s9Atb/JRVCbBUpeRUq//////////////////9RUi0f2jn/+xDECgPCjAEQAABN4AAANIAAAAQVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ==';
+    dummy.play().catch(() => {});
+    dummy.pause();
   }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -6;
+  comp.ratio.value = 4;
+  comp.attack.value = 0.003;
+  comp.release.value = 0.25;
+  comp.connect(ctx.destination);
+  ctx._out = comp;
+  // Reverb (synthetic impulse response)
+  const sr = ctx.sampleRate;
+  const len = Math.floor(sr * 2.5);
+  const impulse = ctx.createBuffer(2, len, sr);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = impulse.getChannelData(ch);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+  }
+  const conv = ctx.createConvolver();
+  conv.buffer = impulse;
+  const reverbWet = ctx.createGain();
+  reverbWet.gain.value = state.synth.reverb;
+  conv.connect(reverbWet);
+  reverbWet.connect(ctx._out);
+  ctx._reverb    = conv;
+  ctx._reverbWet = reverbWet;
+  // Delay
+  const delay = ctx.createDelay(2.0);
+  delay.delayTime.value = state.synth.delayTime;
+  const delayFb = ctx.createGain();
+  delayFb.gain.value = state.synth.delayFeedback;
+  const delayWet = ctx.createGain();
+  delayWet.gain.value = state.synth.delayWet;
+  delay.connect(delayFb); delayFb.connect(delay);
+  delay.connect(delayWet); delayWet.connect(ctx._out);
+  ctx._delay    = delay;
+  ctx._delayFb  = delayFb;
+  ctx._delayWet = delayWet;
+  // Warm up audio graph so first chord hits a primed compressor
+  const wo = ctx.createOscillator();
+  const wg = ctx.createGain(); wg.gain.value = 0;
+  wo.connect(wg); wg.connect(ctx._out);
+  wo.start(); wo.stop(ctx.currentTime + 0.01);
+  return ctx;
+}
+
+// Release audio device cleanly on page unload so Windows doesn't get stuck
+window.addEventListener('beforeunload', () => { audioCtx?.close(); });
+
+function getAudioCtx() {
+  if (audioCtx?.state === 'closed') audioCtx = null;
+  if (!audioCtx) audioCtx = _buildAudioCtx();
   if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
 }
@@ -1097,6 +1117,12 @@ function playChord(padId, interval, quality, bassInterval) {
   document.getElementById(padId)?.classList.add('active');
   updateNowPlaying();
   updateSuggestions();
+  if (REC.active) {
+    const rawBeat = Math.round(recCurrentBeat() * 2) / 2;
+    const startBeat = SEQ.loop ? rawBeat % SEQ.loopEnd : rawBeat;
+    REC.pendingChords.set(padId, { interval, q: quality, bassInterval, label,
+      keyRoot: state.keys[state.currentTemplate], template: state.currentTemplate, startBeat });
+  }
 }
 
 function releaseChord(padId) {
@@ -1111,6 +1137,17 @@ function releaseChord(padId) {
   document.getElementById(padId)?.classList.remove('active');
   updateNowPlaying();
   updateSuggestions();
+  if (REC.active && REC.pendingChords.has(padId)) {
+    const p = REC.pendingChords.get(padId);
+    const beats = Math.max(0.5, Math.round(recCurrentBeat() * 2) / 2 - p.startBeat) || 0.5;
+    SEQ.items.push({ interval: p.interval, q: p.q, bassInterval: p.bassInterval,
+      label: p.label, beats, start: p.startBeat, keyRoot: p.keyRoot, template: p.template });
+    SEQ.items.sort((a, b) => a.start - b.start);
+    seqAutoExtendLoop(p.startBeat + beats);
+    seqRender();
+    seqResyncChords();
+    REC.pendingChords.delete(padId);
+  }
 }
 
 function releaseAll() {
@@ -1157,8 +1194,9 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
   const pad = document.createElement('div');
   pad.id = id;
   pad.className = 'pad';
-  pad.draggable = true;
+  pad.draggable = seqIsOpen();
   pad.addEventListener('dragstart', (e) => {
+    if (!seqIsOpen()) { e.preventDefault(); return; }
     const label = `${formatChordRoot(root)}${qualityToHTML(glyph)}`;
     e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData('application/x-chord', JSON.stringify({
@@ -1167,12 +1205,16 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
       bassInterval: chordSpec.bassInterval,
       label,
     }));
+    SEQ._dragLabel = label;
+    const { el, h } = seqChordDragImage(label, state.beatsPerBar);
+    e.dataTransfer.setDragImage(el, 0, h / 2);
     document.body.classList.add('seq-dragging-chord');
-    setTimeout(() => pad.classList.add('dragging'), 0);
+    setTimeout(() => { pad.classList.add('dragging'); document.querySelector('#seq-lane .seq-drop-hint')?.style.setProperty('color', 'var(--accent)'); }, 0);
   });
   pad.addEventListener('dragend', () => {
     document.body.classList.remove('seq-dragging-chord');
     pad.classList.remove('dragging');
+    document.querySelector('#seq-lane .seq-drop-hint')?.style.removeProperty('color');
   });
   pad.innerHTML = `
     ${isStartHere ? '<span class="start-here-marker">start here</span>' : ''}
@@ -1200,7 +1242,10 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
   pad.addEventListener('mouseleave', (e) => { onUp(); hidePianoTooltip(); });
   pad.addEventListener('touchstart', onDown, { passive: false });
   pad.addEventListener('touchend',   () => { onUp(); hidePianoTooltip(); });
-  pad.addEventListener('mouseenter', showMainTooltip);
+  pad.addEventListener('mouseenter', (e) => {
+    showMainTooltip();
+    if (e.buttons > 0 && !seqIsOpen()) playChord(id, chordSpec.interval, chordSpec.q, chordSpec.bassInterval);
+  });
 
   const badge = pad.querySelector('.pad-ext');
   if (badge && extQ) {
@@ -1208,9 +1253,10 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
       e.stopPropagation();
       playChord(id, chordSpec.interval, extQ);
     });
-    badge.draggable = true;
+    badge.draggable = seqIsOpen();
     badge.addEventListener('dragstart', (e) => {
       e.stopPropagation();
+      if (!seqIsOpen()) { e.preventDefault(); return; }
       const extLabel = `${formatChordRoot(root)}${qualityToHTML(chordSpec.ext)}`;
       e.dataTransfer.effectAllowed = 'copy';
       e.dataTransfer.setData('application/x-chord', JSON.stringify({
@@ -1219,12 +1265,17 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
         bassInterval: chordSpec.bassInterval,
         label: extLabel,
       }));
+      SEQ._dragLabel = extLabel;
+      const { el, h } = seqChordDragImage(extLabel, state.beatsPerBar);
+      e.dataTransfer.setDragImage(el, 0, h / 2);
       document.body.classList.add('seq-dragging-chord');
-      setTimeout(() => badge.classList.add('dragging'), 0);
+      setTimeout(() => { badge.classList.add('dragging'); document.querySelector('#seq-lane .seq-drop-hint')?.style.setProperty('color', 'var(--accent)'); }, 0);
     });
     badge.addEventListener('dragend', () => {
       document.body.classList.remove('seq-dragging-chord');
       badge.classList.remove('dragging');
+      document.querySelector('#seq-lane .seq-drop-hint')?.style.removeProperty('color');
+      if (SEQ._dragHoverId) { releaseChord(SEQ._dragHoverId); SEQ._dragHoverId = null; }
     });
     badge.addEventListener('mouseup', (e) => {
       e.stopPropagation();
@@ -2016,24 +2067,6 @@ document.getElementById('ch-down').addEventListener('click', () => {
 document.getElementById('ch-up').addEventListener('click', () => {
   state.channel = Math.min(15, state.channel + 1); updateControlDisplays();
 });
-// Pre-create audio graph at page load (context stays suspended until user gesture)
-getAudioCtx();
-
-function resumeAndWarmup() {
-  const ctx = getAudioCtx();
-  if (ctx.state !== 'suspended') return;
-  ctx.resume().then(() => {
-    // Silent oscillator to trigger audio graph initialization
-    const osc = ctx.createOscillator();
-    const g   = ctx.createGain(); g.gain.value = 0;
-    osc.connect(g); g.connect(ctx._out);
-    osc.start(); osc.stop(ctx.currentTime + 0.001);
-  });
-}
-// Resume on mouse movement (fires before click — gives max warmup time)
-document.addEventListener('pointermove', resumeAndWarmup, { once: true });
-// Fallback for touch / direct tap
-document.addEventListener('pointerdown', resumeAndWarmup, { once: true, capture: true });
 
 document.getElementById('synth-waveform').addEventListener('change', (e) => {
   state.synth.waveform = e.target.value;
@@ -2164,7 +2197,7 @@ function invFlfo(v)      { return Math.round(v / 8); }
 
 const INSTRUMENT_PRESETS = {
   piano:   { attack:0.005, decay:0.8,  sustain:0.2,  release:2.0,  filterFreq:5000, filterQ:0.5, overtones:0.2, reverb:0.4,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
-  epiano:  { attack:0.008, decay:0.5,  sustain:0.35, release:1.5,  filterFreq:3000, filterQ:1.5, overtones:0.2, reverb:0.35, detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0.15, delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
+  epiano:  { attack:0.008, decay:0.5,  sustain:0.35, release:1.5,  filterFreq:3000, filterQ:1.5, overtones:0.2, reverb:0.35, detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0.40, delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   epiano2: { attack:0.008, decay:0.4,  sustain:0.4,  release:1.2,  filterFreq:3500, filterQ:1.0, overtones:0.2, reverb:0.3,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   organ:   { attack:0.02,  decay:0.1,  sustain:0.9,  release:0.08, filterFreq:4000, filterQ:0.5, overtones:0.2, reverb:0.3,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:6, tremoloDepth:0.1,  delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   strings: { attack:0.4,   decay:0.3,  sustain:0.8,  release:1.5,  filterFreq:3000, filterQ:1.0, overtones:0.2, reverb:0.6,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
@@ -2537,6 +2570,11 @@ const SEQ = {
   timer: null,
   TICK_MS: 25,
   LOOKAHEAD: 0.15,
+  loopStart: 0,
+  loopEnd: 4,  // beats; auto-extends when blocks go beyond
+  loop: false,
+  _dragLabel: '',
+  _dragHoverId: null,
 };
 
 function seqBeatDur() { return 60 / state.tempo; }
@@ -2555,24 +2593,83 @@ function seqUpdateNowPlaying() {
 
 function seqAnimatePlayhead() {
   if (!SEQ.playing) return;
-  const ctx      = getAudioCtx();
-  const total    = seqTotalDur();
-  const elapsed  = ctx.currentTime - SEQ.playStartTime;
-  const posInCycle = ((elapsed % total) + total) % total;
-  const px = (posInCycle / seqBeatDur()) * BEAT_PX;
+  const ctx     = getAudioCtx();
+  const elapsed = ctx.currentTime - SEQ.playStartTime - (ctx.outputLatency || 0);
+  const total   = seqTotalDur();
+  let px;
+  if (SEQ.loop) {
+    const posInCycle = ((elapsed % total) + total) % total;
+    px = (SEQ.loopStart + posInCycle / seqBeatDur()) * BEAT_PX;
+  } else {
+    px = (elapsed / seqBeatDur()) * BEAT_PX;
+    const minW = px + 64;
+    const cLane = document.getElementById('seq-lane');
+    const nLane = document.getElementById('seq-note-lane');
+    if (cLane && parseFloat(cLane.style.minWidth || 0) < minW) cLane.style.minWidth = minW + 'px';
+    if (nLane && parseFloat(nLane.style.minWidth || 0) < minW) nLane.style.minWidth = minW + 'px';
+    const wrap = document.getElementById('seq-lane-wrap');
+    if (wrap) {
+      wrap.scrollLeft = Math.max(0, px - wrap.clientWidth * 0.75);
+      const hintCenter = wrap.scrollLeft + wrap.clientWidth / 2;
+      document.querySelectorAll('.seq-drop-hint').forEach(h => { h.style.left = hintCenter + 'px'; });
+    }
+  }
   document.querySelectorAll('.seq-playhead').forEach(ph => { ph.style.left = px + 'px'; });
   SEQ.rafId = requestAnimationFrame(seqAnimatePlayhead);
 }
 
 function seqTotalDur() {
-  const bd = seqBeatDur();
-  const chordEnd = SEQ.items.reduce((m, x) => Math.max(m, x.start + x.beats), 0) * bd;
-  const noteEnd  = SEQ.noteItems.reduce((m, x) => Math.max(m, x.start + x.beats), 0) * bd;
-  return Math.max(chordEnd, noteEnd, 0.001);
+  return (SEQ.loopEnd - SEQ.loopStart) * seqBeatDur();
+}
+
+function seqLoopOffset() { return SEQ.loop ? SEQ.loopStart : 0; }
+function seqItemInRange(item) { return !SEQ.loop || (item.start >= SEQ.loopStart && item.start < SEQ.loopEnd); }
+function seqFindNextInRange(items, fromIdx) {
+  if (!SEQ.loop) return fromIdx < items.length ? fromIdx : -1;
+  for (let i = fromIdx; i < items.length; i++) {
+    if (items[i].start >= SEQ.loopStart && items[i].start < SEQ.loopEnd) return i;
+  }
+  return -1;
 }
 
 function seqLaneWidth(items) {
-  return Math.max(items.reduce((m, x) => Math.max(m, x.start + x.beats), 4), 4) * BEAT_PX + 64;
+  const blockEnd = items.reduce((m, x) => Math.max(m, x.start + x.beats), 0);
+  return Math.max(blockEnd, SEQ.loopEnd, 4) * BEAT_PX + 64;
+}
+
+function seqAutoExtendLoop(blockEnd) {
+  if (blockEnd > SEQ.loopEnd) {
+    SEQ.loopEnd = blockEnd;
+    seqUpdateLoopEnd();
+  }
+}
+
+function seqUpdateLoopVisible() {
+  const vis = SEQ.loop;
+  document.getElementById('seq-loop-end')?.style.setProperty('display', vis ? '' : 'none');
+  document.getElementById('seq-loop-start')?.style.setProperty('display', vis ? '' : 'none');
+  document.querySelectorAll('.seq-loop-line').forEach(l => l.style.display = vis ? '' : 'none');
+  document.querySelectorAll('.seq-loop-start-line').forEach(l => l.style.display = vis ? '' : 'none');
+}
+
+function seqUpdateLoopEnd() {
+  const px = SEQ.loopEnd * BEAT_PX;
+  const handle = document.getElementById('seq-loop-end');
+  if (handle) handle.style.left = px + 'px';
+  document.querySelectorAll('.seq-loop-line').forEach(l => { l.style.left = px + 'px'; });
+  const cLane = document.getElementById('seq-lane');
+  const nLane = document.getElementById('seq-note-lane');
+  if (cLane && SEQ.items.length > 0) cLane.style.minWidth = seqLaneWidth(SEQ.items) + 'px';
+  if (nLane && SEQ.noteItems.length > 0) nLane.style.minWidth = seqLaneWidth(SEQ.noteItems) + 'px';
+  seqUpdateLoopVisible();
+}
+
+function seqUpdateLoopStart() {
+  const px = SEQ.loopStart * BEAT_PX;
+  const handle = document.getElementById('seq-loop-start');
+  if (handle) handle.style.left = px + 'px';
+  document.querySelectorAll('.seq-loop-start-line').forEach(l => { l.style.left = px + 'px'; });
+  seqUpdateLoopVisible();
 }
 
 function seqMakeBlock(item, idx, isNote) {
@@ -2628,7 +2725,7 @@ function seqMakeBlock(item, idx, isNote) {
     e.stopPropagation(); e.preventDefault();
     resize.setPointerCapture(e.pointerId);
     const startX = e.clientX, startBts = item.beats;
-    const snap = isNote ? 0.5 : 1;
+    const snap = 0.5;
     const lane = block.parentElement;
     const items = isNote ? SEQ.noteItems : SEQ.items;
     const onMove = (ev) => {
@@ -2636,8 +2733,9 @@ function seqMakeBlock(item, idx, isNote) {
       block.style.width = (item.beats * BEAT_PX) + 'px';
       refreshTicks(item.beats);
       if (lane) lane.style.minWidth = seqLaneWidth(items) + 'px';
+      seqAutoExtendLoop(item.start + item.beats);
     };
-    const onUp = () => { resize.removeEventListener('pointermove', onMove); resize.removeEventListener('pointerup', onUp); };
+    const onUp = () => { resize.removeEventListener('pointermove', onMove); resize.removeEventListener('pointerup', onUp); seqSave(); };
     resize.addEventListener('pointermove', onMove);
     resize.addEventListener('pointerup', onUp);
   });
@@ -2649,7 +2747,7 @@ function seqMakeBlock(item, idx, isNote) {
     e.preventDefault();
     block.setPointerCapture(e.pointerId);
     const startX = e.clientX, startBeat = item.start;
-    const snap = isNote ? 0.5 : 1;
+    const snap = 0.5;
     const items = isNote ? SEQ.noteItems : SEQ.items;
     const lane  = block.parentElement;
     let moved = false;
@@ -2668,6 +2766,7 @@ function seqMakeBlock(item, idx, isNote) {
       block.classList.remove('moving');
       if (moved) {
         items.sort((a, b) => a.start - b.start);
+        seqAutoExtendLoop(item.start + item.beats);
         if (isNote) seqRenderNotes(); else seqRender();
       }
     };
@@ -2676,6 +2775,35 @@ function seqMakeBlock(item, idx, isNote) {
   });
 
   return block;
+}
+
+const SEQ_KEY = 'chord-pad-seq-v1';
+
+function seqSave() {
+  try {
+    localStorage.setItem(SEQ_KEY, JSON.stringify({
+      items: SEQ.items,
+      noteItems: SEQ.noteItems,
+      loopStart: SEQ.loopStart,
+      loopEnd: SEQ.loopEnd,
+      loop: SEQ.loop,
+      beatsPerBar: state.beatsPerBar,
+    }));
+  } catch (_) {}
+}
+
+function seqLoad() {
+  try {
+    const raw = localStorage.getItem(SEQ_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    if (Array.isArray(d.items))     SEQ.items     = d.items;
+    if (Array.isArray(d.noteItems)) SEQ.noteItems = d.noteItems;
+    if (typeof d.loopStart   === 'number')  SEQ.loopStart      = d.loopStart;
+    if (typeof d.loopEnd     === 'number')  SEQ.loopEnd        = d.loopEnd;
+    if (typeof d.loop        === 'boolean') SEQ.loop           = d.loop;
+    if (typeof d.beatsPerBar === 'number')  state.beatsPerBar  = d.beatsPerBar;
+  } catch (_) {}
 }
 
 function seqRender() {
@@ -2688,14 +2816,38 @@ function seqRender() {
     hint.textContent = 'drag chords here';
     lane.appendChild(hint);
     lane.style.minWidth = '';
-    return;
+  } else {
+    lane.style.minWidth = seqLaneWidth(SEQ.items) + 'px';
+    SEQ.items.forEach((item, idx) => lane.appendChild(seqMakeBlock(item, idx, false)));
   }
-  lane.style.minWidth = seqLaneWidth(SEQ.items) + 'px';
-  SEQ.items.forEach((item, idx) => lane.appendChild(seqMakeBlock(item, idx, false)));
+  const sl = document.createElement('div');
+  sl.className = 'seq-loop-start-line';
+  sl.style.left = (SEQ.loopStart * BEAT_PX) + 'px';
+  lane.appendChild(sl);
+  const sh = document.createElement('div');
+  sh.className = 'seq-loop-start';
+  sh.id = 'seq-loop-start';
+  sh.textContent = '[';
+  sh.style.left = (SEQ.loopStart * BEAT_PX) + 'px';
+  lane.appendChild(sh);
+  const ll = document.createElement('div');
+  ll.className = 'seq-loop-line';
+  ll.style.left = (SEQ.loopEnd * BEAT_PX) + 'px';
+  lane.appendChild(ll);
+  const lh = document.createElement('div');
+  lh.className = 'seq-loop-end';
+  lh.id = 'seq-loop-end';
+  lh.textContent = ']';
+  lh.style.left = (SEQ.loopEnd * BEAT_PX) + 'px';
+  lane.appendChild(lh);
   const ph = document.createElement('div');
   ph.className = 'seq-playhead';
   ph.style.display = SEQ.playing ? 'block' : 'none';
   lane.appendChild(ph);
+  initSeqLoopEnd();
+  initSeqLoopStart();
+  seqUpdateLoopVisible();
+  seqSave();
 }
 
 function seqRenderNotes() {
@@ -2708,14 +2860,24 @@ function seqRenderNotes() {
     hint.textContent = 'drag keys here';
     lane.appendChild(hint);
     lane.style.minWidth = '';
-    return;
+  } else {
+    lane.style.minWidth = seqLaneWidth(SEQ.noteItems) + 'px';
+    SEQ.noteItems.forEach((item, idx) => lane.appendChild(seqMakeBlock(item, idx, true)));
   }
-  lane.style.minWidth = seqLaneWidth(SEQ.noteItems) + 'px';
-  SEQ.noteItems.forEach((item, idx) => lane.appendChild(seqMakeBlock(item, idx, true)));
+  const sl = document.createElement('div');
+  sl.className = 'seq-loop-start-line';
+  sl.style.left = (SEQ.loopStart * BEAT_PX) + 'px';
+  lane.appendChild(sl);
+  const ll = document.createElement('div');
+  ll.className = 'seq-loop-line';
+  ll.style.left = (SEQ.loopEnd * BEAT_PX) + 'px';
+  lane.appendChild(ll);
   const ph = document.createElement('div');
   ph.className = 'seq-playhead';
   ph.style.display = SEQ.playing ? 'block' : 'none';
   lane.appendChild(ph);
+  seqUpdateLoopEnd();
+  seqSave();
 }
 
 function seqHighlight(idx) {
@@ -2742,7 +2904,7 @@ function seqTick() {
   // Chord track — items sorted by start
   while (SEQ.items.length > 0 && SEQ.pendingTime < horizon) {
     const item = SEQ.items[SEQ.pendingIdx];
-    const t    = SEQ.cycleStart + item.start * bd;
+    const t    = SEQ.cycleStart + (item.start - seqLoopOffset()) * bd;
     const dur  = item.beats * bd;
     const onDelay = Math.max(0, (t - now) * 1000);
 
@@ -2752,7 +2914,7 @@ function seqTick() {
     const offDelay = Math.max(0, (t + dur * 0.95 - now) * 1000);
 
     if (state.audioEnabled) {
-      const audioNodes = notes.map(n => startAudioNote(n, state.velocity, t));
+      const audioNodes = notes.map((n, i) => startAudioNote(n, state.velocity, t + i * 0.002));
       audioNodes.forEach(n => SEQ.activeNodes.add(n));
       seqTimeout(() => audioNodes.forEach(n => { stopAudioNote(n); SEQ.activeNodes.delete(n); }), offDelay);
       if (bassNote !== null) {
@@ -2777,21 +2939,29 @@ function seqTick() {
 
     const capturedIdx = SEQ.pendingIdx;
     seqTimeout(() => seqHighlight(capturedIdx), onDelay);
+    seqTimeout(() => { if (SEQ.activeIdx === capturedIdx) seqHighlight(-1); }, offDelay);
 
     SEQ.pendingIdx++;
-    if (SEQ.pendingIdx >= SEQ.items.length) {
-      SEQ.cycleStart += seqTotalDur();
-      SEQ.pendingIdx  = 0;
-      SEQ.pendingTime = SEQ.cycleStart + SEQ.items[0].start * bd;
+    const nextChordIdx = seqFindNextInRange(SEQ.items, SEQ.pendingIdx);
+    if (nextChordIdx < 0) {
+      if (SEQ.loop) {
+        SEQ.cycleStart += seqTotalDur();
+        const fi = seqFindNextInRange(SEQ.items, 0);
+        SEQ.pendingIdx  = fi >= 0 ? fi : 0;
+        SEQ.pendingTime = fi >= 0 ? SEQ.cycleStart + (SEQ.items[fi].start - SEQ.loopStart) * bd : Infinity;
+      } else {
+        SEQ.pendingTime = Infinity;
+      }
     } else {
-      SEQ.pendingTime = SEQ.cycleStart + SEQ.items[SEQ.pendingIdx].start * bd;
+      SEQ.pendingIdx  = nextChordIdx;
+      SEQ.pendingTime = SEQ.cycleStart + (SEQ.items[nextChordIdx].start - seqLoopOffset()) * bd;
     }
   }
 
   // Note track — noteItems sorted by start
   while (SEQ.noteItems.length > 0 && SEQ.notePendingTime < horizon) {
     const item = SEQ.noteItems[SEQ.notePendingIdx];
-    const t    = SEQ.noteCycleStart + item.start * bd;
+    const t    = SEQ.noteCycleStart + (item.start - seqLoopOffset()) * bd;
     const dur  = item.beats * bd;
     const onDelay  = Math.max(0, (t - now) * 1000);
     const offDelay = Math.max(0, (t + dur * 0.95 - now) * 1000);
@@ -2815,32 +2985,82 @@ function seqTick() {
 
     const capturedNoteIdx = SEQ.notePendingIdx;
     seqTimeout(() => seqHighlightNote(capturedNoteIdx), onDelay);
+    seqTimeout(() => { if (SEQ.noteActiveIdx === capturedNoteIdx) seqHighlightNote(-1); }, offDelay);
 
     SEQ.notePendingIdx++;
-    if (SEQ.notePendingIdx >= SEQ.noteItems.length) {
-      SEQ.noteCycleStart += seqTotalDur();
-      SEQ.notePendingIdx  = 0;
-      SEQ.notePendingTime = SEQ.noteCycleStart + SEQ.noteItems[0].start * bd;
+    const nextNoteIdx = seqFindNextInRange(SEQ.noteItems, SEQ.notePendingIdx);
+    if (nextNoteIdx < 0) {
+      if (SEQ.loop) {
+        SEQ.noteCycleStart += seqTotalDur();
+        const fn = seqFindNextInRange(SEQ.noteItems, 0);
+        SEQ.notePendingIdx  = fn >= 0 ? fn : 0;
+        SEQ.notePendingTime = fn >= 0 ? SEQ.noteCycleStart + (SEQ.noteItems[fn].start - SEQ.loopStart) * bd : Infinity;
+      } else {
+        SEQ.notePendingTime = Infinity;
+      }
     } else {
-      SEQ.notePendingTime = SEQ.noteCycleStart + SEQ.noteItems[SEQ.notePendingIdx].start * bd;
+      SEQ.notePendingIdx  = nextNoteIdx;
+      SEQ.notePendingTime = SEQ.noteCycleStart + (SEQ.noteItems[nextNoteIdx].start - seqLoopOffset()) * bd;
     }
   }
 }
 
 
-function seqPlay() {
-  if (SEQ.items.length === 0 && SEQ.noteItems.length === 0) return;
-  const ctx     = getAudioCtx();
-  const t0 = ctx.currentTime + 0.05;
-  const bd = seqBeatDur();
+function seqResyncChords() {
+  if (!SEQ.playing || SEQ.items.length === 0) return;
+  const bd    = seqBeatDur();
+  const tRef  = SEQ.playStartTime + 0.05;
+  const total = seqTotalDur();
+  const now   = getAudioCtx().currentTime;
+  const ls    = seqLoopOffset();
+  const cycleNum   = SEQ.loop ? Math.max(0, Math.floor((now - tRef) / total)) : 0;
+  const cycleStart = tRef + cycleNum * total;
+  for (let i = 0; i < SEQ.items.length; i++) {
+    if (!seqItemInRange(SEQ.items[i])) continue;
+    const t = cycleStart + (SEQ.items[i].start - ls) * bd;
+    if (t > now) { SEQ.cycleStart = cycleStart; SEQ.pendingIdx = i; SEQ.pendingTime = t; return; }
+  }
+  if (!SEQ.loop) { SEQ.pendingTime = Infinity; return; }
+  const next = cycleStart + total;
+  const fi = seqFindNextInRange(SEQ.items, 0);
+  SEQ.cycleStart = next; SEQ.pendingIdx = fi >= 0 ? fi : 0;
+  SEQ.pendingTime = fi >= 0 ? next + (SEQ.items[fi].start - SEQ.loopStart) * bd : Infinity;
+}
+
+function seqResyncNotes() {
+  if (!SEQ.playing || SEQ.noteItems.length === 0) return;
+  const bd    = seqBeatDur();
+  const tRef  = SEQ.playStartTime + 0.05;
+  const total = seqTotalDur();
+  const now   = getAudioCtx().currentTime;
+  const ls    = seqLoopOffset();
+  const cycleNum   = SEQ.loop ? Math.max(0, Math.floor((now - tRef) / total)) : 0;
+  const cycleStart = tRef + cycleNum * total;
+  for (let i = 0; i < SEQ.noteItems.length; i++) {
+    if (!seqItemInRange(SEQ.noteItems[i])) continue;
+    const t = cycleStart + (SEQ.noteItems[i].start - ls) * bd;
+    if (t > now) { SEQ.noteCycleStart = cycleStart; SEQ.notePendingIdx = i; SEQ.notePendingTime = t; return; }
+  }
+  if (!SEQ.loop) { SEQ.notePendingTime = Infinity; return; }
+  const next = cycleStart + total;
+  const fn = seqFindNextInRange(SEQ.noteItems, 0);
+  SEQ.noteCycleStart = next; SEQ.notePendingIdx = fn >= 0 ? fn : 0;
+  SEQ.notePendingTime = fn >= 0 ? next + (SEQ.noteItems[fn].start - SEQ.loopStart) * bd : Infinity;
+}
+
+function seqInitPlay(t0) {
+  const bd  = seqBeatDur();
+  const ls  = seqLoopOffset();
   SEQ.playing        = true;
-  SEQ.playStartTime  = ctx.currentTime;
+  SEQ.playStartTime  = t0 - 0.05;
   SEQ.cycleStart     = t0;
   SEQ.noteCycleStart = t0;
-  SEQ.pendingIdx     = 0;
-  SEQ.pendingTime    = SEQ.items.length     > 0 ? t0 + SEQ.items[0].start     * bd : Infinity;
-  SEQ.notePendingIdx  = 0;
-  SEQ.notePendingTime = SEQ.noteItems.length > 0 ? t0 + SEQ.noteItems[0].start * bd : Infinity;
+  const fi = seqFindNextInRange(SEQ.items, 0);
+  const fn = seqFindNextInRange(SEQ.noteItems, 0);
+  SEQ.pendingIdx      = fi >= 0 ? fi : 0;
+  SEQ.pendingTime     = fi >= 0 ? t0 + (SEQ.items[fi].start - ls) * bd : Infinity;
+  SEQ.notePendingIdx  = fn >= 0 ? fn : 0;
+  SEQ.notePendingTime = fn >= 0 ? t0 + (SEQ.noteItems[fn].start - ls) * bd : Infinity;
   SEQ.activeIdx       = -1;
   SEQ.noteActiveIdx   = -1;
   if (!SEQ.timer) SEQ.timer = setInterval(seqTick, SEQ.TICK_MS);
@@ -2849,6 +3069,60 @@ function seqPlay() {
   SEQ.rafId = requestAnimationFrame(seqAnimatePlayhead);
   document.getElementById('seq-play-btn').classList.add('active');
   document.getElementById('seq-play-btn').innerHTML = '&#9632; Stop';
+}
+
+function startPrecount(onDone) {
+  const ctx  = getAudioCtx();
+  const bd   = seqBeatDur();
+  const tRef = ctx.currentTime + 0.05;
+  const savedEnabled = METRO.enabled;
+  METRO.enabled = true;
+  metroRun(tRef, 0);
+  const beatSpan = document.getElementById('seq-rec-beat');
+
+  function tick() {
+    if (!SEQ.playing) {
+      beatSpan.textContent = '';
+      METRO.enabled = savedEnabled;
+      if (!METRO.enabled) metroHalt();
+      return;
+    }
+    const elapsed = getAudioCtx().currentTime - tRef;
+    const beatNum = Math.floor(elapsed / bd);
+    if (beatNum >= state.beatsPerBar) {
+      beatSpan.textContent = '';
+      METRO.enabled = savedEnabled;
+      if (!METRO.enabled) metroHalt();
+      onDone(getAudioCtx().currentTime + 0.05);
+      return;
+    }
+    beatSpan.textContent = state.beatsPerBar - beatNum;
+    REC._precountRaf = requestAnimationFrame(tick);
+  }
+  REC._precountRaf = requestAnimationFrame(tick);
+
+  // mark play btn immediately so Stop works during precount
+  document.getElementById('seq-play-btn').classList.add('active');
+  document.getElementById('seq-play-btn').innerHTML = '&#9632; Stop';
+  SEQ.playing = true;
+}
+
+function seqPlay() {
+  const ctx = getAudioCtx();
+  const t0  = ctx.currentTime + 0.05;
+
+  if (REC.armed && PRECOUNT.enabled) {
+    startPrecount((t0actual) => {
+      if (!SEQ.playing) return;
+      seqInitPlay(t0actual);
+      recActivate(t0actual);
+    });
+    return;
+  }
+
+  seqInitPlay(t0);
+  metroRun(t0);
+  if (REC.armed) recActivate(t0);
 }
 
 function seqStop() {
@@ -2863,7 +3137,16 @@ function seqStop() {
   panic();
   if (SEQ.rafId) { cancelAnimationFrame(SEQ.rafId); SEQ.rafId = null; }
   document.querySelectorAll('.seq-playhead').forEach(ph => ph.style.display = 'none');
+  const _cL = document.getElementById('seq-lane');
+  const _nL = document.getElementById('seq-note-lane');
+  if (_cL) _cL.style.minWidth = SEQ.items.length > 0 ? seqLaneWidth(SEQ.items) + 'px' : '';
+  if (_nL) _nL.style.minWidth = SEQ.noteItems.length > 0 ? seqLaneWidth(SEQ.noteItems) + 'px' : '';
+  const _wrap = document.getElementById('seq-lane-wrap');
+  if (_wrap) _wrap.scrollLeft = 0;
+  document.querySelectorAll('.seq-drop-hint').forEach(h => { h.style.left = ''; });
   if (SEQ.timer) { clearInterval(SEQ.timer); SEQ.timer = null; }
+  if (REC.active) recStop();
+  if (!REC.active) metroHalt();
   document.querySelectorAll('.seq-block').forEach(b => b.classList.remove('active'));
   SEQ.noteActiveIdx = -1;
   document.getElementById('now-playing-notes').textContent = '—';
@@ -2871,32 +3154,69 @@ function seqStop() {
   if (btn) { btn.classList.remove('active'); btn.innerHTML = '&#9654; Play'; }
 }
 
+function seqIsOpen() {
+  return !document.getElementById('seq-panel').classList.contains('collapsed');
+}
+
+function seqChordDragImage(label, beats = 4) {
+  const w = beats * BEAT_PX;
+  const h = 44;
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;left:-9999px;top:-9999px;width:${w}px;height:${h}px;`
+    + `display:flex;align-items:center;justify-content:center;`
+    + `background:#2a2b2e;border:1px solid rgba(255,255,255,0.15);border-radius:5px;`
+    + `color:var(--text);font-size:13px;font-weight:500;box-sizing:border-box;padding:4px 10px;`
+    + `pointer-events:none;`;
+  el.innerHTML = label;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 0);
+  return { el, h };
+}
+
+function seqSetGhost(lane, beat, beats) {
+  let g = lane.querySelector('.seq-ghost');
+  if (!g) { g = document.createElement('div'); g.className = 'seq-ghost'; lane.appendChild(g); }
+  g.style.left  = (beat * BEAT_PX) + 'px';
+  g.style.width = (beats * BEAT_PX) + 'px';
+  g.innerHTML   = SEQ._dragLabel || '';
+}
+function seqClearGhost(lane) { lane.querySelector('.seq-ghost')?.remove(); }
+
 // Lane drag-and-drop
 function initSeqNoteLane() {
   const lane = document.getElementById('seq-note-lane');
   if (!lane) return;
+  const _noteHint = () => lane.querySelector('.seq-drop-hint');
   lane.addEventListener('dragover', (e) => {
     if (!e.dataTransfer.types.includes('application/x-note')) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     lane.classList.add('drag-over');
+    _noteHint()?.style.setProperty('color', 'var(--accent)');
+    const rect = lane.getBoundingClientRect();
+    const beat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
+    seqSetGhost(lane, beat, 1);
   });
   lane.addEventListener('dragleave', (e) => {
-    if (!lane.contains(e.relatedTarget)) lane.classList.remove('drag-over');
+    if (!lane.contains(e.relatedTarget)) { lane.classList.remove('drag-over'); seqClearGhost(lane); }
   });
   lane.addEventListener('drop', (e) => {
     e.preventDefault();
     lane.classList.remove('drag-over');
+    _noteHint()?.style.removeProperty('color');
+    seqClearGhost(lane);
     if (SEQ.noteDragSrcIdx !== null) return;
     const raw = e.dataTransfer.getData('application/x-note');
     if (!raw) return;
     const data  = JSON.parse(raw);
     const rect  = lane.getBoundingClientRect();
-    const dropBeat = Math.max(0, Math.round(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
-    const start = SEQ.noteItems.length === 0 ? 0 : dropBeat;
+    const dropBeat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
+    const start = dropBeat;
     SEQ.noteItems.push({ midi: data.midi, label: data.label, beats: 1, start });
     SEQ.noteItems.sort((a, b) => a.start - b.start);
+    seqAutoExtendLoop(start + 1);
     seqRenderNotes();
+    seqResyncNotes();
   });
 }
 
@@ -2904,39 +3224,228 @@ function initSeqLane() {
   const lane = document.getElementById('seq-lane');
   if (!lane) return;
 
+  const _chordHint = () => lane.querySelector('.seq-drop-hint');
   lane.addEventListener('dragover', (e) => {
     if (!e.dataTransfer.types.includes('application/x-chord')) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     lane.classList.add('drag-over');
+    _chordHint()?.style.setProperty('color', 'var(--accent)');
+    const rect = lane.getBoundingClientRect();
+    const beat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
+    seqSetGhost(lane, beat, state.beatsPerBar);
   });
   lane.addEventListener('dragleave', (e) => {
-    if (!lane.contains(e.relatedTarget)) lane.classList.remove('drag-over');
+    if (!lane.contains(e.relatedTarget)) { lane.classList.remove('drag-over'); seqClearGhost(lane); }
   });
   lane.addEventListener('drop', (e) => {
     e.preventDefault();
     lane.classList.remove('drag-over');
+    _chordHint()?.style.removeProperty('color');
+    seqClearGhost(lane);
 
     // New chord from pad
     const raw = e.dataTransfer.getData('application/x-chord');
     if (!raw) return;
     const data  = JSON.parse(raw);
     const rect  = lane.getBoundingClientRect();
-    const dropBeat = Math.max(0, Math.round((e.clientX - rect.left) / BEAT_PX));
-    const start = SEQ.items.length === 0 ? 0 : dropBeat;
+    const dropBeat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
+    const start = dropBeat;
     SEQ.items.push({
       interval:     data.interval,
       q:            data.q,
       bassInterval: data.bassInterval,
       label:        data.label,
-      beats:        4,
+      beats:        state.beatsPerBar,
       start,
       keyRoot:      state.keys[state.currentTemplate],
       template:     state.currentTemplate,
     });
     SEQ.items.sort((a, b) => a.start - b.start);
+    seqAutoExtendLoop(start + state.beatsPerBar);
     seqRender();
+    seqResyncChords();
   });
+}
+
+function initSeqLoopEnd() {
+  const handle = document.getElementById('seq-loop-end');
+  const lane   = document.getElementById('seq-lane');
+  if (!handle || !lane) return;
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handle.setPointerCapture(e.pointerId);
+    const onMove = (ev) => {
+      const laneRect = lane.getBoundingClientRect();
+      const beat = Math.max(1, Math.round((ev.clientX - laneRect.left) / BEAT_PX));
+      SEQ.loopEnd = Math.max(beat, SEQ.loopStart + 1);
+      seqUpdateLoopEnd();
+      if (SEQ.playing && SEQ.loop) {
+        seqResyncChords();
+        seqResyncNotes();
+      }
+    };
+    const onUp = () => {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      seqSave();
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+  });
+}
+
+function initSeqLoopStart() {
+  const handle = document.getElementById('seq-loop-start');
+  const lane   = document.getElementById('seq-lane');
+  if (!handle || !lane) return;
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handle.setPointerCapture(e.pointerId);
+    const onMove = (ev) => {
+      const laneRect = lane.getBoundingClientRect();
+      const beat = Math.max(0, Math.round((ev.clientX - laneRect.left) / BEAT_PX));
+      SEQ.loopStart = Math.min(beat, SEQ.loopEnd - 1);
+      seqUpdateLoopStart();
+      if (SEQ.playing && SEQ.loop) {
+        seqResyncChords();
+        seqResyncNotes();
+      }
+    };
+    const onUp = () => {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      seqSave();
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+  });
+}
+
+// ============================================================
+// RECORD
+// ============================================================
+const REC = {
+  active: false,
+  armed: false,
+  startTime: 0,
+  rafId: null,
+  _precountRaf: null,
+  pendingChords: new Map(), // padId → {interval, q, bassInterval, label, keyRoot, template, startBeat}
+  pendingNotes:  new Map(), // midi  → {label, startBeat}
+};
+
+const PRECOUNT = { enabled: true };
+
+function midiNoteLabel(midi) {
+  return ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'][midi % 12] + (Math.floor(midi / 12) - 1);
+}
+
+function recCurrentBeat() {
+  const elapsed = getAudioCtx().currentTime - REC.startTime;
+  const raw = elapsed / seqBeatDur();
+  if (!SEQ.loop) return raw;
+  const total = SEQ.loopEnd - SEQ.loopStart;
+  return SEQ.loopStart + ((raw % total) + total) % total;
+}
+
+function recAnimateBeat() {
+  if (!REC.active) return;
+  document.getElementById('seq-rec-beat').textContent = (Math.floor(recCurrentBeat()) + 1);
+  REC.rafId = requestAnimationFrame(recAnimateBeat);
+}
+
+function recArm() {
+  REC.armed = true;
+  document.getElementById('seq-rec-btn').classList.add('armed');
+}
+
+function recDisarm() {
+  REC.armed = false;
+  document.getElementById('seq-rec-btn').classList.remove('armed');
+}
+
+function recActivate(t0) {
+  REC.armed = false;
+  REC.active = true;
+  REC.startTime = t0;
+  document.getElementById('seq-rec-btn').classList.remove('armed');
+  document.getElementById('seq-rec-btn').classList.add('active');
+  recAnimateBeat();
+}
+
+function recStop() {
+  REC.active = false;
+  REC.armed = false;
+  REC.pendingChords.clear();
+  REC.pendingNotes.clear();
+  if (REC.rafId) { cancelAnimationFrame(REC.rafId); REC.rafId = null; }
+  if (!SEQ.playing) metroHalt();
+  document.getElementById('seq-rec-btn').classList.remove('active');
+  document.getElementById('seq-rec-btn').classList.remove('armed');
+  document.getElementById('seq-rec-beat').textContent = '';
+}
+
+// ============================================================
+// METRONOME
+// ============================================================
+const METRO = {
+  enabled: false,   // user toggle
+  timer: null,      // only runs during play or rec
+  nextBeatTime: 0,
+  beatCount: 0,
+  TICK_MS: 25,
+  LOOKAHEAD: 0.1,
+};
+
+function scheduleMetroClick(time, accent) {
+  const ctx = getAudioCtx();
+  const osc  = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = accent ? 1200 : 800;
+  gain.gain.setValueAtTime(0, time);
+  gain.gain.linearRampToValueAtTime(accent ? 0.35 : 0.2, time + 0.002);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(time);
+  osc.stop(time + 0.06);
+}
+
+function metroTick() {
+  const ctx = getAudioCtx();
+  const horizon = ctx.currentTime + METRO.LOOKAHEAD;
+  while (METRO.nextBeatTime < horizon) {
+    scheduleMetroClick(METRO.nextBeatTime, METRO.beatCount % state.beatsPerBar === 0);
+    METRO.nextBeatTime += seqBeatDur();
+    METRO.beatCount++;
+  }
+}
+
+function metroRun(startTime, beatOffset = 0) {
+  if (!METRO.enabled || METRO.timer) return;
+  METRO.beatCount = beatOffset;
+  METRO.nextBeatTime = startTime;
+  metroTick();
+  METRO.timer = setInterval(metroTick, METRO.TICK_MS);
+}
+
+function metroRunSynced() {
+  if (!METRO.enabled || METRO.timer) return;
+  const ctx  = getAudioCtx();
+  const now  = ctx.currentTime;
+  const tRef = SEQ.playStartTime + 0.05;
+  const bd   = seqBeatDur();
+  const beatsElapsed = (now - tRef) / bd;
+  const nextBeat     = Math.ceil(beatsElapsed + 0.01);
+  metroRun(tRef + nextBeat * bd, nextBeat % 4);
+}
+
+function metroHalt() {
+  if (METRO.timer) { clearInterval(METRO.timer); METRO.timer = null; }
 }
 
 // ============================================================
@@ -2994,6 +3503,11 @@ function kbNoteOn(midi) {
   sendNoteOn(midi, state.velocity);
   kbActive.set(midi, node);
   document.querySelector(`.kb-key[data-midi="${midi}"]`)?.classList.add('active');
+  if (REC.active) {
+    const rawBeat = Math.round(recCurrentBeat() * 2) / 2;
+    const startBeat = SEQ.loop ? rawBeat % SEQ.loopEnd : rawBeat;
+    REC.pendingNotes.set(midi, { label: midiNoteLabel(midi), startBeat });
+  }
 }
 
 function kbNoteOff(midi) {
@@ -3003,6 +3517,16 @@ function kbNoteOff(midi) {
   sendNoteOff(midi);
   kbActive.delete(midi);
   document.querySelector(`.kb-key[data-midi="${midi}"]`)?.classList.remove('active');
+  if (REC.active && REC.pendingNotes.has(midi)) {
+    const p = REC.pendingNotes.get(midi);
+    const beats = Math.max(0.5, Math.round(recCurrentBeat() * 2) / 2 - p.startBeat) || 0.5;
+    SEQ.noteItems.push({ midi, label: p.label, beats, start: p.startBeat });
+    SEQ.noteItems.sort((a, b) => a.start - b.start);
+    seqAutoExtendLoop(p.startBeat + beats);
+    seqRenderNotes();
+    seqResyncNotes();
+    REC.pendingNotes.delete(midi);
+  }
 }
 
 function buildKeyboard() {
@@ -3059,9 +3583,11 @@ function addKbHandlers(key, midi) {
   key.draggable = true;
   key.addEventListener('dragstart', (e) => {
     e.stopPropagation();
+    if (!seqIsOpen()) { e.preventDefault(); return; }
     const label = midiNoteName(midi);
     e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData('application/x-note', JSON.stringify({ midi, label }));
+    SEQ._dragLabel = label;
     const ghost = document.createElement('div');
     ghost.textContent = label;
     ghost.style.cssText = 'position:fixed;top:-999px;padding:3px 7px;background:#1a1b1e;border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#fff;font-family:monospace;font-size:11px;white-space:nowrap';
@@ -3069,8 +3595,12 @@ function addKbHandlers(key, midi) {
     e.dataTransfer.setDragImage(ghost, ghost.offsetWidth / 2, ghost.offsetHeight / 2);
     setTimeout(() => ghost.remove(), 0);
     document.body.classList.add('seq-dragging-note');
+    setTimeout(() => document.querySelector('#seq-note-lane .seq-drop-hint')?.style.setProperty('color', 'var(--accent)'), 0);
   });
-  key.addEventListener('dragend', () => document.body.classList.remove('seq-dragging-note'));
+  key.addEventListener('dragend', () => {
+    document.body.classList.remove('seq-dragging-note');
+    document.querySelector('#seq-note-lane .seq-drop-hint')?.style.removeProperty('color');
+  });
   key.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') e.preventDefault(); kbNoteOn(midi); });
   key.addEventListener('pointerup',   ()  => kbNoteOff(midi));
   key.addEventListener('pointerleave',()  => kbNoteOff(midi));
@@ -3099,10 +3629,69 @@ document.getElementById('trem-sync').addEventListener('click', () => {
 // Sequencer controls
 document.getElementById('seq-header').addEventListener('click', () => {
   document.getElementById('seq-panel').classList.toggle('collapsed');
+  const open = seqIsOpen();
+  document.querySelectorAll('.pad, .pad-ext').forEach(el => { el.draggable = open; });
 });
 
 document.getElementById('seq-play-btn').addEventListener('click', () => {
   if (SEQ.playing) seqStop(); else seqPlay();
+});
+
+document.getElementById('seq-rec-btn').addEventListener('click', () => {
+  if (REC.active) recStop();
+  else if (REC.armed) recDisarm();
+  else if (SEQ.playing) recActivate(SEQ.playStartTime + 0.05);
+  else recArm();
+});
+
+document.getElementById('seq-metro-btn').addEventListener('click', () => {
+  METRO.enabled = !METRO.enabled;
+  document.getElementById('seq-metro-btn').classList.toggle('active', METRO.enabled);
+  if (!METRO.enabled) {
+    metroHalt();
+  } else if (SEQ.playing || REC.active) {
+    metroRunSynced();
+  }
+});
+
+function seqUpdateBarLine() {
+  document.documentElement.style.setProperty('--bar-px', (state.beatsPerBar * BEAT_PX) + 'px');
+}
+
+document.getElementById('seq-timesig').addEventListener('change', (e) => {
+  state.beatsPerBar = parseInt(e.target.value);
+  seqUpdateBarLine();
+  if (SEQ.items.length === 0 && SEQ.noteItems.length === 0) {
+    SEQ.loopStart = 0;
+    SEQ.loopEnd   = state.beatsPerBar;
+    seqUpdateLoopStart();
+    seqUpdateLoopEnd();
+  }
+  seqSave();
+});
+
+document.getElementById('seq-loop-btn').addEventListener('click', () => {
+  SEQ.loop = !SEQ.loop;
+  document.getElementById('seq-loop-btn').classList.toggle('active', SEQ.loop);
+  seqUpdateLoopVisible();
+  seqSave();
+
+  if (SEQ.loop && SEQ.playing) {
+    // pendingTime may be Infinity (no-loop exhausted) — restart scheduling from next cycle
+    const ctx   = getAudioCtx();
+    const bd    = seqBeatDur();
+    const total = seqTotalDur();
+    const tRef  = SEQ.playStartTime + 0.05;
+    const now   = ctx.currentTime;
+    const elapsed = Math.max(0, now - tRef);
+    const nextCycle = tRef + (Math.floor(elapsed / total) + 1) * total;
+    SEQ.cycleStart     = nextCycle;
+    SEQ.pendingIdx     = 0;
+    SEQ.pendingTime    = SEQ.items.length     > 0 ? nextCycle + SEQ.items[0].start     * bd : Infinity;
+    SEQ.noteCycleStart = nextCycle;
+    SEQ.notePendingIdx  = 0;
+    SEQ.notePendingTime = SEQ.noteItems.length > 0 ? nextCycle + SEQ.noteItems[0].start * bd : Infinity;
+  }
 });
 
 
@@ -3125,9 +3714,22 @@ document.getElementById('seq-tempo-up').addEventListener('click', () => {
   document.getElementById('ctrl-tempo').textContent    = state.tempo;
 });
 
+// Apply default instrument preset and sync dropdown
+document.getElementById('synth-instrument').value = state.instrument;
+if (state.instrument !== 'synth') {
+  applySynthPreset(INSTRUMENT_PRESETS[state.instrument]);
+  preloadSamples(state.instrument);
+}
+updateSynthOnlyVisibility();
+
 buildKeyboard();
 initSeqLane();
 initSeqNoteLane();
+seqLoad();
+seqUpdateBarLine();
+seqUpdateLoopStart();
+document.getElementById('seq-timesig').value = String(state.beatsPerBar);
+document.getElementById('seq-loop-btn').classList.toggle('active', SEQ.loop);
 seqRender();
 seqRenderNotes();
 

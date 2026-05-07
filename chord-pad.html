@@ -177,9 +177,9 @@
     <div class="synth-sliders" id="synth-sliders">
       <div class="synth-instrument-row">
         <select id="synth-instrument">
-          <option value="synth"   selected>Synth</option>
+          <option value="synth">Synth</option>
           <option value="piano">Piano</option>
-          <option value="epiano">E-Piano</option>
+          <option value="epiano" selected>E-Piano</option>
           <option value="epiano2">E-Piano 2</option>
           <option value="organ">Organ</option>
           <option value="strings">Strings</option>
@@ -300,6 +300,16 @@
     <div class="seq-header" id="seq-header">Sequencer</div>
     <div class="seq-controls">
       <button class="seq-play-btn" id="seq-play-btn">&#9654; Play</button>
+      <button class="seq-rec-btn" id="seq-rec-btn">&#9210; Rec</button>
+      <button class="seq-metro-btn" id="seq-metro-btn">&#9833; Metro</button>
+<button class="seq-loop-btn" id="seq-loop-btn">&#8635; Loop</button>
+      <select class="seq-timesig" id="seq-timesig">
+        <option value="2">2/4</option>
+        <option value="3">3/4</option>
+        <option value="4">4/4</option>
+        <option value="6">6/8</option>
+      </select>
+      <span class="seq-rec-beat" id="seq-rec-beat"></span>
       <div class="seq-tempo-wrap">
         <span>BPM</span>
         <button class="btn" id="seq-tempo-down">▼</button>
@@ -308,7 +318,7 @@
       </div>
       <button class="seq-clear-btn" id="seq-clear-btn">Clear</button>
     </div>
-    <div class="seq-lane-wrap">
+    <div class="seq-lane-wrap" id="seq-lane-wrap">
       <div class="seq-tracks-inner">
         <div class="seq-track-row">
           <span class="seq-track-label">Chords</span>
