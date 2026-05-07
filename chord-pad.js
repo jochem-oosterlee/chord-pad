@@ -351,6 +351,7 @@ const state = {
   midiEnabled: false,
   midiAccess: null,
   output: null,
+  inputPort: null,
   activeChords: new Map(),
   sustain: false,
   audioEnabled: true,
@@ -903,7 +904,8 @@ async function initMIDI() {
   try {
     state.midiAccess = await navigator.requestMIDIAccess({ sysex: false });
     refreshOutputs();
-    state.midiAccess.onstatechange = refreshOutputs;
+    refreshInputs();
+    state.midiAccess.onstatechange = () => { refreshOutputs(); refreshInputs(); };
   } catch (e) {
     showError('Could not get MIDI access: ' + e.message + '. Open this file directly in your browser (not in a sandboxed iframe).');
   }
@@ -913,23 +915,59 @@ function refreshOutputs() {
   const select = document.getElementById('output-select');
   const previousId = state.output ? state.output.id : null;
   select.innerHTML = '';
+  const noneOpt = document.createElement('option');
+  noneOpt.value = '';
+  noneOpt.textContent = '— none —';
+  select.appendChild(noneOpt);
   const outputs = Array.from(state.midiAccess.outputs.values());
-  if (outputs.length === 0) {
-    const opt = document.createElement('option');
-    opt.textContent = '— no MIDI port found —';
-    select.appendChild(opt);
-    state.output = null;
-    return;
-  }
   outputs.forEach(out => {
     const opt = document.createElement('option');
     opt.value = out.id;
     opt.textContent = out.name + (out.manufacturer ? ' · ' + out.manufacturer : '');
     select.appendChild(opt);
   });
-  const toSelect = outputs.find(o => o.id === previousId) || outputs[0];
-  state.output = toSelect;
-  select.value = toSelect.id;
+  const prev = outputs.find(o => o.id === previousId);
+  state.output = prev || null;
+  select.value = prev ? prev.id : '';
+}
+
+function onMidiMessage(e) {
+  const [status, note, velocity] = e.data;
+  const type = status & 0xF0;
+  blinkLed();
+  if (type === 0x90 && velocity > 0) {
+    kbNoteOn(note, false);
+  } else if (type === 0x80 || (type === 0x90 && velocity === 0)) {
+    kbNoteOff(note, false);
+  }
+}
+
+function attachMidiInput() {
+  if (!state.midiAccess) return;
+  state.midiAccess.inputs.forEach(inp => { inp.onmidimessage = null; });
+  if (state.inputPort) state.inputPort.onmidimessage = onMidiMessage;
+}
+
+function refreshInputs() {
+  const select = document.getElementById('input-select');
+  if (!select) return;
+  const previousId = state.inputPort ? state.inputPort.id : null;
+  select.innerHTML = '';
+  const noneOpt = document.createElement('option');
+  noneOpt.value = '';
+  noneOpt.textContent = '— none —';
+  select.appendChild(noneOpt);
+  const inputs = Array.from(state.midiAccess.inputs.values());
+  inputs.forEach(inp => {
+    const opt = document.createElement('option');
+    opt.value = inp.id;
+    opt.textContent = inp.name + (inp.manufacturer ? ' · ' + inp.manufacturer : '');
+    select.appendChild(opt);
+  });
+  const prev = inputs.find(i => i.id === previousId);
+  state.inputPort = prev || null;
+  select.value = prev ? prev.id : '';
+  attachMidiInput();
 }
 
 function sendNoteOn(note, velocity) {
@@ -2068,8 +2106,11 @@ function updateControlDisplays() {
 }
 
 document.getElementById('output-select').addEventListener('change', (e) => {
-  const out = state.midiAccess?.outputs.get(e.target.value);
-  if (out) state.output = out;
+  state.output = e.target.value ? state.midiAccess?.outputs.get(e.target.value) ?? null : null;
+});
+document.getElementById('input-select').addEventListener('change', (e) => {
+  state.inputPort = e.target.value ? state.midiAccess?.inputs.get(e.target.value) ?? null : null;
+  attachMidiInput();
 });
 document.getElementById('oct-down').addEventListener('click', () => {
   state.octave = Math.max(0, state.octave - 1); updateControlDisplays(); rebuildBoard();
@@ -2559,7 +2600,7 @@ function psStop(padId) {
 // ============================================================
 // CHORD SEQUENCER
 // ============================================================
-const BEAT_PX = 30; // pixels per beat
+let BEAT_PX = 30; // pixels per beat
 
 const SEQ = {
   items: [],       // [{interval, q, bassInterval, label, beats, keyRoot, template}]
@@ -3361,9 +3402,89 @@ function seqAddTouchDrag(el, laneId, getData, onCancelPlay) {
   }, { passive: true });
 }
 
+function seqApplyZoom(newBeatPx) {
+  const wrap = document.getElementById('seq-lane-wrap');
+  const prevBeatPx = BEAT_PX;
+  BEAT_PX = Math.round(Math.max(10, Math.min(120, newBeatPx)));
+  if (BEAT_PX === prevBeatPx) return;
+  const centerBeat = wrap ? (wrap.scrollLeft + wrap.clientWidth / 2) / prevBeatPx : 0;
+  seqUpdateBarLine();
+  seqRender();
+  seqRenderNotes();
+  if (wrap) wrap.scrollLeft = Math.max(0, centerBeat * BEAT_PX - wrap.clientWidth / 2);
+}
+
+function initSeqPinchZoom() {
+  const wrap = document.getElementById('seq-lane-wrap');
+  if (!wrap) return;
+  let pinchStartDist = 0;
+  let pinchStartBeatPx = BEAT_PX;
+  let pinching = false;
+  let liveScale = 1;
+  const inner = wrap.querySelector('.seq-tracks-inner');
+
+  wrap.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 2) return;
+    e.preventDefault();
+    pinching = true;
+    pinchStartDist = Math.hypot(
+      e.touches[1].clientX - e.touches[0].clientX,
+      e.touches[1].clientY - e.touches[0].clientY
+    );
+    pinchStartBeatPx = BEAT_PX;
+    liveScale = 1;
+  }, { passive: false });
+
+  wrap.addEventListener('touchmove', (e) => {
+    if (!pinching || e.touches.length !== 2) return;
+    e.preventDefault();
+    const dist = Math.hypot(
+      e.touches[1].clientX - e.touches[0].clientX,
+      e.touches[1].clientY - e.touches[0].clientY
+    );
+    liveScale = dist / pinchStartDist;
+    const preview = Math.max(10, Math.min(120, pinchStartBeatPx * liveScale));
+    if (inner) { inner.style.transformOrigin = 'left center'; inner.style.transform = `scaleX(${preview / BEAT_PX})`; }
+  }, { passive: false });
+
+  wrap.addEventListener('touchend', (e) => {
+    if (!pinching || e.touches.length > 1) return;
+    pinching = false;
+    if (inner) inner.style.transform = '';
+    seqApplyZoom(pinchStartBeatPx * liveScale);
+  });
+
+  document.getElementById('seq-zoom-in')   ?.addEventListener('click', () => seqApplyZoom(BEAT_PX * 1.33));
+  document.getElementById('seq-zoom-out')  ?.addEventListener('click', () => seqApplyZoom(BEAT_PX / 1.33));
+  document.getElementById('seq-zoom-reset')?.addEventListener('click', () => seqApplyZoom(30));
+}
+
 function initSeqLanePan() {
   const wrap = document.getElementById('seq-lane-wrap');
   if (!wrap) return;
+
+  function startPan(startX) {
+    let prevX   = startX;
+    let panning = false;
+
+    const extendLanes = () => {
+      const needed = wrap.scrollLeft + wrap.clientWidth + BEAT_PX * 8;
+      ['seq-lane', 'seq-note-lane'].forEach(id => {
+        const lane = document.getElementById(id);
+        if (lane && needed > lane.scrollWidth) lane.style.minWidth = needed + 'px';
+      });
+    };
+
+    return { prevX: () => prevX, panning: () => panning, move(clientX, prevent) {
+      const dx = prevX - clientX;
+      if (!panning && Math.abs(dx) < 5) return;
+      panning = true;
+      if (prevent) prevent();
+      wrap.scrollLeft += dx;
+      prevX = clientX;
+      extendLanes();
+    }};
+  }
 
   wrap.addEventListener('touchstart', (e) => {
     const target = e.target;
@@ -3374,41 +3495,53 @@ function initSeqLanePan() {
     if (!inChord && !inNote) return;
 
     const hasContent = inChord ? SEQ.items.length > 0 : SEQ.noteItems.length > 0;
-    if (!hasContent) return; // let page scroll when lane is empty
+    if (!hasContent) return;
 
     const touch = e.changedTouches[0];
     const tid   = touch.identifier;
-    let prevX   = touch.clientX;
-    let panning = false;
+    const pan   = startPan(touch.clientX);
 
     const onMove = (ev) => {
       const t = Array.from(ev.changedTouches).find(t => t.identifier === tid);
       if (!t) return;
-      const dx = prevX - t.clientX;
-      if (!panning && Math.abs(dx) < 5) return;
-      panning = true;
-      ev.preventDefault();
-      wrap.scrollLeft += dx;
-      prevX = t.clientX;
-
-      // Extend the lane so user can pan into empty beats
-      const needed = wrap.scrollLeft + wrap.clientWidth + BEAT_PX * 8;
-      ['seq-lane', 'seq-note-lane'].forEach(id => {
-        const lane = document.getElementById(id);
-        if (lane && needed > lane.scrollWidth) lane.style.minWidth = needed + 'px';
-      });
+      pan.move(t.clientX, () => ev.preventDefault());
     };
-
     const onUp = () => {
       document.removeEventListener('touchmove', onMove);
       document.removeEventListener('touchend',  onUp);
       document.removeEventListener('touchcancel', onUp);
     };
-
     document.addEventListener('touchmove',   onMove, { passive: false });
     document.addEventListener('touchend',    onUp);
     document.addEventListener('touchcancel', onUp);
   }, { passive: false });
+
+  wrap.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    const target = e.target;
+    if (target.closest('.seq-block, .seq-loop-start, .seq-loop-end, .seq-resize, .seq-delete')) return;
+
+    const inChord = !!target.closest('#seq-lane');
+    const inNote  = !!target.closest('#seq-note-lane');
+    if (!inChord && !inNote) return;
+
+    const hasContent = inChord ? SEQ.items.length > 0 : SEQ.noteItems.length > 0;
+    if (!hasContent) return;
+
+    const pan = startPan(e.clientX);
+
+    const onMove = (ev) => {
+      pan.move(ev.clientX, null);
+      if (pan.panning()) wrap.style.cursor = 'grabbing';
+    };
+    const onUp = () => {
+      wrap.style.cursor = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup',   onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup',   onUp);
+  });
 }
 
 // Lane drag-and-drop
@@ -3695,7 +3828,9 @@ midiToggleBtn.addEventListener('click', async () => {
   midiToggleBtn.classList.toggle('active', state.midiEnabled);
   channelControl.style.display = state.midiEnabled ? '' : 'none';
   portControl.style.display    = state.midiEnabled ? '' : 'none';
+  document.getElementById('in-port-control').style.display = state.midiEnabled ? '' : 'none';
   midiLed.style.display        = state.midiEnabled ? '' : 'none';
+  document.getElementById('hint-panic').style.display = state.midiEnabled ? '' : 'none';
   if (state.midiEnabled && !state.midiAccess) await initMIDI();
 });
 
@@ -3705,8 +3840,8 @@ document.getElementById('play-style-select').addEventListener('change', (e) => {
   document.getElementById('tempo-control').style.display = hasPattern ? '' : 'none';
 });
 function applyTempoChange() {
-  document.getElementById('seq-tempo-val').textContent = state.tempo;
-  document.getElementById('ctrl-tempo').textContent    = state.tempo;
+  document.getElementById('seq-tempo-val').value = state.tempo;
+  document.getElementById('ctrl-tempo').value    = state.tempo;
   if (!SEQ.playing) return;
 
   SEQ.pendingTimers.forEach(id => clearTimeout(id));
@@ -3756,10 +3891,10 @@ const KB_BH        = 44;
 
 const kbActive = new Map(); // midi → audioNode
 
-function kbNoteOn(midi) {
+function kbNoteOn(midi, sendMidi = true) {
   if (kbActive.has(midi)) return;
   const node = startAudioNote(midi, state.velocity);
-  sendNoteOn(midi, state.velocity);
+  if (sendMidi) sendNoteOn(midi, state.velocity);
   kbActive.set(midi, node);
   document.querySelector(`.kb-key[data-midi="${midi}"]`)?.classList.add('active');
   if (REC.active) {
@@ -3769,11 +3904,11 @@ function kbNoteOn(midi) {
   }
 }
 
-function kbNoteOff(midi) {
+function kbNoteOff(midi, sendMidi = true) {
   const node = kbActive.get(midi);
   if (!node) return;
   stopAudioNote(node);
-  sendNoteOff(midi);
+  if (sendMidi) sendNoteOff(midi);
   kbActive.delete(midi);
   document.querySelector(`.kb-key[data-midi="${midi}"]`)?.classList.remove('active');
   if (REC.active && REC.pendingNotes.has(midi)) {
@@ -3915,7 +4050,8 @@ document.getElementById('seq-metro-btn').addEventListener('click', () => {
 });
 
 function seqUpdateBarLine() {
-  document.documentElement.style.setProperty('--bar-px', (state.beatsPerBar * BEAT_PX) + 'px');
+  document.documentElement.style.setProperty('--bar-px',  (state.beatsPerBar * BEAT_PX) + 'px');
+  document.documentElement.style.setProperty('--beat-px', BEAT_PX + 'px');
 }
 
 document.getElementById('seq-timesig').addEventListener('change', (e) => {
@@ -3972,6 +4108,16 @@ document.getElementById('seq-tempo-up').addEventListener('click', () => {
   applyTempoChange();
 });
 
+function handleTempoInput(el) {
+  el.addEventListener('change', () => {
+    const v = parseInt(el.value, 10);
+    if (!isNaN(v)) { state.tempo = Math.max(40, Math.min(240, v)); applyTempoChange(); }
+  });
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.blur(); });
+}
+handleTempoInput(document.getElementById('seq-tempo-val'));
+handleTempoInput(document.getElementById('ctrl-tempo'));
+
 // Apply default instrument preset and sync dropdown
 document.getElementById('synth-instrument').value = state.instrument;
 if (state.instrument !== 'synth') {
@@ -3984,12 +4130,13 @@ buildKeyboard();
 initSeqLane();
 initSeqNoteLane();
 initSeqLanePan();
+initSeqPinchZoom();
 seqLoad();
 seqUpdateBarLine();
 seqUpdateLoopStart();
 document.getElementById('seq-timesig').value  = String(state.beatsPerBar);
-document.getElementById('seq-tempo-val').textContent = state.tempo;
-document.getElementById('ctrl-tempo').textContent    = state.tempo;
+document.getElementById('seq-tempo-val').value = state.tempo;
+document.getElementById('ctrl-tempo').value    = state.tempo;
 document.getElementById('seq-loop-btn').classList.toggle('active', SEQ.loop);
 seqRender();
 seqRenderNotes();

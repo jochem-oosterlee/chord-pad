@@ -140,6 +140,17 @@
           <button class="btn" id="scale-tones-toggle">OFF</button>
         </div>
       </div>
+      <div class="control" id="tempo-control" style="display:none">
+        <span class="control-label">Tempo</span>
+        <div class="control-row">
+          <button class="btn" id="tempo-down">▼</button>
+          <input class="control-value tempo-input" id="ctrl-tempo" type="number" min="40" max="240" value="120">
+          <button class="btn" id="tempo-up">▲</button>
+        </div>
+      </div>
+      <select id="play-style-select" style="display:none"></select>
+    </div>
+    <div class="controls-body">
       <div class="control">
         <span class="control-label">MIDI</span>
         <div class="control-row">
@@ -155,20 +166,17 @@
         </div>
       </div>
       <div class="control wide" id="port-control" style="display:none">
-        <span class="control-label">Port</span>
+        <span class="control-label">Out port</span>
         <div class="control-row">
-          <select id="output-select"><option>— no MIDI port found —</option></select>
+          <select id="output-select"><option value="">— none —</option></select>
         </div>
       </div>
-      <div class="control" id="tempo-control" style="display:none">
-        <span class="control-label">Tempo</span>
+      <div class="control wide" id="in-port-control" style="display:none">
+        <span class="control-label">In port</span>
         <div class="control-row">
-          <button class="btn" id="tempo-down">▼</button>
-          <span class="control-value" id="ctrl-tempo">120</span>
-          <button class="btn" id="tempo-up">▲</button>
+          <select id="input-select"><option value="">— none —</option></select>
         </div>
       </div>
-      <select id="play-style-select" style="display:none"></select>
     </div>
   </div>
 
@@ -313,7 +321,7 @@
       <div class="seq-tempo-wrap">
         <span>BPM</span>
         <button class="btn" id="seq-tempo-down">▼</button>
-        <span class="seq-tempo-val" id="seq-tempo-val">120</span>
+        <input class="seq-tempo-val" id="seq-tempo-val" type="number" min="40" max="240" value="120">
         <button class="btn" id="seq-tempo-up">▲</button>
       </div>
       <button class="seq-clear-btn" id="seq-clear-btn">Clear</button>
@@ -330,6 +338,11 @@
         </div>
       </div>
     </div>
+    <div class="seq-zoom-btns">
+      <button class="btn" id="seq-zoom-out">−</button>
+      <button class="btn" id="seq-zoom-reset" title="Reset zoom">↺</button>
+      <button class="btn" id="seq-zoom-in">+</button>
+    </div>
   </div>
 
   <footer class="footer">
@@ -337,7 +350,7 @@
       <span class="label">Playing</span>
       <span class="notes" id="now-playing-notes">—</span>
     </div>
-    <div class="help"><span class="hint-key" id="hint-space">SPACE</span> = play · <span class="hint-key">P</span> = panic · <span class="hint-key" id="hint-lr">← →</span> = key · <span class="hint-key" id="hint-ud">↑ ↓</span> = octave</div>
+    <div class="help"><span class="hint-key" id="hint-space">SPACE</span> = play · <span id="hint-panic" style="display:none"><span class="hint-key">P</span> = panic · </span><span class="hint-key" id="hint-lr">← →</span> = key · <span class="hint-key" id="hint-ud">↑ ↓</span> = octave</div>
   </footer>
 </div>
 
