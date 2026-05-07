@@ -2573,9 +2573,10 @@ const SEQ = {
   loopStart: 0,
   loopEnd: 4,  // beats; auto-extends when blocks go beyond
   loop: false,
-  animCycleRef: 0,    // audio time of current visual cycle start (updated only on resync)
-  animCycleTotal: 0,  // duration of current visual cycle in seconds (updated only on resync)
-  animLoopStart: 0,   // loopStart beat at last resync (updated only on resync)
+  animBeat: 0,       // current visual beat position, accumulated each RAF tick
+  animLastTime: 0,   // ctx.currentTime - outputLatency at last RAF tick
+  animLoopLen: 4,    // loop length in beats, cached at init/resync (not during drag)
+  animLoopStart: 0,  // loopStart beat, cached at init/resync
   _dragLabel: '',
   _dragHoverId: null,
 };
@@ -2597,15 +2598,20 @@ function seqUpdateNowPlaying() {
 function seqAnimatePlayhead() {
   if (!SEQ.playing) return;
   const ctx     = getAudioCtx();
-  const elapsed = ctx.currentTime - SEQ.playStartTime - (ctx.outputLatency || 0);
+  const now    = ctx.currentTime - (ctx.outputLatency || 0);
+  const rawDt  = now - SEQ.animLastTime;
+  const dt     = rawDt > 0 ? Math.min(rawDt, seqBeatDur() * SEQ.animLoopLen) : 0;
+  if (rawDt > 0) SEQ.animLastTime = now;
   let px;
   if (SEQ.loop) {
-    const cycleElapsed = ctx.currentTime - SEQ.animCycleRef - (ctx.outputLatency || 0);
-    const animTotal    = SEQ.animCycleTotal;
-    const posInCycle   = ((cycleElapsed % animTotal) + animTotal) % animTotal;
-    px = (SEQ.animLoopStart + posInCycle / seqBeatDur()) * BEAT_PX;
+    SEQ.animBeat += dt / seqBeatDur();
+    const L = SEQ.animLoopLen;
+    const pos = ((SEQ.animBeat - SEQ.animLoopStart) % L + L) % L;
+    SEQ.animBeat = SEQ.animLoopStart + pos;
+    px = SEQ.animBeat * BEAT_PX;
   } else {
-    px = (elapsed / seqBeatDur()) * BEAT_PX;
+    if (dt > 0) SEQ.animBeat += dt / seqBeatDur();
+    px = SEQ.animBeat * BEAT_PX;
     const minW = px + 64;
     const cLane = document.getElementById('seq-lane');
     const nLane = document.getElementById('seq-note-lane');
@@ -2624,6 +2630,17 @@ function seqAnimatePlayhead() {
 
 function seqTotalDur() {
   return (SEQ.loopEnd - SEQ.loopStart) * seqBeatDur();
+}
+
+function seqResyncAnimLoop() {
+  const newLen   = SEQ.loopEnd - SEQ.loopStart;
+  const newStart = SEQ.loopStart;
+  if (newLen !== SEQ.animLoopLen || newStart !== SEQ.animLoopStart) {
+    const pos = ((SEQ.animBeat - newStart) % newLen + newLen) % newLen;
+    SEQ.animBeat = newStart + pos;
+    SEQ.animLoopLen   = newLen;
+    SEQ.animLoopStart = newStart;
+  }
 }
 
 function seqLoopOffset() { return SEQ.loop ? SEQ.loopStart : 0; }
@@ -2792,6 +2809,7 @@ function seqSave() {
       loopEnd: SEQ.loopEnd,
       loop: SEQ.loop,
       beatsPerBar: state.beatsPerBar,
+      tempo: state.tempo,
     }));
   } catch (_) {}
 }
@@ -2807,6 +2825,7 @@ function seqLoad() {
     if (typeof d.loopEnd     === 'number')  SEQ.loopEnd        = d.loopEnd;
     if (typeof d.loop        === 'boolean') SEQ.loop           = d.loop;
     if (typeof d.beatsPerBar === 'number')  state.beatsPerBar  = d.beatsPerBar;
+    if (typeof d.tempo       === 'number')  state.tempo        = d.tempo;
   } catch (_) {}
 }
 
@@ -3024,7 +3043,7 @@ function seqResyncChords() {
     const t = cycleStart + (SEQ.items[i].start - ls) * bd;
     if (t > now) {
       SEQ.cycleStart = cycleStart; SEQ.pendingIdx = i; SEQ.pendingTime = t;
-      SEQ.animCycleRef = cycleStart; SEQ.animCycleTotal = total; SEQ.animLoopStart = SEQ.loopStart;
+      seqResyncAnimLoop();
       return;
     }
   }
@@ -3033,7 +3052,7 @@ function seqResyncChords() {
   const fi = seqFindNextInRange(SEQ.items, 0);
   SEQ.cycleStart = next; SEQ.pendingIdx = fi >= 0 ? fi : 0;
   SEQ.pendingTime = fi >= 0 ? next + (SEQ.items[fi].start - SEQ.loopStart) * bd : Infinity;
-  SEQ.animCycleRef = next; SEQ.animCycleTotal = total; SEQ.animLoopStart = SEQ.loopStart;
+  seqResyncAnimLoop();
 }
 
 function seqResyncNotes() {
@@ -3050,7 +3069,7 @@ function seqResyncNotes() {
     const t = cycleStart + (SEQ.noteItems[i].start - ls) * bd;
     if (t > now) {
       SEQ.noteCycleStart = cycleStart; SEQ.notePendingIdx = i; SEQ.notePendingTime = t;
-      SEQ.animCycleRef = cycleStart; SEQ.animCycleTotal = total; SEQ.animLoopStart = SEQ.loopStart;
+      seqResyncAnimLoop();
       return;
     }
   }
@@ -3059,7 +3078,7 @@ function seqResyncNotes() {
   const fn = seqFindNextInRange(SEQ.noteItems, 0);
   SEQ.noteCycleStart = next; SEQ.notePendingIdx = fn >= 0 ? fn : 0;
   SEQ.notePendingTime = fn >= 0 ? next + (SEQ.noteItems[fn].start - SEQ.loopStart) * bd : Infinity;
-  SEQ.animCycleRef = next; SEQ.animCycleTotal = total; SEQ.animLoopStart = SEQ.loopStart;
+  seqResyncAnimLoop();
 }
 
 function seqInitPlay(t0) {
@@ -3069,9 +3088,10 @@ function seqInitPlay(t0) {
   SEQ.playStartTime  = t0 - 0.05;
   SEQ.cycleStart     = t0;
   SEQ.noteCycleStart = t0;
-  SEQ.animCycleRef   = t0;
-  SEQ.animCycleTotal = seqTotalDur();
-  SEQ.animLoopStart  = SEQ.loopStart;
+  SEQ.animBeat      = SEQ.loopStart;
+  SEQ.animLastTime  = t0;
+  SEQ.animLoopLen   = SEQ.loopEnd - SEQ.loopStart;
+  SEQ.animLoopStart = SEQ.loopStart;
   const fi = seqFindNextInRange(SEQ.items, 0);
   const fn = seqFindNextInRange(SEQ.noteItems, 0);
   SEQ.pendingIdx      = fi >= 0 ? fi : 0;
@@ -3492,13 +3512,43 @@ document.getElementById('play-style-select').addEventListener('change', (e) => {
   const hasPattern = !['off', 'strum-up', 'strum-down'].includes(state.playStyle);
   document.getElementById('tempo-control').style.display = hasPattern ? '' : 'none';
 });
+function applyTempoChange() {
+  document.getElementById('seq-tempo-val').textContent = state.tempo;
+  document.getElementById('ctrl-tempo').textContent    = state.tempo;
+  if (!SEQ.playing) return;
+
+  SEQ.pendingTimers.forEach(id => clearTimeout(id));
+  SEQ.pendingTimers.clear();
+  SEQ.activeNodes.forEach(n => stopAudioNote(n));
+  SEQ.activeNodes.clear();
+  panic();
+  seqHighlight(-1);
+  seqHighlightNote(-1);
+  seqResyncChords();
+  seqResyncNotes();
+
+  // Re-align visual cursor to audio position after tempo change
+  if (SEQ.loop) {
+    const ctx = getAudioCtx();
+    const bd  = seqBeatDur();
+    const L   = SEQ.animLoopLen;
+    const cyclePos = ((ctx.currentTime - SEQ.cycleStart) / bd % L + L) % L;
+    SEQ.animBeat     = SEQ.animLoopStart + cyclePos;
+    SEQ.animLastTime = ctx.currentTime - (ctx.outputLatency || 0);
+  }
+
+  metroHalt();
+  metroRunSynced();
+  seqSave();
+}
+
 document.getElementById('tempo-down').addEventListener('click', () => {
   state.tempo = Math.max(40, state.tempo - 5);
-  document.getElementById('ctrl-tempo').textContent = state.tempo;
+  applyTempoChange();
 });
 document.getElementById('tempo-up').addEventListener('click', () => {
   state.tempo = Math.min(240, state.tempo + 5);
-  document.getElementById('ctrl-tempo').textContent = state.tempo;
+  applyTempoChange();
 });
 
 // ============================================================
@@ -3722,13 +3772,11 @@ document.getElementById('seq-clear-btn').addEventListener('click', () => {
 
 document.getElementById('seq-tempo-down').addEventListener('click', () => {
   state.tempo = Math.max(40, state.tempo - 5);
-  document.getElementById('seq-tempo-val').textContent = state.tempo;
-  document.getElementById('ctrl-tempo').textContent    = state.tempo;
+  applyTempoChange();
 });
 document.getElementById('seq-tempo-up').addEventListener('click', () => {
   state.tempo = Math.min(240, state.tempo + 5);
-  document.getElementById('seq-tempo-val').textContent = state.tempo;
-  document.getElementById('ctrl-tempo').textContent    = state.tempo;
+  applyTempoChange();
 });
 
 // Apply default instrument preset and sync dropdown
@@ -3745,7 +3793,9 @@ initSeqNoteLane();
 seqLoad();
 seqUpdateBarLine();
 seqUpdateLoopStart();
-document.getElementById('seq-timesig').value = String(state.beatsPerBar);
+document.getElementById('seq-timesig').value  = String(state.beatsPerBar);
+document.getElementById('seq-tempo-val').textContent = state.tempo;
+document.getElementById('ctrl-tempo').textContent    = state.tempo;
 document.getElementById('seq-loop-btn').classList.toggle('active', SEQ.loop);
 seqRender();
 seqRenderNotes();
