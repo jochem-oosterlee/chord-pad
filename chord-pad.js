@@ -1232,6 +1232,9 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
   const pad = document.createElement('div');
   pad.id = id;
   pad.className = 'pad';
+  pad.dataset.interval    = chordSpec.interval;
+  pad.dataset.q           = chordSpec.q;
+  pad.dataset.bassInterval = chordSpec.bassInterval ?? '';
   pad.draggable = seqIsOpen();
   pad.addEventListener('dragstart', (e) => {
     if (!seqIsOpen()) { e.preventDefault(); return; }
@@ -2677,8 +2680,6 @@ function seqAnimatePlayhead() {
     const wrap = document.getElementById('seq-lane-wrap');
     if (wrap) {
       wrap.scrollLeft = Math.max(0, px - wrap.clientWidth * 0.75);
-      const hintCenter = wrap.scrollLeft + wrap.clientWidth / 2;
-      document.querySelectorAll('.seq-drop-hint').forEach(h => { h.style.left = hintCenter + 'px'; });
     }
   }
   document.querySelectorAll('.seq-playhead').forEach(ph => { ph.style.left = px + 'px'; });
@@ -2895,6 +2896,13 @@ function seqLoad() {
   } catch (_) {}
 }
 
+function seqUpdateHints() {
+  const wrap = document.getElementById('seq-lane-wrap');
+  if (!wrap) return;
+  const center = wrap.scrollLeft + wrap.clientWidth / 2;
+  document.querySelectorAll('.seq-drop-hint').forEach(h => { h.style.left = center + 'px'; });
+}
+
 function seqRender() {
   const lane = document.getElementById('seq-lane');
   if (!lane) return;
@@ -2905,6 +2913,7 @@ function seqRender() {
     hint.textContent = 'drag chords here';
     lane.appendChild(hint);
     lane.style.minWidth = '';
+    seqUpdateHints();
   } else {
     lane.style.minWidth = seqLaneWidth(SEQ.items) + 'px';
     SEQ.items.forEach((item, idx) => lane.appendChild(seqMakeBlock(item, idx, false)));
@@ -2949,6 +2958,7 @@ function seqRenderNotes() {
     hint.textContent = 'drag keys here';
     lane.appendChild(hint);
     lane.style.minWidth = '';
+    seqUpdateHints();
   } else {
     lane.style.minWidth = seqLaneWidth(SEQ.noteItems) + 'px';
     SEQ.noteItems.forEach((item, idx) => lane.appendChild(seqMakeBlock(item, idx, true)));
@@ -3463,6 +3473,8 @@ function initSeqLanePan() {
   const wrap = document.getElementById('seq-lane-wrap');
   if (!wrap) return;
 
+  wrap.addEventListener('scroll', seqUpdateHints);
+
   function startPan(startX) {
     let prevX   = startX;
     let panning = false;
@@ -3494,9 +3506,6 @@ function initSeqLanePan() {
     const inNote  = !!target.closest('#seq-note-lane');
     if (!inChord && !inNote) return;
 
-    const hasContent = inChord ? SEQ.items.length > 0 : SEQ.noteItems.length > 0;
-    if (!hasContent) return;
-
     const touch = e.changedTouches[0];
     const tid   = touch.identifier;
     const pan   = startPan(touch.clientX);
@@ -3524,9 +3533,6 @@ function initSeqLanePan() {
     const inChord = !!target.closest('#seq-lane');
     const inNote  = !!target.closest('#seq-note-lane');
     if (!inChord && !inNote) return;
-
-    const hasContent = inChord ? SEQ.items.length > 0 : SEQ.noteItems.length > 0;
-    if (!hasContent) return;
 
     const pan = startPan(e.clientX);
 
@@ -3923,6 +3929,50 @@ function kbNoteOff(midi, sendMidi = true) {
   }
 }
 
+function initTouchGlide() {
+  // Keyboard glide
+  const kbWrap = document.getElementById('kb-container')?.parentElement;
+  if (kbWrap) {
+    let glideMidi = null;
+    kbWrap.addEventListener('touchmove', (e) => {
+      const t   = e.touches[0];
+      const el  = document.elementFromPoint(t.clientX, t.clientY);
+      const key = el?.closest('.kb-key');
+      const midi = key ? +key.dataset.midi : null;
+      if (midi === glideMidi) return;
+      if (glideMidi !== null) kbNoteOff(glideMidi);
+      glideMidi = midi;
+      if (midi !== null && !kbActive.has(midi)) kbNoteOn(midi);
+    }, { passive: true });
+    const kbGlideEnd = () => { if (glideMidi !== null) { kbNoteOff(glideMidi); glideMidi = null; } };
+    kbWrap.addEventListener('touchend',    kbGlideEnd);
+    kbWrap.addEventListener('touchcancel', kbGlideEnd);
+  }
+
+  // Chord pad glide — attach to app root so bubbling from any page works
+  const app = document.querySelector('.app');
+  if (!app) return;
+  let glidePadId = null;
+  app.addEventListener('touchmove', (e) => {
+    const t   = e.touches[0];
+    const el  = document.elementFromPoint(t.clientX, t.clientY);
+    const pad = el?.closest('.pad[data-interval]');
+    const padId = pad?.id ?? null;
+    if (padId === glidePadId) return;
+    if (glidePadId !== null) releaseChord(glidePadId);
+    glidePadId = padId;
+    if (pad && !state.activeChords.has(padId)) {
+      const interval     = +pad.dataset.interval;
+      const q            = pad.dataset.q;
+      const bassInterval = pad.dataset.bassInterval !== '' ? +pad.dataset.bassInterval : undefined;
+      playChord(padId, interval, q, bassInterval);
+    }
+  }, { passive: true });
+  const padGlideEnd = () => { if (glidePadId !== null) { releaseChord(glidePadId); glidePadId = null; } };
+  app.addEventListener('touchend',    padGlideEnd);
+  app.addEventListener('touchcancel', padGlideEnd);
+}
+
 function buildKeyboard() {
   const container = document.getElementById('kb-container');
   if (!container) return;
@@ -4026,6 +4076,7 @@ document.getElementById('seq-header').addEventListener('click', () => {
   document.getElementById('seq-panel').classList.toggle('collapsed');
   const open = seqIsOpen();
   document.querySelectorAll('.pad, .pad-ext').forEach(el => { el.draggable = open; });
+  if (open) requestAnimationFrame(seqUpdateHints);
 });
 
 document.getElementById('seq-play-btn').addEventListener('click', () => {
@@ -4127,6 +4178,7 @@ if (state.instrument !== 'synth') {
 updateSynthOnlyVisibility();
 
 buildKeyboard();
+initTouchGlide();
 initSeqLane();
 initSeqNoteLane();
 initSeqLanePan();
@@ -4140,6 +4192,7 @@ document.getElementById('ctrl-tempo').value    = state.tempo;
 document.getElementById('seq-loop-btn').classList.toggle('active', SEQ.loop);
 seqRender();
 seqRenderNotes();
+requestAnimationFrame(seqUpdateHints);
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
