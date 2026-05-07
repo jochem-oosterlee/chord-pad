@@ -1216,10 +1216,6 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
     pad.classList.remove('dragging');
     document.querySelector('#seq-lane .seq-drop-hint')?.style.removeProperty('color');
   });
-  seqAddTouchDrag(pad, 'seq-lane', () => ({
-    interval: chordSpec.interval, q: chordSpec.q, bassInterval: chordSpec.bassInterval,
-    label: `${formatChordRoot(root)}${qualityToHTML(glyph)}`,
-  }), () => releaseChord(id));
   pad.innerHTML = `
     ${isStartHere ? '<span class="start-here-marker">start here</span>' : ''}
     <span class="pad-roman">${qualityToHTML(chordSpec.roman)}</span>
@@ -1239,13 +1235,20 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
     const rootPitch = (keyRoot + chordSpec.interval) % 12;
     showPianoTooltip(pad, rootPitch, chordSpec.q, chordSpec.pianoScale);
   };
-  const onDown = (e) => { if (e.type === 'touchstart') e.preventDefault(); showMainTooltip(); playChord(id, chordSpec.interval, chordSpec.q, chordSpec.bassInterval); };
   const onUp   = ()  => releaseChord(id);
-  pad.addEventListener('mousedown', onDown);
+  pad.addEventListener('mousedown', () => { showMainTooltip(); playChord(id, chordSpec.interval, chordSpec.q, chordSpec.bassInterval); });
   pad.addEventListener('mouseup',   onUp);
-  pad.addEventListener('mouseleave', (e) => { onUp(); hidePianoTooltip(); });
-  pad.addEventListener('touchstart', onDown, { passive: false });
-  pad.addEventListener('touchend',   () => { onUp(); hidePianoTooltip(); });
+  pad.addEventListener('mouseleave', () => { onUp(); hidePianoTooltip(); });
+  pad.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    showMainTooltip();
+    playChord(id, chordSpec.interval, chordSpec.q, chordSpec.bassInterval);
+    if (seqIsOpen()) seqStartTouchDrag(e.changedTouches[0], 'seq-lane', () => ({
+      interval: chordSpec.interval, q: chordSpec.q, bassInterval: chordSpec.bassInterval,
+      label: `${formatChordRoot(root)}${qualityToHTML(glyph)}`,
+    }), () => releaseChord(id));
+  }, { passive: false });
+  pad.addEventListener('touchend', () => { onUp(); hidePianoTooltip(); });
   pad.addEventListener('mouseenter', (e) => {
     showMainTooltip();
     if (e.buttons > 0 && !seqIsOpen()) playChord(id, chordSpec.interval, chordSpec.q, chordSpec.bassInterval);
@@ -1281,10 +1284,15 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
       document.querySelector('#seq-lane .seq-drop-hint')?.style.removeProperty('color');
       if (SEQ._dragHoverId) { releaseChord(SEQ._dragHoverId); SEQ._dragHoverId = null; }
     });
-    seqAddTouchDrag(badge, 'seq-lane', () => ({
-      interval: chordSpec.interval, q: extQ, bassInterval: chordSpec.bassInterval,
-      label: `${formatChordRoot(root)}${qualityToHTML(chordSpec.ext)}`,
-    }), () => releaseChord(id));
+    badge.addEventListener('touchstart', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      playChord(id, chordSpec.interval, extQ);
+      if (seqIsOpen()) seqStartTouchDrag(e.changedTouches[0], 'seq-lane', () => ({
+        interval: chordSpec.interval, q: extQ, bassInterval: chordSpec.bassInterval,
+        label: `${formatChordRoot(root)}${qualityToHTML(chordSpec.ext)}`,
+      }), () => releaseChord(id));
+    }, { passive: false });
+    badge.addEventListener('touchend', (e) => { e.stopPropagation(); releaseChord(id); });
     badge.addEventListener('mouseup', (e) => {
       e.stopPropagation();
       releaseChord(id);
@@ -3236,17 +3244,32 @@ function seqSetGhost(lane, beat, beats) {
 }
 function seqClearGhost(lane) { lane.querySelector('.seq-ghost')?.remove(); }
 
-function seqAddTouchDrag(el, laneId, getData, onCancelPlay) {
-  el.addEventListener('pointerdown', (e) => {
-    if (e.pointerType !== 'touch' || !seqIsOpen()) return;
-    const startX = e.clientX, startY = e.clientY;
+function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
+    const tid = touch.identifier;
+    const startX = touch.clientX, startY = touch.clientY;
     let dragging = false;
     let ghost = null;
+    let lastTouch = touch;
+    let scrollRaf = null;
+
+    const stopScroll = () => { if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null; } };
+
+    const autoScroll = () => {
+      if (!dragging) return;
+      const edge = 80, maxSpeed = 12;
+      const y = lastTouch.clientY, vh = window.innerHeight;
+      let speed = 0;
+      if (y < edge)           speed = -maxSpeed * (1 - y / edge);
+      else if (y > vh - edge) speed =  maxSpeed * (1 - (vh - y) / edge);
+      if (speed !== 0) window.scrollBy(0, speed);
+      scrollRaf = requestAnimationFrame(autoScroll);
+    };
 
     const cleanup = () => {
-      el.removeEventListener('pointermove', onMove);
-      el.removeEventListener('pointerup', onUp);
-      el.removeEventListener('pointercancel', onUp);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend',  onUp);
+      document.removeEventListener('touchcancel', onUp);
+      stopScroll();
       if (ghost) { ghost.remove(); ghost = null; }
       const lane = document.getElementById(laneId);
       if (lane) {
@@ -3257,12 +3280,14 @@ function seqAddTouchDrag(el, laneId, getData, onCancelPlay) {
     };
 
     const onMove = (ev) => {
-      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      const t = Array.from(ev.changedTouches).find(t => t.identifier === tid);
+      if (!t) return;
+      lastTouch = t;
+      const dx = t.clientX - startX, dy = t.clientY - startY;
       if (!dragging) {
         if (dx * dx + dy * dy < 64) return;
         dragging = true;
         if (onCancelPlay) onCancelPlay();
-        el.setPointerCapture(e.pointerId);
         const data = getData();
         SEQ._dragLabel = data.label;
         ghost = document.createElement('div');
@@ -3274,15 +3299,17 @@ function seqAddTouchDrag(el, laneId, getData, onCancelPlay) {
           lane.classList.add('drag-over');
           lane.querySelector('.seq-drop-hint')?.style.setProperty('color', 'var(--accent)');
         }
+        autoScroll();
       }
-      ghost.style.left = ev.clientX + 'px';
-      ghost.style.top  = ev.clientY + 'px';
+      ev.preventDefault();
+      ghost.style.left = t.clientX + 'px';
+      ghost.style.top  = t.clientY + 'px';
       const lane = document.getElementById(laneId);
       if (lane) {
         const rect = lane.getBoundingClientRect();
-        if (ev.clientX >= rect.left && ev.clientX <= rect.right &&
-            ev.clientY >= rect.top  && ev.clientY <= rect.bottom) {
-          const beat = Math.max(0, Math.floor(((ev.clientX - rect.left) / BEAT_PX) * 2) / 2);
+        if (t.clientX >= rect.left && t.clientX <= rect.right &&
+            t.clientY >= rect.top  && t.clientY <= rect.bottom) {
+          const beat = Math.max(0, Math.floor(((t.clientX - rect.left) / BEAT_PX) * 2) / 2);
           const beats = laneId === 'seq-note-lane' ? 1 : state.beatsPerBar;
           seqSetGhost(lane, beat, beats);
         } else {
@@ -3292,8 +3319,10 @@ function seqAddTouchDrag(el, laneId, getData, onCancelPlay) {
     };
 
     const onUp = (ev) => {
+      const t = Array.from(ev.changedTouches).find(t => t.identifier === tid);
+      if (!t) return;
       if (!dragging) { cleanup(); return; }
-      const dropX = ev.clientX, dropY = ev.clientY;
+      const dropX = t.clientX, dropY = t.clientY;
       cleanup();
       const lane = document.getElementById(laneId);
       if (!lane) return;
@@ -3320,10 +3349,66 @@ function seqAddTouchDrag(el, laneId, getData, onCancelPlay) {
       }
     };
 
-    el.addEventListener('pointermove', onMove);
-    el.addEventListener('pointerup', onUp);
-    el.addEventListener('pointercancel', onUp);
-  });
+    document.addEventListener('touchmove',   onMove, { passive: false });
+    document.addEventListener('touchend',    onUp);
+    document.addEventListener('touchcancel', onUp);
+}
+
+function seqAddTouchDrag(el, laneId, getData, onCancelPlay) {
+  el.addEventListener('touchstart', (e) => {
+    if (!seqIsOpen()) return;
+    seqStartTouchDrag(e.changedTouches[0], laneId, getData, onCancelPlay);
+  }, { passive: true });
+}
+
+function initSeqLanePan() {
+  const wrap = document.getElementById('seq-lane-wrap');
+  if (!wrap) return;
+
+  wrap.addEventListener('touchstart', (e) => {
+    const target = e.target;
+    if (target.closest('.seq-block, .seq-loop-start, .seq-loop-end, .seq-resize, .seq-delete')) return;
+
+    const inChord = !!target.closest('#seq-lane');
+    const inNote  = !!target.closest('#seq-note-lane');
+    if (!inChord && !inNote) return;
+
+    const hasContent = inChord ? SEQ.items.length > 0 : SEQ.noteItems.length > 0;
+    if (!hasContent) return; // let page scroll when lane is empty
+
+    const touch = e.changedTouches[0];
+    const tid   = touch.identifier;
+    let prevX   = touch.clientX;
+    let panning = false;
+
+    const onMove = (ev) => {
+      const t = Array.from(ev.changedTouches).find(t => t.identifier === tid);
+      if (!t) return;
+      const dx = prevX - t.clientX;
+      if (!panning && Math.abs(dx) < 5) return;
+      panning = true;
+      ev.preventDefault();
+      wrap.scrollLeft += dx;
+      prevX = t.clientX;
+
+      // Extend the lane so user can pan into empty beats
+      const needed = wrap.scrollLeft + wrap.clientWidth + BEAT_PX * 8;
+      ['seq-lane', 'seq-note-lane'].forEach(id => {
+        const lane = document.getElementById(id);
+        if (lane && needed > lane.scrollWidth) lane.style.minWidth = needed + 'px';
+      });
+    };
+
+    const onUp = () => {
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend',  onUp);
+      document.removeEventListener('touchcancel', onUp);
+    };
+
+    document.addEventListener('touchmove',   onMove, { passive: false });
+    document.addEventListener('touchend',    onUp);
+    document.addEventListener('touchcancel', onUp);
+  }, { passive: false });
 }
 
 // Lane drag-and-drop
@@ -3775,7 +3860,7 @@ function addKbHandlers(key, midi) {
     document.body.classList.remove('seq-dragging-note');
     document.querySelector('#seq-note-lane .seq-drop-hint')?.style.removeProperty('color');
   });
-  key.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') e.preventDefault(); kbNoteOn(midi); });
+  key.addEventListener('pointerdown', () => kbNoteOn(midi));
   key.addEventListener('pointerup',   ()  => kbNoteOff(midi));
   key.addEventListener('pointerleave',()  => kbNoteOff(midi));
   key.addEventListener('pointerenter',(e) => { if (e.buttons > 0) kbNoteOn(midi); });
@@ -3898,6 +3983,7 @@ updateSynthOnlyVisibility();
 buildKeyboard();
 initSeqLane();
 initSeqNoteLane();
+initSeqLanePan();
 seqLoad();
 seqUpdateBarLine();
 seqUpdateLoopStart();

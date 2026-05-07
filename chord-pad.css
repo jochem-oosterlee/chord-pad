@@ -1357,6 +1357,7 @@ input[type="range"]::-moz-range-thumb {
 .seq-block {
   position: absolute;
   top: 4px;
+  touch-action: none;
   bottom: 4px;
   display: flex;
   flex-direction: column;
@@ -1459,8 +1460,16 @@ input[type="range"]::-moz-range-thumb {
   font-size: 8px;
   color: var(--text-faint);
   z-index: 1;
+  touch-action: none;
 }
 .seq-resize:hover { background: rgba(255,255,255,0.1); color: var(--text-dim); }
+@media (pointer: coarse) {
+  .seq-resize {
+    width: 20px;
+    background: rgba(255,255,255,0.07);
+    color: rgba(255,255,255,0.3);
+  }
+}
 
 .seq-playhead {
   position: absolute;
@@ -1493,6 +1502,7 @@ input[type="range"]::-moz-range-thumb {
   transform: translateX(-11px);
   z-index: 20;
   user-select: none;
+  touch-action: none;
   transition: border-color 0.1s, color 0.1s;
 }
 .seq-loop-start:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
@@ -1525,6 +1535,7 @@ input[type="range"]::-moz-range-thumb {
   transform: translateX(-11px);
   z-index: 20;
   user-select: none;
+  touch-action: none;
   transition: border-color 0.1s, color 0.1s;
 }
 .seq-loop-end:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
