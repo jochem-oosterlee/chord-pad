@@ -2758,13 +2758,21 @@ function seqMakeBlock(item, idx, isNote) {
     const lane = block.parentElement;
     const items = isNote ? SEQ.noteItems : SEQ.items;
     const onMove = (ev) => {
-      item.beats = Math.max(snap, Math.round((startBts + (ev.clientX - startX) / BEAT_PX) / snap) * snap);
+      item.beats = Math.max(snap, startBts + (ev.clientX - startX) / BEAT_PX);
       block.style.width = (item.beats * BEAT_PX) + 'px';
-      refreshTicks(item.beats);
+      refreshTicks(Math.round(item.beats));
       if (lane) lane.style.minWidth = seqLaneWidth(items) + 'px';
       seqAutoExtendLoop(item.start + item.beats);
     };
-    const onUp = () => { resize.removeEventListener('pointermove', onMove); resize.removeEventListener('pointerup', onUp); seqSave(); };
+    const onUp = () => {
+      resize.removeEventListener('pointermove', onMove);
+      resize.removeEventListener('pointerup', onUp);
+      item.beats = Math.max(snap, Math.round(item.beats / snap) * snap);
+      block.style.width = (item.beats * BEAT_PX) + 'px';
+      refreshTicks(item.beats);
+      seqAutoExtendLoop(item.start + item.beats);
+      seqSave();
+    };
     resize.addEventListener('pointermove', onMove);
     resize.addEventListener('pointerup', onUp);
   });
@@ -2785,7 +2793,7 @@ function seqMakeBlock(item, idx, isNote) {
       if (!moved && Math.abs(dx) < 4) return;
       moved = true;
       block.classList.add('moving');
-      item.start = Math.max(0, Math.round((startBeat + dx / BEAT_PX) / snap) * snap);
+      item.start = Math.max(0, startBeat + dx / BEAT_PX);
       block.style.left = (item.start * BEAT_PX) + 'px';
       if (lane) lane.style.minWidth = seqLaneWidth(items) + 'px';
     };
@@ -2794,6 +2802,7 @@ function seqMakeBlock(item, idx, isNote) {
       block.removeEventListener('pointerup', onUp);
       block.classList.remove('moving');
       if (moved) {
+        item.start = Math.max(0, Math.round(item.start / snap) * snap);
         items.sort((a, b) => a.start - b.start);
         seqAutoExtendLoop(item.start + item.beats);
         if (isNote) seqRenderNotes(); else seqRender();
