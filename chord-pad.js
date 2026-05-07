@@ -2573,6 +2573,9 @@ const SEQ = {
   loopStart: 0,
   loopEnd: 4,  // beats; auto-extends when blocks go beyond
   loop: false,
+  animCycleRef: 0,    // audio time of current visual cycle start (updated only on resync)
+  animCycleTotal: 0,  // duration of current visual cycle in seconds (updated only on resync)
+  animLoopStart: 0,   // loopStart beat at last resync (updated only on resync)
   _dragLabel: '',
   _dragHoverId: null,
 };
@@ -2595,11 +2598,12 @@ function seqAnimatePlayhead() {
   if (!SEQ.playing) return;
   const ctx     = getAudioCtx();
   const elapsed = ctx.currentTime - SEQ.playStartTime - (ctx.outputLatency || 0);
-  const total   = seqTotalDur();
   let px;
   if (SEQ.loop) {
-    const posInCycle = ((elapsed % total) + total) % total;
-    px = (SEQ.loopStart + posInCycle / seqBeatDur()) * BEAT_PX;
+    const cycleElapsed = ctx.currentTime - SEQ.animCycleRef - (ctx.outputLatency || 0);
+    const animTotal    = SEQ.animCycleTotal;
+    const posInCycle   = ((cycleElapsed % animTotal) + animTotal) % animTotal;
+    px = (SEQ.animLoopStart + posInCycle / seqBeatDur()) * BEAT_PX;
   } else {
     px = (elapsed / seqBeatDur()) * BEAT_PX;
     const minW = px + 64;
@@ -3018,13 +3022,18 @@ function seqResyncChords() {
   for (let i = 0; i < SEQ.items.length; i++) {
     if (!seqItemInRange(SEQ.items[i])) continue;
     const t = cycleStart + (SEQ.items[i].start - ls) * bd;
-    if (t > now) { SEQ.cycleStart = cycleStart; SEQ.pendingIdx = i; SEQ.pendingTime = t; return; }
+    if (t > now) {
+      SEQ.cycleStart = cycleStart; SEQ.pendingIdx = i; SEQ.pendingTime = t;
+      SEQ.animCycleRef = cycleStart; SEQ.animCycleTotal = total; SEQ.animLoopStart = SEQ.loopStart;
+      return;
+    }
   }
   if (!SEQ.loop) { SEQ.pendingTime = Infinity; return; }
   const next = cycleStart + total;
   const fi = seqFindNextInRange(SEQ.items, 0);
   SEQ.cycleStart = next; SEQ.pendingIdx = fi >= 0 ? fi : 0;
   SEQ.pendingTime = fi >= 0 ? next + (SEQ.items[fi].start - SEQ.loopStart) * bd : Infinity;
+  SEQ.animCycleRef = next; SEQ.animCycleTotal = total; SEQ.animLoopStart = SEQ.loopStart;
 }
 
 function seqResyncNotes() {
@@ -3039,13 +3048,18 @@ function seqResyncNotes() {
   for (let i = 0; i < SEQ.noteItems.length; i++) {
     if (!seqItemInRange(SEQ.noteItems[i])) continue;
     const t = cycleStart + (SEQ.noteItems[i].start - ls) * bd;
-    if (t > now) { SEQ.noteCycleStart = cycleStart; SEQ.notePendingIdx = i; SEQ.notePendingTime = t; return; }
+    if (t > now) {
+      SEQ.noteCycleStart = cycleStart; SEQ.notePendingIdx = i; SEQ.notePendingTime = t;
+      SEQ.animCycleRef = cycleStart; SEQ.animCycleTotal = total; SEQ.animLoopStart = SEQ.loopStart;
+      return;
+    }
   }
   if (!SEQ.loop) { SEQ.notePendingTime = Infinity; return; }
   const next = cycleStart + total;
   const fn = seqFindNextInRange(SEQ.noteItems, 0);
   SEQ.noteCycleStart = next; SEQ.notePendingIdx = fn >= 0 ? fn : 0;
   SEQ.notePendingTime = fn >= 0 ? next + (SEQ.noteItems[fn].start - SEQ.loopStart) * bd : Infinity;
+  SEQ.animCycleRef = next; SEQ.animCycleTotal = total; SEQ.animLoopStart = SEQ.loopStart;
 }
 
 function seqInitPlay(t0) {
@@ -3055,6 +3069,9 @@ function seqInitPlay(t0) {
   SEQ.playStartTime  = t0 - 0.05;
   SEQ.cycleStart     = t0;
   SEQ.noteCycleStart = t0;
+  SEQ.animCycleRef   = t0;
+  SEQ.animCycleTotal = seqTotalDur();
+  SEQ.animLoopStart  = SEQ.loopStart;
   const fi = seqFindNextInRange(SEQ.items, 0);
   const fn = seqFindNextInRange(SEQ.noteItems, 0);
   SEQ.pendingIdx      = fi >= 0 ? fi : 0;
@@ -3281,14 +3298,14 @@ function initSeqLoopEnd() {
       const beat = Math.max(1, Math.round((ev.clientX - laneRect.left) / BEAT_PX));
       SEQ.loopEnd = Math.max(beat, SEQ.loopStart + 1);
       seqUpdateLoopEnd();
-      if (SEQ.playing && SEQ.loop) {
-        seqResyncChords();
-        seqResyncNotes();
-      }
     };
     const onUp = () => {
       handle.removeEventListener('pointermove', onMove);
       handle.removeEventListener('pointerup', onUp);
+      if (SEQ.playing && SEQ.loop) {
+        seqResyncChords();
+        seqResyncNotes();
+      }
       seqSave();
     };
     handle.addEventListener('pointermove', onMove);
@@ -3309,14 +3326,14 @@ function initSeqLoopStart() {
       const beat = Math.max(0, Math.round((ev.clientX - laneRect.left) / BEAT_PX));
       SEQ.loopStart = Math.min(beat, SEQ.loopEnd - 1);
       seqUpdateLoopStart();
-      if (SEQ.playing && SEQ.loop) {
-        seqResyncChords();
-        seqResyncNotes();
-      }
     };
     const onUp = () => {
       handle.removeEventListener('pointermove', onMove);
       handle.removeEventListener('pointerup', onUp);
+      if (SEQ.playing && SEQ.loop) {
+        seqResyncChords();
+        seqResyncNotes();
+      }
       seqSave();
     };
     handle.addEventListener('pointermove', onMove);
