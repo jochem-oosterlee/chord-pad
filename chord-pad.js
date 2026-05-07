@@ -1216,6 +1216,10 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
     pad.classList.remove('dragging');
     document.querySelector('#seq-lane .seq-drop-hint')?.style.removeProperty('color');
   });
+  seqAddTouchDrag(pad, 'seq-lane', () => ({
+    interval: chordSpec.interval, q: chordSpec.q, bassInterval: chordSpec.bassInterval,
+    label: `${formatChordRoot(root)}${qualityToHTML(glyph)}`,
+  }), () => releaseChord(id));
   pad.innerHTML = `
     ${isStartHere ? '<span class="start-here-marker">start here</span>' : ''}
     <span class="pad-roman">${qualityToHTML(chordSpec.roman)}</span>
@@ -1277,6 +1281,10 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
       document.querySelector('#seq-lane .seq-drop-hint')?.style.removeProperty('color');
       if (SEQ._dragHoverId) { releaseChord(SEQ._dragHoverId); SEQ._dragHoverId = null; }
     });
+    seqAddTouchDrag(badge, 'seq-lane', () => ({
+      interval: chordSpec.interval, q: extQ, bassInterval: chordSpec.bassInterval,
+      label: `${formatChordRoot(root)}${qualityToHTML(chordSpec.ext)}`,
+    }), () => releaseChord(id));
     badge.addEventListener('mouseup', (e) => {
       e.stopPropagation();
       releaseChord(id);
@@ -3219,6 +3227,96 @@ function seqSetGhost(lane, beat, beats) {
 }
 function seqClearGhost(lane) { lane.querySelector('.seq-ghost')?.remove(); }
 
+function seqAddTouchDrag(el, laneId, getData, onCancelPlay) {
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch' || !seqIsOpen()) return;
+    const startX = e.clientX, startY = e.clientY;
+    let dragging = false;
+    let ghost = null;
+
+    const cleanup = () => {
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
+      if (ghost) { ghost.remove(); ghost = null; }
+      const lane = document.getElementById(laneId);
+      if (lane) {
+        lane.classList.remove('drag-over');
+        lane.querySelector('.seq-drop-hint')?.style.removeProperty('color');
+        seqClearGhost(lane);
+      }
+    };
+
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      if (!dragging) {
+        if (dx * dx + dy * dy < 64) return;
+        dragging = true;
+        if (onCancelPlay) onCancelPlay();
+        el.setPointerCapture(e.pointerId);
+        const data = getData();
+        SEQ._dragLabel = data.label;
+        ghost = document.createElement('div');
+        ghost.className = 'seq-touch-drag-ghost';
+        ghost.innerHTML = data.label;
+        document.body.appendChild(ghost);
+        const lane = document.getElementById(laneId);
+        if (lane) {
+          lane.classList.add('drag-over');
+          lane.querySelector('.seq-drop-hint')?.style.setProperty('color', 'var(--accent)');
+        }
+      }
+      ghost.style.left = ev.clientX + 'px';
+      ghost.style.top  = ev.clientY + 'px';
+      const lane = document.getElementById(laneId);
+      if (lane) {
+        const rect = lane.getBoundingClientRect();
+        if (ev.clientX >= rect.left && ev.clientX <= rect.right &&
+            ev.clientY >= rect.top  && ev.clientY <= rect.bottom) {
+          const beat = Math.max(0, Math.floor(((ev.clientX - rect.left) / BEAT_PX) * 2) / 2);
+          const beats = laneId === 'seq-note-lane' ? 1 : state.beatsPerBar;
+          seqSetGhost(lane, beat, beats);
+        } else {
+          seqClearGhost(lane);
+        }
+      }
+    };
+
+    const onUp = (ev) => {
+      if (!dragging) { cleanup(); return; }
+      const dropX = ev.clientX, dropY = ev.clientY;
+      cleanup();
+      const lane = document.getElementById(laneId);
+      if (!lane) return;
+      const rect = lane.getBoundingClientRect();
+      if (dropX < rect.left || dropX > rect.right || dropY < rect.top || dropY > rect.bottom) return;
+      const dropBeat = Math.max(0, Math.floor(((dropX - rect.left) / BEAT_PX) * 2) / 2);
+      const data = getData();
+      if (laneId === 'seq-note-lane') {
+        SEQ.noteItems.push({ midi: data.midi, label: data.label, beats: 1, start: dropBeat });
+        SEQ.noteItems.sort((a, b) => a.start - b.start);
+        seqAutoExtendLoop(dropBeat + 1);
+        seqRenderNotes();
+        seqResyncNotes();
+      } else {
+        SEQ.items.push({
+          interval: data.interval, q: data.q, bassInterval: data.bassInterval, label: data.label,
+          beats: state.beatsPerBar, start: dropBeat,
+          keyRoot: state.keys[state.currentTemplate], template: state.currentTemplate,
+        });
+        SEQ.items.sort((a, b) => a.start - b.start);
+        seqAutoExtendLoop(dropBeat + state.beatsPerBar);
+        seqRender();
+        seqResyncChords();
+      }
+    };
+
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onUp);
+  });
+}
+
 // Lane drag-and-drop
 function initSeqNoteLane() {
   const lane = document.getElementById('seq-note-lane');
@@ -3672,6 +3770,7 @@ function addKbHandlers(key, midi) {
   key.addEventListener('pointerup',   ()  => kbNoteOff(midi));
   key.addEventListener('pointerleave',()  => kbNoteOff(midi));
   key.addEventListener('pointerenter',(e) => { if (e.buttons > 0) kbNoteOn(midi); });
+  seqAddTouchDrag(key, 'seq-note-lane', () => ({ midi, label: midiNoteName(midi) }), () => kbNoteOff(midi));
 }
 
 document.getElementById('keyboard-header').addEventListener('click', () => {

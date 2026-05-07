@@ -1542,6 +1542,19 @@ input[type="range"]::-moz-range-thumb {
 body.seq-dragging-chord #seq-lane,
 body.seq-dragging-note  #seq-note-lane { border-color: rgba(255,170,51,0.5); background: rgba(255,170,51,0.04); }
 
+.seq-touch-drag-ghost {
+  position: fixed;
+  padding: 4px 10px;
+  background: var(--bg-card, #1a1b1e);
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 6px;
+  color: var(--text, #fff);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 9999;
+  transform: translate(-50%, calc(-100% - 12px));
+}
 .seq-ghost {
   position: absolute;
   top: 4px; bottom: 4px;
