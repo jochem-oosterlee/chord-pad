@@ -2671,6 +2671,7 @@ const SEQ = {
   animLoopLen: 4,    // loop length in beats, cached at init/resync (not during drag)
   animLoopStart: 0,  // loopStart beat, cached at init/resync
   _dragLabel: '',
+  _dragChord: null,
   _dragHoverId: null,
 };
 
@@ -3809,6 +3810,7 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
         l.classList.remove('drag-over');
         l.querySelector('.seq-drop-hint')?.style.removeProperty('color');
         seqClearGhost(l);
+        seqClearRollGhost(l);
       }
     };
 
@@ -3829,6 +3831,7 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
         document.body.appendChild(ghost);
         const isChordData = data.interval !== undefined;
         document.body.classList.add(isChordData ? 'seq-dragging-chord' : 'seq-dragging-note');
+        SEQ._dragChord = isChordData ? { interval: data.interval, q: data.q } : null;
         const lane = document.getElementById(laneId);
         if (lane) lane.querySelector('.seq-drop-hint')?.style.setProperty('color', 'var(--accent)');
         autoScroll();
@@ -3843,9 +3846,16 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
         if (t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom) {
           const beat = Math.max(0, Math.floor(((t.clientX - r.left) / BEAT_PX) * 2) / 2);
           const beats = lid === 'seq-note-lane' ? 1 : state.beatsPerBar;
-          seqSetGhost(l, beat, beats);
+          if (lid === 'seq-midi-lane' && SEQ._dragChord && l.classList.contains('roll-mode')) {
+            seqClearGhost(l);
+            seqSetRollGhost(l, beat, beats, chordNotesAtY(l, t.clientY, SEQ._dragChord.interval, SEQ._dragChord.q));
+          } else {
+            seqClearRollGhost(l);
+            seqSetGhost(l, beat, beats);
+          }
         } else {
           seqClearGhost(l);
+          seqClearRollGhost(l);
         }
       }
     };
