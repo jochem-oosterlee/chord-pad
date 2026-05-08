@@ -3089,7 +3089,7 @@ function rollBuildGrid(lane) {
     row.dataset.midi = m;
     row.style.top    = (ROLL_TOP_MIDI - m) * ROLL_ROW_H + 'px';
     row.style.height = ROLL_ROW_H + 'px';
-    if (m % 12 === 0) {
+    if (m % 12 === 0 && !SEQ.rollKeyboard) {
       const lbl = document.createElement('span');
       lbl.className = 'roll-c-label';
       lbl.textContent = 'C' + (Math.floor(m / 12) - 1);
