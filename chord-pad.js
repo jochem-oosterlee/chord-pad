@@ -3794,6 +3794,23 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
       if (y < edge)           speed = -maxSpeed * (1 - y / edge);
       else if (y > vh - edge) speed =  maxSpeed * (1 - (vh - y) / edge);
       if (speed !== 0) window.scrollBy(0, speed);
+
+      const midiLane = document.getElementById('seq-midi-lane');
+      if (midiLane && midiLane.classList.contains('roll-mode')) {
+        const laneRect = midiLane.getBoundingClientRect();
+        const laneEdge = 40, laneMaxSpeed = 4;
+        let laneSpeed = 0;
+        if (y < laneRect.top + laneEdge)
+          laneSpeed = -laneMaxSpeed * (1 - (y - laneRect.top) / laneEdge);
+        else if (y > laneRect.bottom - laneEdge)
+          laneSpeed =  laneMaxSpeed * (1 - (laneRect.bottom - y) / laneEdge);
+        if (laneSpeed !== 0) {
+          midiLane.scrollTop += laneSpeed;
+          updateRollOverflow();
+          updateKeyboardPosition();
+        }
+      }
+
       scrollRaf = requestAnimationFrame(autoScroll);
     };
 
