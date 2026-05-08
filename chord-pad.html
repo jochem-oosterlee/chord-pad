@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Chord Pad</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230d0e10'/><text x='16' y='22' font-family='monospace' font-size='14' font-weight='bold' text-anchor='middle' fill='%23ffaa33'>CP</text></svg>">
 <link rel="manifest" href="manifest.json">
@@ -108,9 +108,11 @@
       <div class="control">
         <span class="control-label">Octave</span>
         <div class="control-row">
-          <button class="btn" id="oct-down">▼</button>
-          <span class="control-value" id="ctrl-oct">4</span>
-          <button class="btn" id="oct-up">▲</button>
+          <div class="arrow-group">
+            <button class="ctrl-arrow" id="oct-down">&#8249;</button>
+            <span class="control-value" id="ctrl-oct">4</span>
+            <button class="ctrl-arrow" id="oct-up">&#8250;</button>
+          </div>
         </div>
       </div>
       <div class="control">
@@ -123,9 +125,11 @@
         <span class="control-label">Bass</span>
         <div class="control-row">
           <button class="btn active" id="bass-toggle">ON</button>
-          <button class="btn" id="bass-oct-down">▼</button>
-          <span class="control-value" id="ctrl-bass-oct">2</span>
-          <button class="btn" id="bass-oct-up">▲</button>
+          <div class="arrow-group">
+            <button class="ctrl-arrow" id="bass-oct-down">&#8249;</button>
+            <span class="control-value" id="ctrl-bass-oct">2</span>
+            <button class="ctrl-arrow" id="bass-oct-up">&#8250;</button>
+          </div>
         </div>
       </div>
       <div class="control">
@@ -143,9 +147,11 @@
       <div class="control" id="tempo-control" style="display:none">
         <span class="control-label">Tempo</span>
         <div class="control-row">
-          <button class="btn" id="tempo-down">▼</button>
-          <input class="control-value tempo-input" id="ctrl-tempo" type="number" min="40" max="240" value="120">
-          <button class="btn" id="tempo-up">▲</button>
+          <div class="arrow-group">
+            <button class="ctrl-arrow" id="tempo-down">&#8249;</button>
+            <input class="control-value tempo-input" id="ctrl-tempo" type="number" min="40" max="240" value="120">
+            <button class="ctrl-arrow" id="tempo-up">&#8250;</button>
+          </div>
         </div>
       </div>
       <select id="play-style-select" style="display:none"></select>
@@ -160,9 +166,11 @@
       <div class="control" id="channel-control" style="display:none">
         <span class="control-label">Channel</span>
         <div class="control-row">
-          <button class="btn" id="ch-down">◀</button>
-          <span class="control-value" id="ctrl-ch">1</span>
-          <button class="btn" id="ch-up">▶</button>
+          <div class="arrow-group">
+            <button class="ctrl-arrow" id="ch-down">&#8249;</button>
+            <span class="control-value" id="ctrl-ch">1</span>
+            <button class="ctrl-arrow" id="ch-up">&#8250;</button>
+          </div>
         </div>
       </div>
       <div class="control wide" id="port-control" style="display:none">
@@ -197,7 +205,6 @@
         </select>
         <span id="synth-loading" style="display:none; font-size:9px; color:var(--accent)"></span>
       </div>
-      <div class="synth-row-divider"></div>
       <div class="synth-param">
         <span class="synth-param-label">Attack</span>
         <input type="range" id="synth-attack" min="0" max="100" value="47">
@@ -234,7 +241,12 @@
         <span class="synth-param-value" id="synth-reverb-val">50%</span>
       </div>
       <div class="synth-param">
-        <span class="synth-param-label">Dly Time</span>
+        <span class="synth-param-label">Dly Wet</span>
+        <input type="range" id="synth-dly-wet" min="0" max="100" value="0">
+        <span class="synth-param-value" id="synth-dly-wet-val">0%</span>
+      </div>
+      <div class="synth-param">
+        <span class="synth-param-label">Dly Time <button class="tempo-sync-btn" id="dly-time-sync" title="Snap to tempo">⟳</button></span>
         <input type="range" id="synth-dly-time" min="0" max="100" value="26">
         <span class="synth-param-value" id="synth-dly-time-val">300ms</span>
       </div>
@@ -244,29 +256,24 @@
         <span class="synth-param-value" id="synth-dly-fb-val">30%</span>
       </div>
       <div class="synth-param">
-        <span class="synth-param-label">Dly Wet</span>
-        <input type="range" id="synth-dly-wet" min="0" max="100" value="0">
-        <span class="synth-param-value" id="synth-dly-wet-val">0%</span>
-      </div>
-      <div class="synth-param">
-        <span class="synth-param-label">Vib Rate</span>
-        <input type="range" id="synth-vib-rate" min="0" max="100" value="47">
-        <span class="synth-param-value" id="synth-vib-rate-val">5.0Hz</span>
-      </div>
-      <div class="synth-param">
         <span class="synth-param-label">Vib Depth</span>
         <input type="range" id="synth-vib-depth" min="0" max="100" value="0">
         <span class="synth-param-value" id="synth-vib-depth-val">0¢</span>
       </div>
       <div class="synth-param">
-        <span class="synth-param-label">Trem Rate <button class="tempo-sync-btn" id="trem-sync" title="Snap to tempo">⟳</button></span>
-        <input type="range" id="synth-trem-rate" min="0" max="100" value="37">
-        <span class="synth-param-value" id="synth-trem-rate-val">4.0Hz</span>
+        <span class="synth-param-label">Vib Rate <button class="tempo-sync-btn" id="vib-rate-sync" title="Snap to tempo">⟳</button></span>
+        <input type="range" id="synth-vib-rate" min="0" max="100" value="47">
+        <span class="synth-param-value" id="synth-vib-rate-val">5.0Hz</span>
       </div>
       <div class="synth-param">
         <span class="synth-param-label">Trem Depth</span>
         <input type="range" id="synth-trem-depth" min="0" max="100" value="0">
         <span class="synth-param-value" id="synth-trem-depth-val">0%</span>
+      </div>
+      <div class="synth-param">
+        <span class="synth-param-label">Trem Rate <button class="tempo-sync-btn" id="trem-sync" title="Snap to tempo">⟳</button></span>
+        <input type="range" id="synth-trem-rate" min="0" max="100" value="37">
+        <span class="synth-param-value" id="synth-trem-rate-val">4.0Hz</span>
       </div>
       <div class="synth-param">
         <span class="synth-param-label">Fltr LFO</span>
@@ -313,23 +320,25 @@
     <div class="seq-header" id="seq-header">Sequencer</div>
     <div class="seq-controls">
       <button class="seq-play-btn" id="seq-play-btn">&#9654; Play</button>
-      <button class="seq-rec-btn" id="seq-rec-btn"><span style="font-size:1.6em;line-height:1;vertical-align:-0.15em">&#x25CF;</span> Rec</button>
+      <button class="seq-rec-btn" id="seq-rec-btn"><span class="seq-rec-dot">&#x25CF;</span>Rec</button>
       <button class="seq-metro-btn" id="seq-metro-btn">&#9833; Metro</button>
 <button class="seq-loop-btn" id="seq-loop-btn">&#8635; Loop</button>
-      <select class="seq-timesig" id="seq-timesig">
-        <option value="2">2/4</option>
-        <option value="3">3/4</option>
-        <option value="4">4/4</option>
-        <option value="6">6/8</option>
-      </select>
-      <span class="seq-rec-beat" id="seq-rec-beat"></span>
-      <div class="seq-tempo-wrap">
-        <span>BPM</span>
-        <button class="btn" id="seq-tempo-down">▼</button>
-        <input class="seq-tempo-val" id="seq-tempo-val" type="number" min="40" max="240" value="120">
-        <button class="btn" id="seq-tempo-up">▲</button>
+      <div class="seq-timesig-tempo">
+        <select class="seq-timesig" id="seq-timesig">
+          <option value="2">2/4</option>
+          <option value="3">3/4</option>
+          <option value="4">4/4</option>
+          <option value="6">6/8</option>
+        </select>
+        <span class="seq-rec-beat" id="seq-rec-beat"></span>
+        <div class="seq-tempo-wrap">
+          <div class="arrow-group">
+            <button class="seq-tempo-arrow" id="seq-tempo-down">&#8249;</button>
+            <input class="seq-tempo-val" id="seq-tempo-val" type="number" min="40" max="240" value="120">
+            <button class="seq-tempo-arrow" id="seq-tempo-up">&#8250;</button>
+          </div>
+        </div>
       </div>
-      <button class="seq-clear-btn" id="seq-clear-btn">Clear</button>
     </div>
     <div class="seq-lane-wrap" id="seq-lane-wrap">
       <div class="seq-tracks-inner">
@@ -347,6 +356,7 @@
       <button class="btn" id="seq-zoom-out">−</button>
       <button class="btn" id="seq-zoom-reset" title="Reset zoom">↺</button>
       <button class="btn" id="seq-zoom-in">+</button>
+      <button class="seq-clear-btn" id="seq-clear-btn">Clear</button>
     </div>
   </div>
 

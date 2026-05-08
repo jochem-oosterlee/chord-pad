@@ -1,4 +1,8 @@
-﻿// ============================================================
+﻿// Block browser touch interference (context menus, text selection popups)
+document.addEventListener('contextmenu', e => { if (e.pointerType === 'touch') e.preventDefault(); });
+document.addEventListener('selectstart', e => { if (e.target.closest('.app')) e.preventDefault(); });
+
+// ============================================================
 // CONSTANTS
 // ============================================================
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -462,9 +466,9 @@ function formatChordRoot(name) {
 }
 function qualityToHTML(glyph) {
   return glyph
-    .replace(/°/g, '<svg class="q-dim" viewBox="0 0 10 10" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="5" r="3.5"/></svg>')
-    .replace(/ø/g, '<svg class="q-halfdim" viewBox="0 0 10 10" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5" cy="5" r="3.5"/><line x1="1.5" y1="8.5" x2="8.5" y2="1.5"/></svg>')
-    .replace(/\+/g, '<svg class="q-aug" viewBox="0 0 10 10" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="5" y1="1.5" x2="5" y2="8.5"/><line x1="1.5" y1="5" x2="8.5" y2="5"/></svg>');
+    .replace(/°/g, '<svg class="q-dim" viewBox="0 0 10 10" width="0.75em" height="0.75em" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="5" r="3.5"/></svg>')
+    .replace(/ø/g, '<svg class="q-halfdim" viewBox="0 0 10 10" width="0.75em" height="0.75em" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5" cy="5" r="3.5"/><line x1="1.5" y1="8.5" x2="8.5" y2="1.5"/></svg>')
+    .replace(/\+/g, '<svg class="q-aug" viewBox="0 0 10 10" width="0.75em" height="0.75em" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="5" y1="1.5" x2="5" y2="8.5"/><line x1="1.5" y1="5" x2="8.5" y2="5"/></svg>');
 }
 
 // ============================================================
@@ -3975,16 +3979,15 @@ function initKbDragStrip() {
     });
   }
 
-  // Arrow buttons — scroll by ~1/3 of visible width, repeat on hold
+  // Arrow buttons — continuous RAF scroll while held, pointer capture prevents mouseleave jank
   function holdScroll(btn, dir) {
-    let interval;
-    const step = () => { wrap.scrollLeft += dir * wrap.clientWidth * 0.35; };
-    btn.addEventListener('touchstart', (e) => { e.preventDefault(); step(); interval = setInterval(step, 300); }, { passive: false });
-    btn.addEventListener('touchend',    () => clearInterval(interval));
-    btn.addEventListener('touchcancel', () => clearInterval(interval));
-    btn.addEventListener('mousedown',  () => { step(); interval = setInterval(step, 300); });
-    btn.addEventListener('mouseup',    () => clearInterval(interval));
-    btn.addEventListener('mouseleave', () => clearInterval(interval));
+    let rafId = null;
+    const tick  = () => { wrap.scrollLeft += dir * 4; rafId = requestAnimationFrame(tick); };
+    const start = (e) => { e.preventDefault(); btn.setPointerCapture(e.pointerId); if (!rafId) rafId = requestAnimationFrame(tick); };
+    const stop  = () => { cancelAnimationFrame(rafId); rafId = null; };
+    btn.addEventListener('pointerdown',  start);
+    btn.addEventListener('pointerup',    stop);
+    btn.addEventListener('pointercancel', stop);
   }
 
   holdScroll(document.getElementById('kb-scroll-left'),  -1);
@@ -4123,7 +4126,6 @@ document.getElementById('keyboard-header').addEventListener('click', () => {
 // Trem Rate tempo sync
 document.getElementById('trem-sync').addEventListener('click', () => {
   const T = state.tempo;
-  // Whole, half, quarter-triplet, quarter, eighth-triplet, eighth, 16th
   const candidates = [T/240, T/120, T/80, T/60, T/40, T/30, T/20, T/15];
   const current = state.synth.tremoloRate;
   const nearest = candidates.reduce((best, c) =>
@@ -4131,6 +4133,33 @@ document.getElementById('trem-sync').addEventListener('click', () => {
   );
   const el = document.getElementById('synth-trem-rate');
   el.value = Math.max(0, Math.min(100, invTremRate(nearest)));
+  el.dispatchEvent(new Event('input'));
+});
+
+// Vib Rate tempo sync
+document.getElementById('vib-rate-sync').addEventListener('click', () => {
+  const T = state.tempo;
+  const candidates = [T/240, T/120, T/80, T/60, T/40, T/30, T/20, T/15];
+  const current = state.synth.vibratoRate;
+  const nearest = candidates.reduce((best, c) =>
+    Math.abs(c - current) < Math.abs(best - current) ? c : best
+  );
+  const el = document.getElementById('synth-vib-rate');
+  el.value = Math.max(0, Math.min(100, invVibRate(nearest)));
+  el.dispatchEvent(new Event('input'));
+});
+
+// Dly Time tempo sync
+document.getElementById('dly-time-sync').addEventListener('click', () => {
+  const T = state.tempo;
+  // half, dotted-quarter, quarter, dotted-eighth, quarter-triplet, eighth, eighth-triplet, 16th
+  const candidates = [120/T, 90/T, 60/T, 45/T, 40/T, 30/T, 20/T, 15/T].filter(v => v >= 0.05 && v <= 1.0);
+  const current = state.synth.delayTime;
+  const nearest = candidates.reduce((best, c) =>
+    Math.abs(c - current) < Math.abs(best - current) ? c : best
+  );
+  const el = document.getElementById('synth-dly-time');
+  el.value = Math.max(0, Math.min(100, invDlyTime(nearest)));
   el.dispatchEvent(new Event('input'));
 });
 
