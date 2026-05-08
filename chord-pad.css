@@ -1097,6 +1097,7 @@ input[type="range"]::-moz-range-thumb {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .seq-play-btn {
   background: none;
@@ -1227,6 +1228,49 @@ input[type="range"]::-moz-range-thumb {
 .kb-wrap::-webkit-scrollbar-track { background: transparent; }
 .kb-wrap::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
 .kb-wrap::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.35); }
+.kb-scroll-nav { display: none; }
+.kb-drag-thumb  { display: none; }
+
+@media (pointer: coarse) {
+  .kb-wrap { scrollbar-width: none; }
+  .kb-wrap::-webkit-scrollbar { display: none; }
+
+  .kb-scroll-nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .kb-scroll-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 20px;
+    line-height: 1;
+    padding: 0px 6px 4px;
+    cursor: pointer;
+    touch-action: manipulation;
+    flex-shrink: 0;
+  }
+  .kb-scroll-btn:active { background: rgba(255,255,255,0.1); color: var(--text); }
+  .kb-scroll-track {
+    flex: 1;
+    position: relative;
+    height: 4px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+  }
+  .kb-drag-thumb {
+    display: block;
+    position: absolute;
+    top: 0;
+    height: 4px;
+    background: rgba(255,255,255,0.35);
+    border-radius: 2px;
+    pointer-events: none;
+  }
+  .keyboard-panel.collapsed .kb-scroll-nav { display: none; }
+}
 .kb-container {
   position: relative;
   flex-shrink: 0;

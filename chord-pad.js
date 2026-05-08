@@ -3929,6 +3929,68 @@ function kbNoteOff(midi, sendMidi = true) {
   }
 }
 
+function initKbDragStrip() {
+  const nav   = document.getElementById('kb-scroll-nav');
+  const thumb = document.getElementById('kb-drag-thumb');
+  const track = nav?.querySelector('.kb-scroll-track');
+  const wrap  = nav?.closest('.keyboard-panel')?.querySelector('.kb-wrap');
+  if (!nav || !wrap) return;
+
+  function updateThumb() {
+    if (!thumb || !track) return;
+    const ratio      = wrap.clientWidth / wrap.scrollWidth;
+    const thumbW     = Math.max(20, track.clientWidth * ratio);
+    const maxLeft    = track.clientWidth - thumbW;
+    const scrollFrac = wrap.scrollLeft / (wrap.scrollWidth - wrap.clientWidth || 1);
+    thumb.style.width = thumbW + 'px';
+    thumb.style.left  = (scrollFrac * maxLeft) + 'px';
+  }
+  wrap.addEventListener('scroll', updateThumb);
+  requestAnimationFrame(updateThumb);
+
+  // Drag on the track scrolls proportionally
+  function startTrackDrag(clientX) {
+    const startX      = clientX;
+    const startScroll = wrap.scrollLeft;
+    const scale       = (wrap.scrollWidth - wrap.clientWidth) / (track.clientWidth - (thumb?.clientWidth ?? 0) || 1);
+    return (x) => { wrap.scrollLeft = startScroll + (x - startX) * scale; };
+  }
+
+  if (track) {
+    track.addEventListener('touchstart', (e) => {
+      const move = startTrackDrag(e.touches[0].clientX);
+      const onMove = (ev) => move(ev.touches[0].clientX);
+      const onEnd  = () => { track.removeEventListener('touchmove', onMove); track.removeEventListener('touchend', onEnd); };
+      track.addEventListener('touchmove',   onMove, { passive: true });
+      track.addEventListener('touchend',    onEnd);
+      track.addEventListener('touchcancel', onEnd);
+    }, { passive: true });
+
+    track.addEventListener('mousedown', (e) => {
+      const move = startTrackDrag(e.clientX);
+      const onMove = (ev) => move(ev.clientX);
+      const onUp   = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup',   onUp);
+    });
+  }
+
+  // Arrow buttons — scroll by ~1/3 of visible width, repeat on hold
+  function holdScroll(btn, dir) {
+    let interval;
+    const step = () => { wrap.scrollLeft += dir * wrap.clientWidth * 0.35; };
+    btn.addEventListener('touchstart', (e) => { e.preventDefault(); step(); interval = setInterval(step, 300); }, { passive: false });
+    btn.addEventListener('touchend',    () => clearInterval(interval));
+    btn.addEventListener('touchcancel', () => clearInterval(interval));
+    btn.addEventListener('mousedown',  () => { step(); interval = setInterval(step, 300); });
+    btn.addEventListener('mouseup',    () => clearInterval(interval));
+    btn.addEventListener('mouseleave', () => clearInterval(interval));
+  }
+
+  holdScroll(document.getElementById('kb-scroll-left'),  -1);
+  holdScroll(document.getElementById('kb-scroll-right'),  1);
+}
+
 function initTouchGlide() {
   // Keyboard glide
   const kbWrap = document.getElementById('kb-container')?.parentElement;
@@ -4045,10 +4107,11 @@ function addKbHandlers(key, midi) {
     document.body.classList.remove('seq-dragging-note');
     document.querySelector('#seq-note-lane .seq-drop-hint')?.style.removeProperty('color');
   });
-  key.addEventListener('pointerdown', () => kbNoteOn(midi));
-  key.addEventListener('pointerup',   ()  => kbNoteOff(midi));
-  key.addEventListener('pointerleave',()  => kbNoteOff(midi));
-  key.addEventListener('pointerenter',(e) => { if (e.buttons > 0) kbNoteOn(midi); });
+  key.addEventListener('pointerdown',  () => kbNoteOn(midi));
+  key.addEventListener('pointerup',    () => kbNoteOff(midi));
+  key.addEventListener('pointerleave', () => kbNoteOff(midi));
+  key.addEventListener('pointercancel',() => kbNoteOff(midi));
+  key.addEventListener('pointerenter', (e) => { if (e.buttons > 0) kbNoteOn(midi); });
   seqAddTouchDrag(key, 'seq-note-lane', () => ({ midi, label: midiNoteName(midi) }), () => kbNoteOff(midi));
 }
 
@@ -4178,6 +4241,7 @@ if (state.instrument !== 'synth') {
 updateSynthOnlyVisibility();
 
 buildKeyboard();
+initKbDragStrip();
 initTouchGlide();
 initSeqLane();
 initSeqNoteLane();
