@@ -2054,7 +2054,7 @@ function renderRowsDropdown() {
     item.className = 'row-config-item';
     item.draggable = true;
     item.dataset.row = rowId;
-    item.innerHTML = `<span class="drag-handle">⠿</span><label><input type="checkbox" ${state.visibleRows.has(rowId) ? 'checked' : ''}> ${labels[rowId]}</label>`;
+    item.innerHTML = `<span class="drag-handle"><i data-lucide="grip-vertical"></i></span><label><input type="checkbox" ${state.visibleRows.has(rowId) ? 'checked' : ''}> ${labels[rowId]}</label>`;
 
     item.querySelector('input').addEventListener('change', e => {
       if (e.target.checked) state.visibleRows.add(rowId);
@@ -2628,6 +2628,8 @@ const SEQ = {
   items: [],       // [{interval, q, bassInterval, label, beats, keyRoot, template}]
   noteItems: [],   // [{midi, label, beats, start}]
   midiItems: [],   // [{midi, label, beats, start}]
+
+  rollTool: 'none',
   playing: false,
   pendingIdx: 0,
   pendingTime: 0,
@@ -2711,6 +2713,27 @@ function seqAnimatePlayhead() {
     }
   }
   document.querySelectorAll('.seq-playhead').forEach(ph => { ph.style.left = px + 'px'; });
+  // Keep roll-mode playhead pinned to visible viewport (absolute child scrolls with content)
+  {
+    const mLane = document.getElementById('seq-midi-lane');
+    if (mLane) {
+      const mPh = mLane.querySelector('.seq-playhead');
+      if (mPh) {
+        const st = mLane.scrollTop;
+        mPh.style.top = (st - 7) + 'px';
+        mPh.style.bottom = 'auto';
+        mPh.style.height = (mLane.clientHeight + 14) + 'px';
+      }
+      // Highlight rows for notes active at current beat
+      const beat = SEQ.animBeat;
+      const activeMidi = new Set(
+        SEQ.midiItems.filter(it => beat >= it.start && beat < it.start + it.beats).map(it => it.midi)
+      );
+      mLane.querySelectorAll('.roll-row').forEach(row => {
+        row.classList.toggle('roll-row-active', activeMidi.has(+row.dataset.midi));
+      });
+    }
+  }
   SEQ.rafId = requestAnimationFrame(seqAnimatePlayhead);
 }
 
@@ -2810,7 +2833,7 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
 
   const del = document.createElement('span');
   del.className = 'seq-delete';
-  del.textContent = '×';
+  del.innerHTML = '<i data-lucide="x"></i>';
   del.addEventListener('mousedown', (e) => { e.stopPropagation(); e.preventDefault(); });
   del.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -2833,7 +2856,7 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
 
   const resize = document.createElement('div');
   resize.className = 'seq-resize';
-  resize.textContent = '⋮';
+  resize.innerHTML = '<i data-lucide="grip-vertical"></i>';
   resize.addEventListener('pointerdown', (e) => {
     e.stopPropagation(); e.preventDefault();
     resize.setPointerCapture(e.pointerId);
@@ -2939,6 +2962,19 @@ function seqUpdateHints() {
   document.querySelectorAll('.seq-drop-hint').forEach(h => { h.style.left = center + 'px'; });
 }
 
+function refreshLucide() {
+  if (window.lucide) lucide.createIcons();
+}
+
+
+function syncTrackLabelHeights() {
+  [['chords', 'seq-lane'], ['melody', 'seq-note-lane'], ['free', 'seq-midi-lane']].forEach(([track, laneId]) => {
+    const label = document.querySelector(`.seq-track-label[data-track="${track}"]`);
+    const lane  = document.getElementById(laneId);
+    if (label && lane) label.style.height = lane.getBoundingClientRect().height + 'px';
+  });
+}
+
 function seqRender() {
   const lane = document.getElementById('seq-lane');
   if (!lane) return;
@@ -2981,6 +3017,8 @@ function seqRender() {
   initSeqLoopEnd();
   initSeqLoopStart();
   seqUpdateLoopVisible();
+  syncTrackLabelHeights();
+  refreshLucide();
   seqSave();
 }
 
@@ -2999,19 +3037,10 @@ function seqRenderNotes() {
     lane.style.minWidth = seqLaneWidth(SEQ.noteItems) + 'px';
     SEQ.noteItems.forEach((item, idx) => lane.appendChild(seqMakeBlock(item, idx, true)));
   }
-  const sl = document.createElement('div');
-  sl.className = 'seq-loop-start-line';
-  sl.style.left = (SEQ.loopStart * BEAT_PX) + 'px';
-  lane.appendChild(sl);
-  const ll = document.createElement('div');
-  ll.className = 'seq-loop-line';
-  ll.style.left = (SEQ.loopEnd * BEAT_PX) + 'px';
-  lane.appendChild(ll);
-  const ph = document.createElement('div');
-  ph.className = 'seq-playhead';
-  ph.style.display = SEQ.playing ? 'block' : 'none';
-  lane.appendChild(ph);
+  seqRollAddLines(lane);
   seqUpdateLoopEnd();
+  syncTrackLabelHeights();
+  refreshLucide();
   seqSave();
 }
 
@@ -3029,21 +3058,43 @@ function seqHighlightNote(idx) {
   });
 }
 
-function seqRenderMidi() {
-  const lane = document.getElementById('seq-midi-lane');
-  if (!lane) return;
-  lane.innerHTML = '';
-  if (SEQ.midiItems.length === 0) {
-    const hint = document.createElement('div');
-    hint.className = 'seq-drop-hint';
-    hint.textContent = 'record via MIDI in';
-    lane.appendChild(hint);
-    lane.style.minWidth = '';
-    seqUpdateHints();
-  } else {
-    lane.style.minWidth = seqLaneWidth(SEQ.midiItems) + 'px';
-    SEQ.midiItems.forEach((item, idx) => lane.appendChild(seqMakeBlock(item, idx, false, true)));
+const ROLL_ROW_H    = 8;
+const ROLL_TOP_MIDI = 96;   // C7
+const ROLL_BOT_MIDI = 24;   // C1
+const ROLL_H        = (ROLL_TOP_MIDI - ROLL_BOT_MIDI + 1) * ROLL_ROW_H;  // 584px
+const ROLL_VIEW_H   = 160;  // must match CSS max-height
+
+function rollScrollForMidi(midi) {
+  return Math.max(0, (ROLL_TOP_MIDI - midi) * ROLL_ROW_H - ROLL_VIEW_H / 2);
+}
+
+function rollBuildGrid(lane) {
+  lane.style.padding = '0';
+  // Normal-flow spacer gives the lane real scrollHeight so scrollTop works
+  const spacer = document.createElement('div');
+  spacer.style.cssText = `height:${ROLL_H}px;width:0;pointer-events:none;flex-shrink:0;`;
+  lane.appendChild(spacer);
+  for (let m = ROLL_TOP_MIDI; m >= ROLL_BOT_MIDI; m--) {
+    const row = document.createElement('div');
+    row.className = 'roll-row' + (midiIsBlack(m) ? ' roll-row-black' : '');
+    row.dataset.midi = m;
+    row.style.top    = (ROLL_TOP_MIDI - m) * ROLL_ROW_H + 'px';
+    row.style.height = ROLL_ROW_H + 'px';
+    if (m % 12 === 0) {
+      const lbl = document.createElement('span');
+      lbl.className = 'roll-c-label';
+      lbl.textContent = 'C' + (Math.floor(m / 12) - 1);
+      row.appendChild(lbl);
+    }
+    lane.appendChild(row);
   }
+}
+
+function midiIsBlack(midi) {
+  return [1, 3, 6, 8, 10].includes(midi % 12);
+}
+
+function seqRollAddLines(lane) {
   const sl = document.createElement('div');
   sl.className = 'seq-loop-start-line';
   sl.style.left = (SEQ.loopStart * BEAT_PX) + 'px';
@@ -3056,13 +3107,138 @@ function seqRenderMidi() {
   ph.className = 'seq-playhead';
   ph.style.display = SEQ.playing ? 'block' : 'none';
   lane.appendChild(ph);
+}
+
+
+// cfg: { items, pendingIdxKey, onRerender, activeIdx, noteClass, yDrag }
+function seqMakeRollNote(item, idx, topMidi, botMidi, cfg) {
+  const block = document.createElement('div');
+  block.className = 'roll-note' + (cfg.noteClass ? ' ' + cfg.noteClass : '') + (idx === cfg.activeIdx ? ' active' : '');
+  block.style.left   = (item.start * BEAT_PX) + 'px';
+  block.style.top    = (topMidi - item.midi) * ROLL_ROW_H + 'px';
+  block.style.width  = Math.max(ROLL_ROW_H, item.beats * BEAT_PX) + 'px';
+  block.style.height = (ROLL_ROW_H - 1) + 'px';
+
+  if (item.beats * BEAT_PX > 20) {
+    const lbl = document.createElement('span');
+    lbl.className = 'roll-note-label';
+    lbl.textContent = item.label;
+    block.appendChild(lbl);
+  }
+
+  // Delete
+  const del = document.createElement('span');
+  del.className = 'roll-note-del';
+  del.innerHTML = '<i data-lucide="x"></i>';
+  del.addEventListener('mousedown', e => { e.stopPropagation(); e.preventDefault(); });
+  del.addEventListener('click', e => {
+    e.stopPropagation();
+    cfg.items.splice(idx, 1);
+    if (SEQ[cfg.pendingIdxKey] >= cfg.items.length) SEQ[cfg.pendingIdxKey] = 0;
+    cfg.onRerender();
+  });
+  block.appendChild(del);
+
+  // Resize
+  const resize = document.createElement('div');
+  resize.className = 'roll-note-resize';
+  resize.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    resize.setPointerCapture(e.pointerId);
+    const startX = e.clientX, startBts = item.beats;
+    const onMove = ev => {
+      item.beats = Math.max(0.125, startBts + (ev.clientX - startX) / BEAT_PX);
+      block.style.width = Math.max(ROLL_ROW_H, item.beats * BEAT_PX) + 'px';
+      seqAutoExtendLoop(item.start + item.beats);
+    };
+    const onUp = () => {
+      resize.removeEventListener('pointermove', onMove);
+      resize.removeEventListener('pointerup', onUp);
+      seqSave();
+    };
+    resize.addEventListener('pointermove', onMove);
+    resize.addEventListener('pointerup', onUp);
+  });
+  block.appendChild(resize);
+
+  // Drag (X = time, Y = pitch if cfg.yDrag)
+  block.addEventListener('pointerdown', e => {
+    if (e.target.closest('.roll-note-resize') || e.target.closest('.roll-note-del')) return;
+    // Eraser tool: delete on click
+    if (SEQ.rollTool === 'erase') {
+      e.preventDefault();
+      cfg.items.splice(idx, 1);
+      if (SEQ[cfg.pendingIdxKey] >= cfg.items.length) SEQ[cfg.pendingIdxKey] = 0;
+      cfg.onRerender();
+      return;
+    }
+    e.preventDefault();
+    block.setPointerCapture(e.pointerId);
+    const startX = e.clientX, startY = e.clientY;
+    const startBeat = item.start, startMidi = item.midi;
+    let moved = false;
+    const onMove = ev => {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+      moved = true;
+      block.classList.add('moving');
+      item.start = Math.max(0, startBeat + dx / BEAT_PX);
+      if (cfg.yDrag) {
+        const newMidi = Math.max(botMidi, Math.min(topMidi, startMidi - Math.round(dy / ROLL_ROW_H)));
+        if (newMidi !== item.midi) { item.midi = newMidi; item.label = midiNoteLabel(newMidi); }
+        block.style.top = (topMidi - item.midi) * ROLL_ROW_H + 'px';
+      }
+      block.style.left = (item.start * BEAT_PX) + 'px';
+    };
+    const onUp = () => {
+      block.removeEventListener('pointermove', onMove);
+      block.removeEventListener('pointerup', onUp);
+      block.classList.remove('moving');
+      if (moved) {
+        cfg.items.sort((a, b) => a.start - b.start);
+        seqAutoExtendLoop(item.start + item.beats);
+        cfg.onRerender();
+      }
+    };
+    block.addEventListener('pointermove', onMove);
+    block.addEventListener('pointerup', onUp);
+  });
+
+  return block;
+}
+
+function seqRenderMidi() {
+  const lane = document.getElementById('seq-midi-lane');
+  if (!lane) return;
+  const savedScroll = lane.scrollTop;
+  lane.innerHTML = '';
+  lane.style.padding = '';
+  lane.classList.add('roll-mode');
+
+  lane.style.minWidth = SEQ.midiItems.length > 0 ? seqLaneWidth(SEQ.midiItems) + 'px' : '';
+  rollBuildGrid(lane);
+  if (SEQ.midiItems.length === 0) {
+    const hint = document.createElement('div');
+    hint.className = 'seq-drop-hint';
+    hint.textContent = 'record via MIDI in';
+    lane.appendChild(hint);
+    seqUpdateHints();
+  } else {
+    const midiCfg = { items: SEQ.midiItems, pendingIdxKey: 'midiPendingIdx', onRerender: seqRenderMidi, activeIdx: SEQ.midiActiveIdx, yDrag: true };
+    SEQ.midiItems.forEach((item, idx) => lane.appendChild(seqMakeRollNote(item, idx, ROLL_TOP_MIDI, ROLL_BOT_MIDI, midiCfg)));
+  }
+  const ctr = SEQ.midiItems.length > 0 ? Math.round(SEQ.midiItems.reduce((s, i) => s + i.midi, 0) / SEQ.midiItems.length) : 66;
+  lane.scrollTop = savedScroll || rollScrollForMidi(ctr);
+  seqRollAddLines(lane);
   seqUpdateLoopEnd();
+  syncTrackLabelHeights();
+  refreshLucide();
   seqSave();
 }
 
 function seqHighlightMidi(idx) {
   SEQ.midiActiveIdx = idx;
-  document.querySelectorAll('#seq-midi-lane .seq-block').forEach((b, i) => {
+  document.querySelectorAll('#seq-midi-lane .roll-note').forEach((b, i) => {
     b.classList.toggle('active', i === idx);
   });
 }
@@ -3081,7 +3257,8 @@ function seqTick() {
     const dur  = item.beats * bd;
     const onDelay = Math.max(0, (t - now) * 1000);
 
-    const notes    = chordToMidiNotes(item.keyRoot, state.octave, item.interval, item.q);
+    const shift    = item.semitoneShift || 0;
+    const notes    = chordToMidiNotes(item.keyRoot, state.octave, item.interval, item.q).map(n => Math.max(0, Math.min(127, n + shift)));
     const bassInt  = item.bassInterval !== undefined ? item.bassInterval : item.interval;
     const bassNote = state.bassEnabled ? (state.bassOctave + 1) * 12 + (item.keyRoot + bassInt) % 12 : null;
     const offDelay = Math.max(0, (t + dur * 0.95 - now) * 1000);
@@ -3332,7 +3509,7 @@ function seqInitPlay(t0) {
   if (SEQ.rafId) cancelAnimationFrame(SEQ.rafId);
   SEQ.rafId = requestAnimationFrame(seqAnimatePlayhead);
   document.getElementById('seq-play-btn').classList.add('active');
-  document.getElementById('seq-play-btn').innerHTML = '&#9632; Stop';
+  document.getElementById('seq-play-btn').innerHTML = '<i data-lucide="square"></i> Stop'; refreshLucide();
 }
 
 function startPrecount(onDone) {
@@ -3367,7 +3544,7 @@ function startPrecount(onDone) {
 
   // mark play btn immediately so Stop works during precount
   document.getElementById('seq-play-btn').classList.add('active');
-  document.getElementById('seq-play-btn').innerHTML = '&#9632; Stop';
+  document.getElementById('seq-play-btn').innerHTML = '<i data-lucide="square"></i> Stop'; refreshLucide();
   SEQ.playing = true;
 }
 
@@ -3401,6 +3578,7 @@ function seqStop() {
   panic();
   if (SEQ.rafId) { cancelAnimationFrame(SEQ.rafId); SEQ.rafId = null; }
   document.querySelectorAll('.seq-playhead').forEach(ph => ph.style.display = 'none');
+  document.querySelectorAll('.roll-row-active').forEach(r => r.classList.remove('roll-row-active'));
   const _cL = document.getElementById('seq-lane');
   const _nL = document.getElementById('seq-note-lane');
   const _mL = document.getElementById('seq-midi-lane');
@@ -3418,7 +3596,7 @@ function seqStop() {
   SEQ.noteActiveIdx = -1;
   document.getElementById('now-playing-notes').textContent = '—';
   const btn = document.getElementById('seq-play-btn');
-  if (btn) { btn.classList.remove('active'); btn.innerHTML = '&#9654; Play'; }
+  if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i data-lucide="play"></i> Play'; refreshLucide(); }
 }
 
 function seqIsOpen() {
@@ -3533,28 +3711,48 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
       if (!lane) return;
       const rect = lane.getBoundingClientRect();
       if (dropX < rect.left || dropX > rect.right || dropY < rect.top || dropY > rect.bottom) return;
-      const dropBeat = Math.max(0, Math.floor(((dropX - rect.left) / BEAT_PX) * 2) / 2);
       const data = getData();
-      if (laneId === 'seq-midi-lane') {
-        SEQ.midiItems.push({ midi: data.midi, label: data.label, beats: 1, start: dropBeat });
+      const isChord = data.interval !== undefined;
+      // Find which lane was actually hit (allows cross-lane drops)
+      let hitLaneId = null, hitBeat = 0;
+      for (const lid of ['seq-lane', 'seq-note-lane', 'seq-midi-lane']) {
+        const laneEl = document.getElementById(lid);
+        if (!laneEl) continue;
+        const r = laneEl.getBoundingClientRect();
+        if (dropX >= r.left && dropX <= r.right && dropY >= r.top && dropY <= r.bottom) {
+          hitLaneId = lid;
+          hitBeat = Math.max(0, Math.floor(((dropX - r.left) / BEAT_PX) * 2) / 2);
+          break;
+        }
+      }
+      if (!hitLaneId) return;
+      if (hitLaneId === 'seq-midi-lane') {
+        if (isChord) {
+          const notes = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
+          notes.forEach(midi => SEQ.midiItems.push({ midi, label: midiNoteLabel(midi), beats: state.beatsPerBar, start: hitBeat }));
+        } else {
+          SEQ.midiItems.push({ midi: data.midi, label: data.label, beats: 1, start: hitBeat });
+        }
         SEQ.midiItems.sort((a, b) => a.start - b.start);
-        seqAutoExtendLoop(dropBeat + 1);
+        seqAutoExtendLoop(hitBeat + (isChord ? state.beatsPerBar : 1));
         seqRenderMidi();
         seqResyncMidi();
-      } else if (laneId === 'seq-note-lane') {
-        SEQ.noteItems.push({ midi: data.midi, label: data.label, beats: 1, start: dropBeat });
+      } else if (hitLaneId === 'seq-note-lane') {
+        if (isChord) return;
+        SEQ.noteItems.push({ midi: data.midi, label: data.label, beats: 1, start: hitBeat });
         SEQ.noteItems.sort((a, b) => a.start - b.start);
-        seqAutoExtendLoop(dropBeat + 1);
+        seqAutoExtendLoop(hitBeat + 1);
         seqRenderNotes();
         seqResyncNotes();
       } else {
+        if (!isChord) return;
         SEQ.items.push({
           interval: data.interval, q: data.q, bassInterval: data.bassInterval, label: data.label,
-          beats: state.beatsPerBar, start: dropBeat,
+          beats: state.beatsPerBar, start: hitBeat,
           keyRoot: state.keys[state.currentTemplate], template: state.currentTemplate,
         });
         SEQ.items.sort((a, b) => a.start - b.start);
-        seqAutoExtendLoop(dropBeat + state.beatsPerBar);
+        seqAutoExtendLoop(hitBeat + state.beatsPerBar);
         seqRender();
         seqResyncChords();
       }
@@ -3636,45 +3834,50 @@ function initSeqLanePan() {
 
   wrap.addEventListener('scroll', seqUpdateHints);
 
-  function startPan(startX) {
-    let prevX   = startX;
+  const EXCLUDE = '.seq-block, .seq-loop-start, .seq-loop-end, .seq-resize, .seq-delete, .roll-note, .roll-chord-group, .roll-note-del, .roll-note-resize, .seq-roll-toggle-btn';
+
+  function startPan(startX, startY, laneEl) {
+    let prevX = startX, prevY = startY;
     let panning = false;
 
     const extendLanes = () => {
       const needed = wrap.scrollLeft + wrap.clientWidth + BEAT_PX * 8;
-      ['seq-lane', 'seq-note-lane'].forEach(id => {
+      ['seq-lane', 'seq-note-lane', 'seq-midi-lane'].forEach(id => {
         const lane = document.getElementById(id);
-        if (lane && needed > lane.scrollWidth) lane.style.minWidth = needed + 'px';
+        if (lane && needed > (parseFloat(lane.style.minWidth) || 0)) lane.style.minWidth = needed + 'px';
       });
     };
 
-    return { prevX: () => prevX, panning: () => panning, move(clientX, prevent) {
-      const dx = prevX - clientX;
-      if (!panning && Math.abs(dx) < 5) return;
-      panning = true;
-      if (prevent) prevent();
-      wrap.scrollLeft += dx;
-      prevX = clientX;
-      extendLanes();
-    }};
+    return {
+      panning: () => panning,
+      move(clientX, clientY, prevent) {
+        const dx = prevX - clientX, dy = prevY - clientY;
+        if (!panning && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+        panning = true;
+        if (prevent) prevent();
+        wrap.scrollLeft += dx;
+        if (laneEl) laneEl.scrollTop += dy;
+        prevX = clientX;
+        prevY = clientY;
+        extendLanes();
+      }
+    };
   }
 
   wrap.addEventListener('touchstart', (e) => {
     const target = e.target;
-    if (target.closest('.seq-block, .seq-loop-start, .seq-loop-end, .seq-resize, .seq-delete')) return;
-
-    const inChord = !!target.closest('#seq-lane');
-    const inNote  = !!target.closest('#seq-note-lane');
-    if (!inChord && !inNote) return;
+    if (target.closest(EXCLUDE)) return;
+    const laneEl = target.closest('#seq-lane, #seq-note-lane, #seq-midi-lane');
+    if (!laneEl) return;
 
     const touch = e.changedTouches[0];
     const tid   = touch.identifier;
-    const pan   = startPan(touch.clientX);
+    const pan   = startPan(touch.clientX, touch.clientY, laneEl);
 
     const onMove = (ev) => {
       const t = Array.from(ev.changedTouches).find(t => t.identifier === tid);
       if (!t) return;
-      pan.move(t.clientX, () => ev.preventDefault());
+      pan.move(t.clientX, t.clientY, () => ev.preventDefault());
     };
     const onUp = () => {
       document.removeEventListener('touchmove', onMove);
@@ -3689,16 +3892,50 @@ function initSeqLanePan() {
   wrap.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     const target = e.target;
-    if (target.closest('.seq-block, .seq-loop-start, .seq-loop-end, .seq-resize, .seq-delete')) return;
+    if (target.closest(EXCLUDE)) return;
+    const laneEl = target.closest('#seq-lane, #seq-note-lane, #seq-midi-lane');
+    if (!laneEl) return;
 
-    const inChord = !!target.closest('#seq-lane');
-    const inNote  = !!target.closest('#seq-note-lane');
-    if (!inChord && !inNote) return;
+    // Pen tool: draw note on roll background — drag sets duration
+    if (SEQ.rollTool === 'pen' && laneEl.id === 'seq-midi-lane') {
+      const laneRect = laneEl.getBoundingClientRect();
+      const relX = e.clientX - laneRect.left + wrap.scrollLeft;
+      const relY = e.clientY - laneRect.top + laneEl.scrollTop;
+      const startBeat = Math.floor(relX / BEAT_PX * 4) / 4;
+      const midi = Math.max(ROLL_BOT_MIDI, Math.min(ROLL_TOP_MIDI, ROLL_TOP_MIDI - Math.floor(relY / ROLL_ROW_H)));
+      // Ghost element for live preview
+      const ghost = document.createElement('div');
+      ghost.className = 'roll-note roll-note-ghost';
+      ghost.style.left   = (startBeat * BEAT_PX) + 'px';
+      ghost.style.top    = (ROLL_TOP_MIDI - midi) * ROLL_ROW_H + 'px';
+      ghost.style.height = (ROLL_ROW_H - 1) + 'px';
+      ghost.style.width  = BEAT_PX + 'px';
+      laneEl.appendChild(ghost);
+      let beats = 1;
+      const onMove = (ev) => {
+        const rx = ev.clientX - laneRect.left + wrap.scrollLeft;
+        beats = Math.max(0.25, Math.round(Math.max(rx - startBeat * BEAT_PX, BEAT_PX * 0.25) / BEAT_PX * 4) / 4);
+        ghost.style.width = (beats * BEAT_PX) + 'px';
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        ghost.remove();
+        SEQ.midiItems.push({ midi, label: midiNoteLabel(midi), beats, start: startBeat });
+        SEQ.midiItems.sort((a, b) => a.start - b.start);
+        seqAutoExtendLoop(startBeat + beats);
+        seqRenderMidi();
+        seqResyncMidi();
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      return;
+    }
 
-    const pan = startPan(e.clientX);
+    const pan = startPan(e.clientX, e.clientY, laneEl);
 
     const onMove = (ev) => {
-      pan.move(ev.clientX, null);
+      pan.move(ev.clientX, ev.clientY, null);
       if (pan.panning()) wrap.style.cursor = 'grabbing';
     };
     const onUp = () => {
@@ -3717,14 +3954,17 @@ function initSeqMidiLane() {
   if (!lane) return;
   const _hint = () => lane.querySelector('.seq-drop-hint');
   lane.addEventListener('dragover', (e) => {
-    if (!e.dataTransfer.types.includes('application/x-note')) return;
+    const hasNote  = e.dataTransfer.types.includes('application/x-note');
+    const hasChord = e.dataTransfer.types.includes('application/x-chord');
+    if (!hasNote && !hasChord) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     lane.classList.add('drag-over');
     _hint()?.style.setProperty('color', 'var(--accent)');
-    const rect = lane.getBoundingClientRect();
-    const beat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
-    seqSetGhost(lane, beat, 1);
+    const rect  = lane.getBoundingClientRect();
+    const beat  = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
+    const beats = hasChord ? state.beatsPerBar : 1;
+    seqSetGhost(lane, beat, beats);
   });
   lane.addEventListener('dragleave', (e) => {
     if (!lane.contains(e.relatedTarget)) { lane.classList.remove('drag-over'); seqClearGhost(lane); }
@@ -3735,11 +3975,22 @@ function initSeqMidiLane() {
     _hint()?.style.removeProperty('color');
     seqClearGhost(lane);
     if (SEQ.midiDragSrcIdx !== null) return;
+    const rect = lane.getBoundingClientRect();
+    const dropBeat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
+    const rawChord = e.dataTransfer.getData('application/x-chord');
+    if (rawChord) {
+      const data  = JSON.parse(rawChord);
+      const notes = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
+      notes.forEach(midi => SEQ.midiItems.push({ midi, label: midiNoteLabel(midi), beats: state.beatsPerBar, start: dropBeat }));
+      SEQ.midiItems.sort((a, b) => a.start - b.start);
+      seqAutoExtendLoop(dropBeat + state.beatsPerBar);
+      seqRenderMidi();
+      seqResyncMidi();
+      return;
+    }
     const raw = e.dataTransfer.getData('application/x-note');
     if (!raw) return;
     const data  = JSON.parse(raw);
-    const rect  = lane.getBoundingClientRect();
-    const dropBeat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
     SEQ.midiItems.push({ midi: data.midi, label: data.label, beats: 1, start: dropBeat });
     SEQ.midiItems.sort((a, b) => a.start - b.start);
     seqAutoExtendLoop(dropBeat + 1);
@@ -4379,7 +4630,14 @@ document.getElementById('seq-header').addEventListener('click', () => {
   document.getElementById('seq-panel').classList.toggle('collapsed');
   const open = seqIsOpen();
   document.querySelectorAll('.pad, .pad-ext').forEach(el => { el.draggable = open; });
-  if (open) requestAnimationFrame(seqUpdateHints);
+  if (open) requestAnimationFrame(() => {
+    seqUpdateHints();
+    const mLane = document.getElementById('seq-midi-lane');
+    if (mLane && mLane.scrollTop === 0) {
+      const ctr = SEQ.midiItems.length > 0 ? Math.round(SEQ.midiItems.reduce((s, i) => s + i.midi, 0) / SEQ.midiItems.length) : 66;
+      mLane.scrollTop = rollScrollForMidi(ctr);
+    }
+  });
 });
 
 document.getElementById('seq-play-btn').addEventListener('click', () => {
@@ -4503,7 +4761,36 @@ document.getElementById('seq-loop-btn').classList.toggle('active', SEQ.loop);
 seqRender();
 seqRenderNotes();
 seqRenderMidi();
+syncTrackLabelHeights();
+refreshLucide();
 requestAnimationFrame(seqUpdateHints);
+
+const TRACK_LANE_MAP = { chords: 'seq-lane', melody: 'seq-note-lane', free: 'seq-midi-lane' };
+
+document.querySelectorAll('.seq-track-label[data-track]').forEach(label => {
+  label.addEventListener('click', () => {
+    const track = label.dataset.track;
+    const isNowCollapsed = label.classList.toggle('track-collapsed');
+    const lane = document.getElementById(TRACK_LANE_MAP[track]);
+    if (lane) lane.classList.toggle('track-collapsed', isNowCollapsed);
+    syncTrackLabelHeights();
+  });
+});
+
+function setRollTool(tool) {
+  SEQ.rollTool = tool;
+  document.getElementById('seq-tool-pen').classList.toggle('active', tool === 'pen');
+  document.getElementById('seq-tool-erase').classList.toggle('active', tool === 'erase');
+  document.body.classList.toggle('roll-tool-pen',   tool === 'pen');
+  document.body.classList.toggle('roll-tool-erase', tool === 'erase');
+}
+document.getElementById('seq-tool-pen').addEventListener('click', () => {
+  setRollTool(SEQ.rollTool === 'pen' ? 'none' : 'pen');
+});
+document.getElementById('seq-tool-erase').addEventListener('click', () => {
+  setRollTool(SEQ.rollTool === 'erase' ? 'none' : 'erase');
+});
+setRollTool('none');
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
