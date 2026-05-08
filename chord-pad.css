@@ -1190,7 +1190,7 @@ input[type="range"]::-moz-range-thumb {
 .seq-rec-beat:empty { display: none; }
 
 .seq-timesig {
-  background: var(--bg);
+  background: none;
   border: 1px solid rgba(255,255,255,0.25);
   border-radius: 4px;
   color: var(--text-dim);
@@ -1407,10 +1407,68 @@ input[type="range"]::-moz-range-thumb {
   color: var(--accent) !important;
   background: rgba(255,170,51,0.12) !important;
 }
+.seq-snap-val-btn {
+  font-size: 10px !important;
+  min-width: 28px;
+  padding: 0 4px !important;
+}
 
 /* Active note row highlight in piano roll */
 .roll-row-active { background: rgba(255,170,51,0.18) !important; }
 .roll-row-active.roll-row-black { background: rgba(255,170,51,0.11) !important; }
+
+/* Mini piano keyboard */
+.roll-keyboard {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 22px;
+  z-index: 7;
+  pointer-events: auto;
+  touch-action: none;
+  background: rgb(220,215,200);
+  border-right: 1px solid rgba(0,0,0,0.25);
+}
+.roll-key {
+  position: absolute;
+  left: 0;
+  box-sizing: border-box;
+}
+.roll-key-white {
+  width: 22px;
+  background: transparent;
+  border-bottom: 1px solid rgba(0,0,0,0.13);
+  border-radius: 0 2px 2px 0;
+}
+.roll-key-black {
+  width: 14px;
+  height: 8px;
+  background: #1d1a1a;
+  z-index: 1;
+  border-radius: 0 2px 2px 0;
+}
+.roll-key-white:hover { background: rgba(255,215,100,0.55); }
+.roll-key-black:hover { background: #3a302e; }
+.roll-key-label {
+  position: absolute;
+  bottom: 1px;
+  right: 2px;
+  font-size: 5px;
+  color: rgba(0,0,0,0.4);
+  pointer-events: none;
+  line-height: 1;
+}
+body.roll-keyboard-on .roll-c-label { left: 26px; }
+
+/* Overflow indicators */
+.roll-overflow-top, .roll-overflow-bot {
+  position: absolute;
+  height: 1px;
+  pointer-events: none;
+  z-index: 9;
+  border-radius: 1px;
+  background: rgb(67, 98, 132);
+}
 
 /* Pen ghost preview */
 .roll-note-ghost {
@@ -1455,41 +1513,66 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   padding-bottom: 4px;
 }
 .seq-track-label {
-  font-size: 8px;
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  transform: rotate(180deg);
+  color: var(--text-dim);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   flex-shrink: 0;
   min-height: 54px;
+  width: 16px;
+  padding-top: 4px;
   cursor: pointer;
   user-select: none;
   border-radius: 4px;
-  padding: 0 2px;
   transition: color 0.15s;
   box-sizing: border-box;
-  overflow: hidden;
 }
-.seq-track-label:hover { color: var(--text-dim); }
-.seq-track-label.track-collapsed { display: none; }
+.seq-track-label .lucide { width: 10px; height: 10px; flex-shrink: 0; }
+.seq-track-label:hover { color: var(--text); }
+.seq-track-label.track-collapsed { min-height: 16px; height: 16px !important; padding-top: 0; align-items: center; }
 .seq-lane.track-collapsed {
   min-height: 0 !important;
-  max-height: 0 !important;
-  overflow: hidden !important;
+  height: 16px !important;
+  max-height: 16px !important;
+  overflow: visible !important;
   padding: 0 !important;
-  border-color: transparent !important;
+  border-color: rgba(255,255,255,0.07) !important;
 }
+.seq-lane.track-collapsed .seq-block {
+  top: 2px !important;
+  bottom: 2px !important;
+  padding: 0 !important;
+  border-radius: 2px !important;
+  min-width: 3px !important;
+  pointer-events: none !important;
+  cursor: default !important;
+}
+.seq-lane.track-collapsed .seq-block.active {
+  background: rgba(255,170,51,0.5) !important;
+  border-color: var(--accent) !important;
+}
+.seq-lane.track-collapsed .seq-block-name,
+.seq-lane.track-collapsed .seq-delete,
+.seq-lane.track-collapsed .seq-resize,
+.seq-lane.track-collapsed .seq-block-ticks { display: none !important; }
 .seq-tracks-inner {
   display: inline-flex;
   flex-direction: column;
   gap: 6px;
   min-width: 100%;
 }
+.midi-lane-resize-handle {
+  height: 5px;
+  cursor: row-resize;
+  background: transparent;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  margin-top: -3px;
+  flex-shrink: 0;
+  min-width: 100%;
+  transition: border-color 0.15s;
+}
+.midi-lane-resize-handle:hover { border-color: rgba(255,255,255,0.25); }
+#seq-midi-lane.track-collapsed ~ .midi-lane-resize-handle { display: none; }
 
 
 .seq-lane {
@@ -1501,23 +1584,22 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   border: 1px dashed rgba(255,255,255,0.12);
   background-color: rgba(0,0,0,0.2);
   background-image:
-    repeating-linear-gradient(
-      to right,
-      transparent,
+    linear-gradient(to right,
       transparent calc(var(--bar-px) - 1px),
       rgba(255,255,255,0.15) calc(var(--bar-px) - 1px),
-      rgba(255,255,255,0.15) var(--bar-px)
+      rgba(255,255,255,0.15) var(--bar-px),
+      transparent var(--bar-px)
     ),
-    repeating-linear-gradient(
-      to right,
-      transparent,
+    linear-gradient(to right,
       transparent calc(var(--beat-px) - 1px),
       rgba(255,255,255,0.05) calc(var(--beat-px) - 1px),
-      rgba(255,255,255,0.05) var(--beat-px)
+      rgba(255,255,255,0.05) var(--beat-px),
+      transparent var(--beat-px)
     );
   background-size: var(--bar-px) 33%, var(--beat-px) 33%;
   background-position: 0 50%;
   background-repeat: repeat-x;
+  background-clip: padding-box;
   flex: none;
   min-width: 120px;
 }
@@ -1617,6 +1699,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 .seq-lane.roll-mode {
   background-size: var(--bar-px) 100%, var(--beat-px) 100%;
   background-position: 0 0;
+  background-clip: padding-box;
   cursor: default;
   min-height: 0;
   max-height: 160px;
@@ -1779,7 +1862,6 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   border-radius: 4px 4px 0 0;
   border-bottom: none;
   cursor: ew-resize;
-  transform: translateX(-11px);
   z-index: 20;
   user-select: none;
   touch-action: none;
@@ -1831,7 +1913,9 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 
 /* drag source from pad: highlight droppable lane */
 body.seq-dragging-chord #seq-lane,
-body.seq-dragging-note  #seq-note-lane { border-color: rgba(255,170,51,0.5); background: rgba(255,170,51,0.04); }
+body.seq-dragging-note  #seq-note-lane,
+body.seq-dragging-chord #seq-midi-lane,
+body.seq-dragging-note  #seq-midi-lane { border-color: rgba(255,170,51,0.5); background: rgba(255,170,51,0.04); }
 
 .seq-touch-drag-ghost {
   position: fixed;
