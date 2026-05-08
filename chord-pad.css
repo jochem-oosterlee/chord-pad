@@ -101,6 +101,7 @@ select {
   border-radius: 4px; min-width: 180px; cursor: pointer;
 }
 select:hover { border-color: var(--accent); }
+option { background: var(--bg); color: var(--text); }
 
 .led {
   width: 8px; height: 8px; border-radius: 50%;
@@ -633,10 +634,21 @@ select:hover { border-color: var(--accent); }
   grid-column: 1 / -1;
   padding-bottom: 4px;
 }
-.synth-instrument-row select,
+.synth-instrument-row select {
+  background: var(--bg);
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 10px;
+  padding: 0 6px;
+  cursor: pointer;
+  max-width: 200px;
+  height: 24px; box-sizing: border-box;
+}
 #output-select,
 #input-select {
-  background: none;
+  background: var(--bg);
   border: 1px solid rgba(255,255,255,0.25);
   border-radius: 4px;
   color: var(--text-dim);
@@ -649,7 +661,8 @@ select:hover { border-color: var(--accent); }
 }
 .synth-instrument-row select:hover,
 #output-select:hover,
-#input-select:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
+#input-select:hover,
+.synth-param select:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
 .synth-row-divider {
   grid-column: 1 / -1;
   border-top: 1px solid var(--panel-edge);
@@ -683,7 +696,7 @@ select:hover { border-color: var(--accent); }
   width: 100%; min-width: 0;
 }
 .synth-param select {
-  background: none;
+  background: var(--bg);
   border: 1px solid rgba(255,255,255,0.25);
   color: var(--text-dim); font-size: 10px; font-family: inherit;
   padding: 0 4px;
@@ -695,6 +708,15 @@ select:hover { border-color: var(--accent); }
   font-size: 9px; color: var(--text-dim);
   text-transform: uppercase; letter-spacing: 0.2em;
   text-align: center;
+}
+.latency-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: default;
+  height: 24px;
+  display: flex;
+  align-items: center;
 }
 .control-row { display: flex; align-items: center; gap: 16px; width: 100%; justify-content: center; }
 .btn {
@@ -1152,11 +1174,12 @@ input[type="range"]::-moz-range-thumb {
 .seq-timesig-tempo {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 8px;
 }
+.seq-rec-beat:empty { display: none; }
 
 .seq-timesig {
-  background: none;
+  background: var(--bg);
   border: 1px solid rgba(255,255,255,0.25);
   border-radius: 4px;
   color: var(--text-dim);
@@ -1497,6 +1520,29 @@ input[type="range"]::-moz-range-thumb {
   right: 1px;
 }
 .seq-note-block { padding: 2px; }
+.seq-midi-block {
+  padding: 2px 2px 2px 3px;
+  min-width: 0;
+  overflow: hidden;
+  justify-content: center;
+  background: rgba(51, 153, 255, 0.12);
+  border-color: rgba(51, 153, 255, 0.35);
+}
+.seq-midi-block .seq-block-name {
+  font-size: 8px;
+  white-space: nowrap;
+}
+.seq-midi-block .seq-delete {
+  width: 11px;
+  height: 11px;
+  font-size: 13px;
+  top: 1px;
+  right: 1px;
+}
+.seq-midi-block.active {
+  background: rgba(51, 153, 255, 0.3);
+  border-color: rgba(100, 180, 255, 0.8);
+}
 .seq-block-ticks {
   position: absolute;
   bottom: 4px;
