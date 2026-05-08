@@ -709,15 +709,6 @@ option { background: var(--bg); color: var(--text); }
   text-transform: uppercase; letter-spacing: 0.2em;
   text-align: center;
 }
-.latency-val {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--text-dim);
-  cursor: default;
-  height: 24px;
-  display: flex;
-  align-items: center;
-}
 .control-row { display: flex; align-items: center; gap: 16px; width: 100%; justify-content: center; }
 .btn {
   background: none;

@@ -360,7 +360,7 @@ const state = {
   sustain: false,
   audioEnabled: true,
   audioVolume: 0.70,
-  bufferSamples: 256,
+  pitchBendCents: 0,
   instrument: 'epiano',
   bassEnabled: true,
   showScaleTones: false,
@@ -478,7 +478,6 @@ function qualityToHTML(glyph) {
 let audioCtx = null;
 
 function _buildAudioCtx() {
-  setTimeout(updateLatencyDisplay, 100);
   // iOS: unlock audio stack before creating context
   if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
     const dummy = document.createElement('audio');
@@ -486,7 +485,7 @@ function _buildAudioCtx() {
     dummy.play().catch(() => {});
     dummy.pause();
   }
-  const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: state.bufferSamples / 48000 });
+  const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
   const comp = ctx.createDynamicsCompressor();
   comp.threshold.value = -6;
   comp.ratio.value = 4;
@@ -682,6 +681,7 @@ function startSampleNote(midiNote, velocity, at = null, autoRelease = null) {
     fLfo.connect(fg); fg.connect(lp.frequency); fLfo.start(t); oscs.push(fLfo);
   }
 
+  if (state.pitchBendCents) src.detune.value = state.pitchBendCents;
   src.start(t);
   const sampleNode = { oscs, env, startTime: t, peak };
   if (autoRelease !== null) {
@@ -895,6 +895,7 @@ function startBassNote(midiNote, at = null, autoRelease = null) {
   const g2 = ctx.createGain(); g2.gain.value = 0.12;
   osc2.connect(g2); g2.connect(env);
 
+  if (state.pitchBendCents) { osc.detune.value = state.pitchBendCents; osc2.detune.value = state.pitchBendCents; }
   osc.start(t); osc2.start(t);
   return { oscs: [osc, osc2], env, peak, startTime: t };
 }
@@ -937,6 +938,14 @@ function refreshOutputs() {
   select.value = prev ? prev.id : '';
 }
 
+function applyPitchBend(cents) {
+  state.pitchBendCents = cents;
+  const ctx = getAudioCtx();
+  kbActive.forEach(node => {
+    node?.oscs?.[0]?.detune?.setTargetAtTime(cents, ctx.currentTime, 0.003);
+  });
+}
+
 function onMidiMessage(e) {
   const [status, note, velocity] = e.data;
   const type = status & 0xF0;
@@ -945,6 +954,9 @@ function onMidiMessage(e) {
     kbNoteOn(note, false);
   } else if (type === 0x80 || (type === 0x90 && velocity === 0)) {
     kbNoteOff(note, false);
+  } else if (type === 0xE0) {
+    const bend = (velocity << 7) | note; // MSB | LSB
+    applyPitchBend(Math.round((bend - 8192) / 8192 * 200));
   }
 }
 
@@ -970,7 +982,7 @@ function refreshInputs() {
     opt.textContent = inp.name + (inp.manufacturer ? ' · ' + inp.manufacturer : '');
     select.appendChild(opt);
   });
-  const prev = inputs.find(i => i.id === previousId);
+  const prev = inputs.find(i => i.id === previousId) || (inputs.length === 1 ? inputs[0] : null);
   state.inputPort = prev || null;
   select.value = prev ? prev.id : '';
   attachMidiInput();
@@ -2188,46 +2200,6 @@ audioToggleBtn.addEventListener('click', () => {
   audioToggleBtn.classList.toggle('active', state.audioEnabled);
 });
 
-const BUF_SIZES = [64, 128, 256, 512, 1024];
-
-function rebuildAudioCtx() {
-  if (SEQ.playing) seqStop();
-  panic();
-  if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
-  updateLatencyDisplay();
-}
-
-function applyBufChange(samples) {
-  state.bufferSamples = samples;
-  document.getElementById('ctrl-buf').textContent = samples;
-  rebuildAudioCtx();
-  // Trigger a rebuild so latency display updates after first interaction
-  setTimeout(updateLatencyDisplay, 300);
-}
-
-document.getElementById('buf-down').addEventListener('click', () => {
-  const idx = BUF_SIZES.indexOf(state.bufferSamples);
-  if (idx > 0) applyBufChange(BUF_SIZES[idx - 1]);
-});
-document.getElementById('buf-up').addEventListener('click', () => {
-  const idx = BUF_SIZES.indexOf(state.bufferSamples);
-  if (idx < BUF_SIZES.length - 1) applyBufChange(BUF_SIZES[idx + 1]);
-});
-
-function updateLatencyDisplay() {
-  const el = document.getElementById('latency-val');
-  if (!el) return;
-  if (!audioCtx || audioCtx.state === 'closed') { el.textContent = '—'; return; }
-  const base = audioCtx.baseLatency ?? 0;
-  const out  = audioCtx.outputLatency ?? 0;
-  const total = Math.round((base + out) * 1000);
-  const baseMs = Math.round(base * 1000);
-  const outMs  = Math.round(out * 1000);
-  el.textContent = `${total}ms`;
-  el.title = `base ${baseMs}ms + output ${outMs}ms`;
-}
-setInterval(updateLatencyDisplay, 1000);
-document.getElementById('settings-header').addEventListener('click', updateLatencyDisplay);
 
 const scaleTonesToggleBtn = document.getElementById('scale-tones-toggle');
 scaleTonesToggleBtn.addEventListener('click', () => {
