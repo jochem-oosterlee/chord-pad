@@ -1622,6 +1622,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   max-height: 160px;
   overflow-y: scroll;
   scrollbar-width: none;
+  touch-action: none;
 }
 .seq-lane.roll-mode::-webkit-scrollbar { display: none; }
 .roll-row {

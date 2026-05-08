@@ -3872,8 +3872,49 @@ function initSeqLanePan() {
 
     const touch = e.changedTouches[0];
     const tid   = touch.identifier;
-    const pan   = startPan(touch.clientX, touch.clientY, laneEl);
 
+    // Pen tool: draw note on roll
+    if (SEQ.rollTool === 'pen' && laneEl.id === 'seq-midi-lane') {
+      e.preventDefault();
+      const laneRect  = laneEl.getBoundingClientRect();
+      const relX      = touch.clientX - laneRect.left + wrap.scrollLeft;
+      const relY      = touch.clientY - laneRect.top  + laneEl.scrollTop;
+      const startBeat = Math.floor(relX / BEAT_PX * 4) / 4;
+      const midi      = Math.max(ROLL_BOT_MIDI, Math.min(ROLL_TOP_MIDI, ROLL_TOP_MIDI - Math.floor(relY / ROLL_ROW_H)));
+      const ghost     = document.createElement('div');
+      ghost.className = 'roll-note roll-note-ghost';
+      ghost.style.left   = (startBeat * BEAT_PX) + 'px';
+      ghost.style.top    = (ROLL_TOP_MIDI - midi) * ROLL_ROW_H + 'px';
+      ghost.style.height = (ROLL_ROW_H - 1) + 'px';
+      ghost.style.width  = BEAT_PX + 'px';
+      laneEl.appendChild(ghost);
+      let beats = 1;
+      const onMove = (ev) => {
+        const t = Array.from(ev.changedTouches).find(t => t.identifier === tid);
+        if (!t) return;
+        ev.preventDefault();
+        const rx = t.clientX - laneRect.left + wrap.scrollLeft;
+        beats = Math.max(0.25, Math.round(Math.max(rx - startBeat * BEAT_PX, BEAT_PX * 0.25) / BEAT_PX * 4) / 4);
+        ghost.style.width = (beats * BEAT_PX) + 'px';
+      };
+      const onUp = () => {
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('touchend',  onUp);
+        document.removeEventListener('touchcancel', onUp);
+        ghost.remove();
+        SEQ.midiItems.push({ midi, label: midiNoteLabel(midi), beats, start: startBeat });
+        SEQ.midiItems.sort((a, b) => a.start - b.start);
+        seqAutoExtendLoop(startBeat + beats);
+        seqRenderMidi();
+        seqResyncMidi();
+      };
+      document.addEventListener('touchmove',   onMove, { passive: false });
+      document.addEventListener('touchend',    onUp);
+      document.addEventListener('touchcancel', onUp);
+      return;
+    }
+
+    const pan = startPan(touch.clientX, touch.clientY, laneEl);
     const onMove = (ev) => {
       const t = Array.from(ev.changedTouches).find(t => t.identifier === tid);
       if (!t) return;
