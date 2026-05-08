@@ -3802,11 +3802,13 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
       document.removeEventListener('touchcancel', onUp);
       stopScroll();
       if (ghost) { ghost.remove(); ghost = null; }
-      const lane = document.getElementById(laneId);
-      if (lane) {
-        lane.classList.remove('drag-over');
-        lane.querySelector('.seq-drop-hint')?.style.removeProperty('color');
-        seqClearGhost(lane);
+      document.body.classList.remove('seq-dragging-chord', 'seq-dragging-note');
+      for (const lid of ['seq-lane', 'seq-note-lane', 'seq-midi-lane']) {
+        const l = document.getElementById(lid);
+        if (!l) continue;
+        l.classList.remove('drag-over');
+        l.querySelector('.seq-drop-hint')?.style.removeProperty('color');
+        seqClearGhost(l);
       }
     };
 
@@ -3825,26 +3827,25 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
         ghost.className = 'seq-touch-drag-ghost';
         ghost.innerHTML = data.label;
         document.body.appendChild(ghost);
+        const isChordData = data.interval !== undefined;
+        document.body.classList.add(isChordData ? 'seq-dragging-chord' : 'seq-dragging-note');
         const lane = document.getElementById(laneId);
-        if (lane) {
-          lane.classList.add('drag-over');
-          lane.querySelector('.seq-drop-hint')?.style.setProperty('color', 'var(--accent)');
-        }
+        if (lane) lane.querySelector('.seq-drop-hint')?.style.setProperty('color', 'var(--accent)');
         autoScroll();
       }
       ev.preventDefault();
       ghost.style.left = t.clientX + 'px';
       ghost.style.top  = t.clientY + 'px';
-      const lane = document.getElementById(laneId);
-      if (lane) {
-        const rect = lane.getBoundingClientRect();
-        if (t.clientX >= rect.left && t.clientX <= rect.right &&
-            t.clientY >= rect.top  && t.clientY <= rect.bottom) {
-          const beat = Math.max(0, Math.floor(((t.clientX - rect.left) / BEAT_PX) * 2) / 2);
-          const beats = laneId === 'seq-note-lane' ? 1 : state.beatsPerBar;
-          seqSetGhost(lane, beat, beats);
+      for (const lid of ['seq-lane', 'seq-note-lane', 'seq-midi-lane']) {
+        const l = document.getElementById(lid);
+        if (!l) continue;
+        const r = l.getBoundingClientRect();
+        if (t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom) {
+          const beat = Math.max(0, Math.floor(((t.clientX - r.left) / BEAT_PX) * 2) / 2);
+          const beats = lid === 'seq-note-lane' ? 1 : state.beatsPerBar;
+          seqSetGhost(l, beat, beats);
         } else {
-          seqClearGhost(lane);
+          seqClearGhost(l);
         }
       }
     };
@@ -3855,10 +3856,6 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
       if (!dragging) { cleanup(); return; }
       const dropX = t.clientX, dropY = t.clientY;
       cleanup();
-      const lane = document.getElementById(laneId);
-      if (!lane) return;
-      const rect = lane.getBoundingClientRect();
-      if (dropX < rect.left || dropX > rect.right || dropY < rect.top || dropY > rect.bottom) return;
       const data = getData();
       const isChord = data.interval !== undefined;
       // Find which lane was actually hit (allows cross-lane drops)
