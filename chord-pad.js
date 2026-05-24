@@ -970,7 +970,7 @@ function startSf2Note(midiNote, velocity, at, autoRelease, instrumentId) {
   // Initial attenuation: centibels (1/10 dB) of reduction baked into the SF2.
   const attenuationCB = gen(48) ?? 0;
   const attenuationGain = Math.pow(10, -attenuationCB / 200); // cB → linear
-  const peak = (velocity / 127) * state.audioVolume * 0.6 * attenuationGain;
+  const peak = (velocity / 127) * state.audioVolume * 0.18 * attenuationGain;
 
   const env = ctx.createGain();
   env.gain.setValueAtTime(0, t);
