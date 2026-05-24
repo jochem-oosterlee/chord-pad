@@ -3,7 +3,7 @@
 Chord Pad is a browser tool for exploring, playing and arranging chord progressions. It runs entirely in the browser — open `chord-pad.html` and you're in. No installation, no account.
 
 Use it to:
-- **Discover** what chords fit together in a key (Progressions, Dark Harmony, Scale Chords).
+- **Discover** what chords fit together in a key (Progressions, Minor Harmony, Scale Chords).
 - **Look up** any chord and its alternative notations (Chord Library).
 - **Sketch** a progression in the built-in sequencer.
 - **Play** out loud through the built-in synth, or send MIDI to your DAW.
@@ -24,7 +24,7 @@ The classic starting point. Pick a key with the **SET THE KEY** slider, then cli
 
 The arrows between rows show common voice-leading paths. Use **v1 / v2** to switch between two different layouts of the same idea.
 
-### Dark Harmony
+### Minor Harmony
 
 Same idea as Progressions, but built around minor / harmonic-minor key centres. The grouping highlights:
 

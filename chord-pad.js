@@ -209,8 +209,8 @@ const TEMPLATES = {
       'a':['modal',0], 'd':['modal',2], 'f':['modal',3], 'g':['modal',4],
     }
   },
-  'dark-harmony': {
-    name: 'Dark Harmony',
+  'minor-harmony': {
+    name: 'Minor Harmony',
     defaultKey: 9,
     keyMode: 'harmonic-minor',
     sections: [
@@ -315,7 +315,7 @@ const V2_SECTIONS = {
       ]
     },
   ],
-  'dark-harmony': [
+  'minor-harmony': [
     {
       id: 'sd_v', flowIcon: ICON_LOOP, flowText: 'MIX CHORDS', label: 'Secondary Diminished V',
       chords: [
@@ -356,7 +356,7 @@ const V2_KEYMAPS = {
     'q':['main',0],'w':['main',1],'e':['main',2],'r':['main',3],'t':['main',4],'y':['main',5],'u':['main',6],
     'a':['modal',0],'s':['modal',1],'d':['modal',2],'f':['modal',3],'g':['modal',4],
   },
-  'dark-harmony': {
+  'minor-harmony': {
     '1':['sd_v',0],'2':['sd_v',1],'3':['sd_v',2],'4':['sd_v',3],
     '5':['neapolitan',0],
     'q':['main',0],'w':['main',1],'e':['main',2],'r':['main',3],
@@ -370,7 +370,7 @@ const V2_KEYMAPS = {
 // ============================================================
 const state = {
   currentTemplate: 'progressions',
-  keys: { 'progressions': 0, 'dark-harmony': 9, 'scale-chords': 0, 'chord-library': 0 },
+  keys: { 'progressions': 0, 'minor-harmony': 9, 'scale-chords': 0, 'chord-library': 0 },
   scaleType: 'major',
   octave: 4,
   velocity: 100,
@@ -394,7 +394,7 @@ const state = {
   playStyle: 'off',
   tempo: 120,
   beatsPerBar: 4,
-  version: { 'progressions': 2, 'dark-harmony': 2 },
+  version: { 'progressions': 2, 'minor-harmony': 2 },
   bassOctave: 2,
   showPianoHover: false,
   synth: {
@@ -1084,13 +1084,13 @@ function getNextChords(currentPadId) {
     }
   }
 
-  if (state.currentTemplate === 'dark-harmony') {
-    if (currentPadId === 'dark-pad-neapolitan-0') {
-      const result = ['dark-pad-main-4'];
-      for (let i = 0; i < 4; i++) result.push(`dark-pad-sd_v-${i}`);
+  if (state.currentTemplate === 'minor-harmony') {
+    if (currentPadId === 'minor-pad-neapolitan-0') {
+      const result = ['minor-pad-main-4'];
+      for (let i = 0; i < 4; i++) result.push(`minor-pad-sd_v-${i}`);
       return result;
     }
-    const m = currentPadId.match(/^dark-pad-(\w+)-(\d+)$/);
+    const m = currentPadId.match(/^minor-pad-(\w+)-(\d+)$/);
     if (!m) return [];
     const [, section, idxStr] = m;
     const idx = parseInt(idxStr, 10);
@@ -1098,26 +1098,26 @@ function getNextChords(currentPadId) {
     if (section === 'main') {
       const result = [];
       for (let i = 0; i < 7; i++) {
-        if (i !== idx) result.push(`dark-pad-main-${i}`);
+        if (i !== idx) result.push(`minor-pad-main-${i}`);
       }
       for (let i = 0; i < 4; i++) {
-        result.push(`dark-pad-sd_v-${i}`);
-        result.push(`dark-pad-sd_iv-${i}`);
+        result.push(`minor-pad-sd_v-${i}`);
+        result.push(`minor-pad-sd_iv-${i}`);
       }
-      result.push('dark-pad-neapolitan-0');
+      result.push('minor-pad-neapolitan-0');
       return result;
     }
     if (section === 'sd_iv') {
-      const result = ['dark-pad-main-2', 'dark-pad-main-3'];
+      const result = ['minor-pad-main-2', 'minor-pad-main-3'];
       for (let i = 0; i < 4; i++) {
-        if (i !== idx) result.push(`dark-pad-sd_iv-${i}`);
+        if (i !== idx) result.push(`minor-pad-sd_iv-${i}`);
       }
       return result;
     }
     if (section === 'sd_v') {
-      const result = ['dark-pad-main-4', 'dark-pad-neapolitan-0'];
+      const result = ['minor-pad-main-4', 'minor-pad-neapolitan-0'];
       for (let i = 0; i < 4; i++) {
-        if (i !== idx) result.push(`dark-pad-sd_v-${i}`);
+        if (i !== idx) result.push(`minor-pad-sd_v-${i}`);
       }
       return result;
     }
@@ -1776,7 +1776,7 @@ function buildProgressionsBoard() {
 }
 
 function updateNeapolitanSplit() {
-  document.querySelectorAll('.dark-row.has-neapolitan').forEach(row => {
+  document.querySelectorAll('.minor-row.has-neapolitan').forEach(row => {
     const rowRect = row.getBoundingClientRect();
     const regularCells = [...row.querySelectorAll('.pad-cell:not(.empty):not(.neapolitan)')];
     const firstCell = regularCells[0];
@@ -1788,13 +1788,13 @@ function updateNeapolitanSplit() {
   });
 }
 
-function buildDarkHarmonyBoard() {
-  const tpl = TEMPLATES['dark-harmony'];
-  const board = document.querySelector('[data-board="dark-harmony"]');
+function buildMinorHarmonyBoard() {
+  const tpl = TEMPLATES['minor-harmony'];
+  const board = document.querySelector('[data-board="minor-harmony"]');
   board.innerHTML = '';
-  const ver = state.version['dark-harmony'];
-  const sections = ver === 2 ? V2_SECTIONS['dark-harmony'] : tpl.sections;
-  const keymap  = ver === 2 ? V2_KEYMAPS['dark-harmony']  : tpl.keymap;
+  const ver = state.version['minor-harmony'];
+  const sections = ver === 2 ? V2_SECTIONS['minor-harmony'] : tpl.sections;
+  const keymap  = ver === 2 ? V2_KEYMAPS['minor-harmony']  : tpl.keymap;
 
   const reverseKeymap = {};
   for (const [k, v] of Object.entries(keymap)) {
@@ -1805,24 +1805,24 @@ function buildDarkHarmonyBoard() {
 
   sections.forEach((section) => {
     const sectionEl = document.createElement('div');
-    sectionEl.className = 'dark-section';
+    sectionEl.className = 'minor-section';
 
     const hasNea = !!section.neapolitan;
 
     const flowEl = document.createElement('div');
-    flowEl.className = 'dark-flow-label';
+    flowEl.className = 'minor-flow-label';
     flowEl.innerHTML = `<span>${section.label}</span><span style="opacity:.45; margin-left:8px">${section.flowText}</span>${hasNea ? `<span style="margin-left:auto; opacity:.7; letter-spacing:0.22em">NEAPOLITAN</span>` : ''}`;
     sectionEl.appendChild(flowEl);
 
     const row = document.createElement('div');
-    row.className = `dark-row ${section.id}`;
+    row.className = `minor-row ${section.id}`;
 
     // Chord cells
     section.chords.forEach((chord, cIdx) => {
       const cell = document.createElement('div');
       cell.className = 'pad-cell' + (chord ? '' : ' empty');
       if (chord) {
-        const padId = `dark-pad-${section.id}-${cIdx}`;
+        const padId = `minor-pad-${section.id}-${cIdx}`;
         const keyLabel = reverseKeymap[`${section.id},${cIdx}`] || '';
         cell.appendChild(createPad(padId, chord, keyLabel, false));
       }
@@ -1841,7 +1841,7 @@ function buildDarkHarmonyBoard() {
       row.classList.add('has-neapolitan');
       const cell = document.createElement('div');
       cell.className = 'pad-cell neapolitan';
-      const padId = 'dark-pad-neapolitan-0';
+      const padId = 'minor-pad-neapolitan-0';
       const keyLabel = reverseKeymap['neapolitan,0'] || '';
       cell.appendChild(createPad(padId, section.neapolitan, keyLabel, false));
       row.appendChild(cell);
@@ -1871,16 +1871,16 @@ const CONNECTIONS = {
     { fromPad: 'prog-pad-main-2', toRow: '.prog-row.modal', type: 'twoway' },
     { fromPad: 'prog-pad-main-4', toRow: '.prog-row.modal', type: 'twoway' },
   ],
-  'dark-harmony': [
+  'minor-harmony': [
     // main → sd_v (group up, starts at 1/3 of main row height)
-    { fromRow: '.dark-row.main', toRow: '.dark-row.sd_v', type: 'oneway', fromYFraction: 1/3 },
+    { fromRow: '.minor-row.main', toRow: '.minor-row.sd_v', type: 'oneway', fromYFraction: 1/3 },
     // sd_v → only V(7) = main-4
-    { fromRow: '.dark-row.sd_v', toPad: 'dark-pad-main-4', type: 'oneway' },
+    { fromRow: '.minor-row.sd_v', toPad: 'minor-pad-main-4', type: 'oneway' },
     // main → sd_iv (group down, starts at 2/3 of main row height)
-    { fromRow: '.dark-row.main', toRow: '.dark-row.sd_iv', type: 'oneway', fromYFraction: 2/3 },
+    { fromRow: '.minor-row.main', toRow: '.minor-row.sd_iv', type: 'oneway', fromYFraction: 2/3 },
     // sd_iv → only iv (main-2) and bVI (main-3)
-    { fromRow: '.dark-row.sd_iv', toPad: 'dark-pad-main-2', type: 'oneway' },
-    { fromRow: '.dark-row.sd_iv', toPad: 'dark-pad-main-3', type: 'oneway' },
+    { fromRow: '.minor-row.sd_iv', toPad: 'minor-pad-main-2', type: 'oneway' },
+    { fromRow: '.minor-row.sd_iv', toPad: 'minor-pad-main-3', type: 'oneway' },
   ],
 };
 
@@ -2113,7 +2113,7 @@ function rebuildBoard() {
     setTimeout(() => {
       if (tpl !== state.currentTemplate) return; // tab changed during animation
       if (tpl === 'progressions') buildProgressionsBoard();
-      else if (tpl === 'dark-harmony') { buildDarkHarmonyBoard(); updateNeapolitanSplit(); }
+      else if (tpl === 'minor-harmony') { buildMinorHarmonyBoard(); updateNeapolitanSplit(); }
       else if (tpl === 'scale-chords') buildScaleChordsBoard();
       else if (tpl === 'chord-library') buildChordLibraryBoard();
       scheduleDraw();
@@ -2125,7 +2125,7 @@ function rebuildBoard() {
     }, 100);
   } else {
     if (state.currentTemplate === 'progressions') buildProgressionsBoard();
-    else if (state.currentTemplate === 'dark-harmony') { buildDarkHarmonyBoard(); updateNeapolitanSplit(); }
+    else if (state.currentTemplate === 'minor-harmony') { buildMinorHarmonyBoard(); updateNeapolitanSplit(); }
     else if (state.currentTemplate === 'scale-chords') buildScaleChordsBoard();
     else if (state.currentTemplate === 'chord-library') buildChordLibraryBoard();
     scheduleDraw();
@@ -2136,7 +2136,7 @@ function rebuildBoard() {
 // KEY SELECTOR
 // ============================================================
 function buildKeyTracks() {
-  ['progressions', 'dark-harmony', 'scale-chords', 'chord-library'].forEach(tplId => {
+  ['progressions', 'minor-harmony', 'scale-chords', 'chord-library'].forEach(tplId => {
     const track = document.querySelector(`[data-key-track="${tplId}"]`);
     track.innerHTML = '';
     const isMinor = ['minor', 'harmonic-minor'].includes(TEMPLATES[tplId].keyMode);
@@ -2157,7 +2157,7 @@ function buildKeyTracks() {
 }
 
 function updateKeySelectors() {
-  ['progressions', 'dark-harmony', 'scale-chords', 'chord-library'].forEach(tplId => {
+  ['progressions', 'minor-harmony', 'scale-chords', 'chord-library'].forEach(tplId => {
     const currentKey = state.keys[tplId];
     document.querySelectorAll(`[data-key-track="${tplId}"] .key-btn`).forEach(btn => {
       btn.classList.toggle('active', parseInt(btn.dataset.keyIdx, 10) === currentKey);
@@ -2552,7 +2552,7 @@ function findChordByKey(key) {
   const mapping = keymap[key];
   if (!mapping) return null;
   const [section, idx] = mapping;
-  const prefix = state.currentTemplate === 'progressions' ? 'prog' : 'dark';
+  const prefix = state.currentTemplate === 'progressions' ? 'prog' : 'minor';
   if (section === 'neapolitan') {
     const sec = sections.find(s => s.neapolitan);
     if (!sec) return null;

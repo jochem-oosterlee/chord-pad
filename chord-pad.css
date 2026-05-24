@@ -29,8 +29,8 @@
 
   --prog-card: #5a86a5;
   --prog-card-deep: #4a7191;
-  --dark-card: #3a4d7a;
-  --dark-card-deep: #2e3e65;
+  --minor-card: #3a4d7a;
+  --minor-card-deep: #2e3e65;
   --lib-card: #b88a32;
   --lib-card-deep: #946d22;
   --pad-dark: #1a212c;
@@ -181,8 +181,8 @@ option { background: var(--bg); color: var(--text); }
     linear-gradient(180deg, rgba(255,255,255,0.05), rgba(0,0,0,0.18)),
     radial-gradient(ellipse at 20% 0%, rgba(255,255,255,0.08), transparent 60%);
 }
-.card.dark {
-  background-color: var(--dark-card);
+.card.minor {
+  background-color: var(--minor-card);
   background-image:
     linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.25)),
     radial-gradient(ellipse at 20% 0%, rgba(255,255,255,0.06), transparent 60%);
@@ -317,13 +317,13 @@ option { background: var(--bg); color: var(--text); }
 }
 .prog-row .pad-cell.empty { visibility: hidden; }
 
-/* Dark Harmony rows */
-.dark-section {
+/* Minor Harmony rows */
+.minor-section {
   margin-bottom: 16px;
 }
-.dark-section:last-of-type { margin-bottom: 0; }
+.minor-section:last-of-type { margin-bottom: 0; }
 
-.dark-flow-label {
+.minor-flow-label {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -334,23 +334,23 @@ option { background: var(--bg); color: var(--text); }
   color: rgba(255,255,255,0.7);
   font-weight: 500;
 }
-.dark-flow-label .icon { width: 13px; height: 13px; flex-shrink: 0; }
-.dark-flow-label .icon path,
-.dark-flow-label .icon line,
-.dark-flow-label .icon circle { stroke: rgba(255,255,255,0.8); fill: none; stroke-width: 1.2; }
+.minor-flow-label .icon { width: 13px; height: 13px; flex-shrink: 0; }
+.minor-flow-label .icon path,
+.minor-flow-label .icon line,
+.minor-flow-label .icon circle { stroke: rgba(255,255,255,0.8); fill: none; stroke-width: 1.2; }
 
-.dark-row {
+.minor-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 12px;
 }
-.dark-row .pad-cell.empty { visibility: hidden; }
-.dark-row.has-neapolitan {
+.minor-row .pad-cell.empty { visibility: hidden; }
+.minor-row.has-neapolitan {
   position: relative;
   box-shadow: none;
 }
 /* solid border on the main part */
-.dark-row.has-neapolitan::before {
+.minor-row.has-neapolitan::before {
   content: '';
   position: absolute;
   top: 0; left: 0; bottom: 0;
@@ -362,7 +362,7 @@ option { background: var(--bg); color: var(--text); }
   z-index: 1;
 }
 /* dashed border on the neapolitan part */
-.dark-row.has-neapolitan::after {
+.minor-row.has-neapolitan::after {
   content: '';
   position: absolute;
   top: 0; right: 0; bottom: 0;
@@ -378,17 +378,17 @@ option { background: var(--bg); color: var(--text); }
 .prog-row.secdom,
 .prog-row.main,
 .prog-row.modal,
-.dark-row.sd_v,
-.dark-row.main,
-.dark-row.sd_iv,
+.minor-row.sd_v,
+.minor-row.main,
+.minor-row.sd_iv,
 .scale-row {
   border-radius: 8px;
   box-shadow: 0 0 0 2px rgba(255,255,255,0.22);
   padding: 10px 12px;
 }
-.dark-row.main.has-neapolitan,
-.dark-row.sd_v.has-neapolitan,
-.dark-row.sd_iv.has-neapolitan { box-shadow: none; }
+.minor-row.main.has-neapolitan,
+.minor-row.sd_v.has-neapolitan,
+.minor-row.sd_iv.has-neapolitan { box-shadow: none; }
 
 /* ─────────── pad (Roman + button + quality) ─────────── */
 .pad {
@@ -589,7 +589,7 @@ option { background: var(--bg); color: var(--text); }
   filter: drop-shadow(0 0 4px rgba(120, 220, 180, 0.55));
 }
 .prog-row.conn-active,
-.dark-row.conn-active {
+.minor-row.conn-active {
   box-shadow: 0 0 0 2px rgba(120, 220, 180, 0.75), 0 0 14px rgba(120, 220, 180, 0.2);
 }
 
@@ -1062,7 +1062,7 @@ input[type="range"]::-moz-range-thumb {
 }
 /* ─────────── shared cell styles (all tabs) ─────────── */
 .prog-row .pad-cell,
-.dark-row .pad-cell,
+.minor-row .pad-cell,
 .scale-cell {
   display: flex;
   align-items: center;
@@ -1071,7 +1071,7 @@ input[type="range"]::-moz-range-thumb {
   min-height: 50px;
 }
 .prog-row .pad-cell.empty,
-.dark-row .pad-cell.empty,
+.minor-row .pad-cell.empty,
 .scale-cell-empty { visibility: hidden; }
 
 /* ─────────── Piano tooltip ─────────── */
@@ -1125,9 +1125,9 @@ input[type="range"]::-moz-range-thumb {
   .key-btn { font-size: 9px; padding: 6px 0; }
   select { min-width: 0; }
   .tab { padding: 10px 14px; font-size: 9px; }
-  .prog-row, .dark-row, .scale-row { gap: 6px; }
-  .prog-row .pad-cell, .dark-row .pad-cell, .scale-cell { min-height: 70px; }
-  .prog-flow-label, .dark-flow-label, .scale-row-label { font-size: 8px; letter-spacing: 0.18em; }
+  .prog-row, .minor-row, .scale-row { gap: 6px; }
+  .prog-row .pad-cell, .minor-row .pad-cell, .scale-cell { min-height: 70px; }
+  .prog-flow-label, .minor-flow-label, .scale-row-label { font-size: 8px; letter-spacing: 0.18em; }
 }
 
 @media (max-width: 880px) and (orientation: portrait) {
@@ -1138,7 +1138,7 @@ input[type="range"]::-moz-range-thumb {
   .tab { white-space: nowrap; padding: 10px 8px; letter-spacing: 0.1em; }
   .help { display: none; }
   .prog-row .pad-cell,
-  .dark-row .pad-cell,
+  .minor-row .pad-cell,
   .scale-cell { align-items: stretch; min-height: 0; }
   .pad { justify-content: stretch; }
   .pad-button { flex: 1; }
@@ -1167,19 +1167,19 @@ input[type="range"]::-moz-range-thumb {
   .key-row .key-label-text { display: none; }
 
   .prog-section { margin-bottom: 8px; }
-  .dark-section { margin-bottom: 8px; }
-  .prog-flow-label, .dark-flow-label { padding-bottom: 4px; font-size: 7px; gap: 6px; }
-  .prog-flow-label .icon, .dark-flow-label .icon { width: 10px; height: 10px; }
+  .minor-section { margin-bottom: 8px; }
+  .prog-flow-label, .minor-flow-label { padding-bottom: 4px; font-size: 7px; gap: 6px; }
+  .prog-flow-label .icon, .minor-flow-label .icon { width: 10px; height: 10px; }
 
-  .prog-row, .dark-row, .scale-row { gap: 5px; }
-  .prog-row .pad-cell, .dark-row .pad-cell, .scale-cell { min-height: 48px; }
+  .prog-row, .minor-row, .scale-row { gap: 5px; }
+  .prog-row .pad-cell, .minor-row .pad-cell, .scale-cell { min-height: 48px; }
 
   .prog-row.secdom,
   .prog-row.main,
   .prog-row.modal,
-  .dark-row.sd_v,
-  .dark-row.main,
-  .dark-row.sd_iv,
+  .minor-row.sd_v,
+  .minor-row.main,
+  .minor-row.sd_iv,
   .scale-row { padding: 6px 10px; margin-left: 4px; margin-right: 4px; }
 
   .pad-button { min-height: 38px; padding: 4px 3px; }
