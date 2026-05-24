@@ -254,6 +254,13 @@ const TEMPLATES = {
     sections: [],
     keymap: {},
   },
+  'chord-library': {
+    name: 'Chord Library',
+    defaultKey: 0,
+    keyMode: 'major',
+    sections: [],
+    keymap: {},
+  },
 };
 
 const V2_SECTIONS = {
@@ -347,7 +354,7 @@ const V2_KEYMAPS = {
 // ============================================================
 const state = {
   currentTemplate: 'progressions',
-  keys: { 'progressions': 0, 'dark-harmony': 9, 'scale-chords': 0 },
+  keys: { 'progressions': 0, 'dark-harmony': 9, 'scale-chords': 0, 'chord-library': 0 },
   scaleType: 'major',
   octave: 4,
   velocity: 100,
@@ -1549,6 +1556,51 @@ function buildScaleChordsBoard() {
   board.appendChild(boardEl);
 }
 
+function buildChordLibraryBoard() {
+  const board = document.querySelector('[data-board="chord-library"]');
+  board.innerHTML = '';
+
+  const SECTIONS = [
+    { label: 'Triads',       qs: ['maj', 'min', 'dim', 'aug'] },
+    { label: 'Power & Sus',  qs: ['power', 'sus2', 'sus4', 'sus24'] },
+    { label: 'Sixths',       qs: ['maj6', 'min6'] },
+    { label: 'Add',          qs: ['majadd2', 'minadd2', 'majadd4', 'minadd4'] },
+    { label: 'Sevenths',     qs: ['maj7', 'dom7', 'min7', 'mmaj7', 'm7b5', 'dim7', 'augmaj7', 'aug7'] },
+    { label: 'Seventh Sus',  qs: ['7sus2', '7sus4'] },
+    { label: 'Ninths',       qs: ['maj9', 'dom9', 'min9'] },
+    { label: 'Elevenths',    qs: ['maj11', 'dom11', 'min11'] },
+  ];
+
+  const boardEl = document.createElement('div');
+  boardEl.className = 'lib-board';
+
+  SECTIONS.forEach(sec => {
+    const group = document.createElement('div');
+    group.className = 'lib-row-group';
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'lib-row-label';
+    labelEl.textContent = sec.label;
+    group.appendChild(labelEl);
+
+    const row = document.createElement('div');
+    row.className = 'lib-row';
+
+    sec.qs.forEach(q => {
+      const cell = document.createElement('div');
+      cell.className = 'lib-cell';
+      const padId = `lib-pad-${q}`;
+      cell.appendChild(createPad(padId, { interval: 0, q, roman: '' }, null, false));
+      row.appendChild(cell);
+    });
+
+    group.appendChild(row);
+    boardEl.appendChild(group);
+  });
+
+  board.appendChild(boardEl);
+}
+
 function buildProgressionsBoard() {
   const tpl = TEMPLATES['progressions'];
   const board = document.querySelector('[data-board="progressions"]');
@@ -1940,6 +1992,7 @@ function rebuildBoard() {
       if (tpl === 'progressions') buildProgressionsBoard();
       else if (tpl === 'dark-harmony') { buildDarkHarmonyBoard(); updateNeapolitanSplit(); }
       else if (tpl === 'scale-chords') buildScaleChordsBoard();
+      else if (tpl === 'chord-library') buildChordLibraryBoard();
       scheduleDraw();
       const enterCls = dir > 0 ? 'key-rolling-up' : 'key-rolling-down';
       document.querySelectorAll(`[data-board="${tpl}"] .pad-chord`).forEach(el => {
@@ -1951,6 +2004,7 @@ function rebuildBoard() {
     if (state.currentTemplate === 'progressions') buildProgressionsBoard();
     else if (state.currentTemplate === 'dark-harmony') { buildDarkHarmonyBoard(); updateNeapolitanSplit(); }
     else if (state.currentTemplate === 'scale-chords') buildScaleChordsBoard();
+    else if (state.currentTemplate === 'chord-library') buildChordLibraryBoard();
     scheduleDraw();
   }
 }
@@ -1959,7 +2013,7 @@ function rebuildBoard() {
 // KEY SELECTOR
 // ============================================================
 function buildKeyTracks() {
-  ['progressions', 'dark-harmony', 'scale-chords'].forEach(tplId => {
+  ['progressions', 'dark-harmony', 'scale-chords', 'chord-library'].forEach(tplId => {
     const track = document.querySelector(`[data-key-track="${tplId}"]`);
     track.innerHTML = '';
     const isMinor = ['minor', 'harmonic-minor'].includes(TEMPLATES[tplId].keyMode);
@@ -1980,7 +2034,7 @@ function buildKeyTracks() {
 }
 
 function updateKeySelectors() {
-  ['progressions', 'dark-harmony', 'scale-chords'].forEach(tplId => {
+  ['progressions', 'dark-harmony', 'scale-chords', 'chord-library'].forEach(tplId => {
     const currentKey = state.keys[tplId];
     document.querySelectorAll(`[data-key-track="${tplId}"] .key-btn`).forEach(btn => {
       btn.classList.toggle('active', parseInt(btn.dataset.keyIdx, 10) === currentKey);

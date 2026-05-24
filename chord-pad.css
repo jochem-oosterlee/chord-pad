@@ -945,6 +945,49 @@ input[type="range"]::-moz-range-thumb {
   flex-direction: column;
   gap: 18px;
 }
+
+/* ─────────── Chord Library ─────────── */
+.card.lib {
+  background-color: var(--prog-card);
+  background-image:
+    linear-gradient(180deg, rgba(255,255,255,0.05), rgba(0,0,0,0.18)),
+    radial-gradient(ellipse at 20% 0%, rgba(255,255,255,0.08), transparent 60%);
+}
+.lib-board {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.lib-row-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.lib-row-label {
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.78);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.lib-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.lib-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 50px;
+  width: 130px;
+  flex: 0 0 130px;
+}
+@media (max-width: 600px) {
+  .lib-cell { width: calc((100% - 36px) / 4); flex: 0 0 calc((100% - 36px) / 4); }
+}
 .scale-section { display: flex; flex-direction: column; gap: 18px; }
 .scale-section + .scale-section { margin-top: 12px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.08); }
 .scale-section-label {
