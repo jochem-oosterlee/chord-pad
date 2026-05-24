@@ -1571,6 +1571,39 @@ function buildChordLibraryBoard() {
     { label: 'Elevenths',    qs: ['maj11', 'dom11', 'min11'] },
   ];
 
+  const ALT_LABELS = {
+    'maj': 'M',
+    'min': '−',
+    'dim': 'm♭5',
+    'aug': '♯5',
+    'power': 'no3',
+    'sus2': 'add9 no3',
+    'sus4': 'add11 no3',
+    'sus24': 'sus4add9',
+    'maj6': 'M6',
+    'min6': '−6',
+    'maj7': 'Δ7',
+    'dom7': 'M♭7',
+    'min7': '−7',
+    'mmaj7': '−Δ7',
+    'm7b5': '½dim',
+    'dim7': '°7',
+    'augmaj7': '+Δ7',
+    'aug7': '7♯5',
+    '7sus2': '9sus no3',
+    '7sus4': '7sus',
+    'maj9': 'Δ9',
+    'dom9': '7add9',
+    'min9': '−9',
+    'maj11': 'Δ11',
+    'dom11': '7add11',
+    'min11': '−11',
+    'majadd2': 'add9',
+    'minadd2': '−add9',
+    'majadd4': 'add11',
+    'minadd4': '−add11',
+  };
+
   const boardEl = document.createElement('div');
   boardEl.className = 'lib-board';
 
@@ -1590,7 +1623,16 @@ function buildChordLibraryBoard() {
       const cell = document.createElement('div');
       cell.className = 'lib-cell';
       const padId = `lib-pad-${q}`;
-      cell.appendChild(createPad(padId, { interval: 0, q, roman: '' }, null, false));
+      const pad = createPad(padId, { interval: 0, q, roman: '' }, null, false);
+      const alt = ALT_LABELS[q];
+      if (alt) {
+        const padBtn = pad.querySelector('.pad-button');
+        const altEl = document.createElement('span');
+        altEl.className = 'pad-alt';
+        altEl.textContent = alt;
+        padBtn.appendChild(altEl);
+      }
+      cell.appendChild(pad);
       row.appendChild(cell);
     });
 
