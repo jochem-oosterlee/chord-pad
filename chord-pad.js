@@ -5508,6 +5508,7 @@ function buildTrackHeaders() {
     });
     label.querySelector('.seq-th-inst').addEventListener('change', (e) => {
       tr.instrument = e.target.value; seqSave();
+      if (tr.instrument !== 'synth') preloadSamples(tr.instrument);
     });
     label.querySelector('.seq-th-m').addEventListener('click', (e) => {
       tr.muted = !tr.muted; e.currentTarget.classList.toggle('on', tr.muted); seqSave();
@@ -5540,6 +5541,12 @@ function toggleTrackCollapse(label) {
 }
 
 buildTrackHeaders();
+// Preload samples for any per-track instrument that isn't already covered by the global one
+for (const tr of Object.values(SEQ.tracks)) {
+  if (tr.instrument && tr.instrument !== 'synth' && tr.instrument !== state.instrument) {
+    preloadSamples(tr.instrument);
+  }
+}
 
 function rollSnapBeat(val) {
   if (!SEQ.rollSnap) return val;
