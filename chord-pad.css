@@ -2067,9 +2067,10 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   z-index: 20;
   user-select: none;
   touch-action: none;
-  transition: border-color 0.1s, color 0.1s;
+  opacity: 0.4;
+  transition: border-color 0.1s, color 0.1s, opacity 0.1s;
 }
-.seq-loop-start:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
+.seq-loop-start:hover { border-color: rgba(255,255,255,0.4); color: var(--text); opacity: 1; }
 .seq-loop-start-line {
   position: absolute;
   top: 0; bottom: 0;
@@ -2100,9 +2101,10 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   z-index: 20;
   user-select: none;
   touch-action: none;
-  transition: border-color 0.1s, color 0.1s;
+  opacity: 0.4;
+  transition: border-color 0.1s, color 0.1s, opacity 0.1s;
 }
-.seq-loop-end:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
+.seq-loop-end:hover { border-color: rgba(255,255,255,0.4); color: var(--text); opacity: 1; }
 .seq-loop-line {
   position: absolute;
   top: 0; bottom: 0;
