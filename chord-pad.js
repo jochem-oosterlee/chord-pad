@@ -908,10 +908,13 @@ function loadSf2(fileKey) {
   if (!entry) return Promise.resolve(null);
   if (entry.sf2)     return Promise.resolve(entry.sf2);
   if (entry.loading) return entry.loading;
-  if (typeof window.SoundFont2 === 'undefined') return Promise.resolve(null);
+  // UMD bundle exposes a namespace object; the class lives at .SoundFont2
+  const ns = window.SoundFont2;
+  const Ctor = typeof ns === 'function' ? ns : (ns && ns.SoundFont2);
+  if (typeof Ctor !== 'function') return Promise.resolve(null);
   entry.loading = fetch(entry.url)
     .then(r => r.arrayBuffer())
-    .then(buf => { entry.sf2 = new window.SoundFont2(new Uint8Array(buf)); return entry.sf2; })
+    .then(buf => { entry.sf2 = new Ctor(new Uint8Array(buf)); return entry.sf2; })
     .catch(err => { console.error('SF2 load failed', entry.url, err); return null; });
   return entry.loading;
 }
@@ -1043,12 +1046,15 @@ function stopAudioNote(node) {
 
 function startBassNote(midiNote, at = null, autoRelease = null, instrumentOverride = null) {
   const effInstrument = instrumentOverride ?? state.instrument;
+  if (effInstrument && effInstrument.startsWith('sf2:')) {
+    return startSf2Note(midiNote, Math.round(state.velocity * 0.9), at, autoRelease, effInstrument);
+  }
   if (effInstrument !== 'synth') {
     const instrument = effInstrument;
     const ctx = getAudioCtx();
     const t = at ?? ctx.currentTime;
     const sampleMidi = nearestSampleMidi(instrument, midiNote);
-    const buffer = sampleCache[instrument][sampleMidi];
+    const buffer = sampleCache[instrument]?.[sampleMidi];
     if (!(buffer instanceof AudioBuffer)) return null;
     const peak = state.audioVolume * 3.5;
     const atk = Math.min(state.synth.attack, 0.01);
