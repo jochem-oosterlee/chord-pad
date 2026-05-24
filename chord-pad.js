@@ -1556,6 +1556,33 @@ function buildScaleChordsBoard() {
   board.appendChild(boardEl);
 }
 
+let synTooltipEl = null;
+function getSynTooltipEl() {
+  if (!synTooltipEl) {
+    synTooltipEl = document.createElement('div');
+    synTooltipEl.id = 'chord-syn-tooltip';
+    document.body.appendChild(synTooltipEl);
+  }
+  return synTooltipEl;
+}
+function showSynonymTooltip(padEl, rootName, syns) {
+  const el = getSynTooltipEl();
+  el.innerHTML = syns.map(s => `<span class="syn">${rootName}${s}</span>`).join('');
+  el.style.display = 'flex';
+  const r  = padEl.getBoundingClientRect();
+  const tw = el.offsetWidth;
+  const th = el.offsetHeight;
+  let left = r.left + r.width / 2 - tw / 2;
+  let top  = r.bottom + 8;
+  left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+  if (top + th > window.innerHeight - 8) top = r.top - th - 8;
+  el.style.left = left + 'px';
+  el.style.top  = top + 'px';
+}
+function hideSynonymTooltip() {
+  if (synTooltipEl) synTooltipEl.style.display = 'none';
+}
+
 function buildChordLibraryBoard() {
   const board = document.querySelector('[data-board="chord-library"]');
   board.innerHTML = '';
@@ -1604,6 +1631,40 @@ function buildChordLibraryBoard() {
     'minadd4': '−add11',
   };
 
+  // Synonym suffixes (root prepended at render time)
+  const SYNONYMS = {
+    'maj':     ['', 'maj', 'M', 'Δ'],
+    'min':     ['m', 'min', 'mi', '−'],
+    'dim':     ['dim', '°', 'm♭5'],
+    'aug':     ['aug', '+', '(♯5)', '(+5)'],
+    'sus2':    ['sus2', '2'],
+    'sus4':    ['sus4', 'sus', '4'],
+    'power':   ['5', 'no3'],
+    'sus24':   ['sus24', 'sus4add9', 'sus4(add9)'],
+    'maj6':    ['6', 'maj6', 'M6', 'add6'],
+    'min6':    ['m6', 'min6', '−6'],
+    'maj7':    ['maj7', 'M7', 'Δ7', 'Δ', 'ma7', 'j7'],
+    'dom7':    ['7', 'dom7'],
+    'min7':    ['m7', 'min7', 'mi7', '−7'],
+    'mmaj7':   ['mMaj7', 'm(maj7)', 'minMaj7', 'm♯7', '−Δ7'],
+    'm7b5':    ['m7♭5', 'ø', 'ø7', '½dim7'],
+    'dim7':    ['dim7', '°7'],
+    'augmaj7': ['+Maj7', 'maj7♯5', 'Maj7(+5)', 'Δ7♯5'],
+    'aug7':    ['+7', '7♯5', '7(+5)', 'aug7'],
+    '7sus2':   ['7sus2'],
+    '7sus4':   ['7sus4', '7sus'],
+    'dom9':    ['9', 'dom9'],
+    'maj9':    ['maj9', 'M9', 'Δ9'],
+    'min9':    ['m9', 'min9', '−9'],
+    'dom11':   ['11'],
+    'maj11':   ['maj11', 'M11', 'Δ11'],
+    'min11':   ['m11', '−11'],
+    'majadd2': ['add9', '(add9)', '(9)'],
+    'minadd2': ['m(add9)', 'madd9', '−(add9)'],
+    'majadd4': ['add11', '(add11)', '(11)'],
+    'minadd4': ['m(add11)', 'madd11', '−(add11)'],
+  };
+
   const boardEl = document.createElement('div');
   boardEl.className = 'lib-board';
 
@@ -1631,6 +1692,12 @@ function buildChordLibraryBoard() {
         altEl.className = 'pad-alt';
         altEl.textContent = alt;
         padBtn.appendChild(altEl);
+      }
+      const syns = SYNONYMS[q];
+      if (syns && syns.length) {
+        const rootName = formatChordRoot(chordRootName(state.keys['chord-library'], 0));
+        pad.addEventListener('mouseenter', () => showSynonymTooltip(pad, rootName, syns));
+        pad.addEventListener('mouseleave', hideSynonymTooltip);
       }
       cell.appendChild(pad);
       row.appendChild(cell);
