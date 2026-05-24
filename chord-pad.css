@@ -31,6 +31,8 @@
   --prog-card-deep: #4a7191;
   --dark-card: #3a4d7a;
   --dark-card-deep: #2e3e65;
+  --lib-card: #b88a32;
+  --lib-card-deep: #946d22;
   --pad-dark: #1a212c;
   --pad-dark-deeper: #11161e;
   --bar-px: 120px;
@@ -949,7 +951,7 @@ input[type="range"]::-moz-range-thumb {
 
 /* ─────────── Chord Library ─────────── */
 .card.lib {
-  background-color: var(--prog-card);
+  background-color: var(--lib-card);
   background-image:
     linear-gradient(180deg, rgba(255,255,255,0.05), rgba(0,0,0,0.18)),
     radial-gradient(ellipse at 20% 0%, rgba(255,255,255,0.08), transparent 60%);
