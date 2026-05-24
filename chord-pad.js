@@ -967,16 +967,31 @@ function startSf2Note(midiNote, velocity, at, autoRelease, instrumentId) {
     return typeof g === 'object' ? g.value : g;
   };
 
-  // Initial attenuation: centibels (1/10 dB) of reduction baked into the SF2.
+  // Initial attenuation (centibels), softened — full SF2 values are tuned for
+  // a complete bank mix and make isolated presets near-inaudible.
   const attenuationCB = gen(48) ?? 0;
-  const attenuationGain = Math.pow(10, -attenuationCB / 200); // cB → linear
-  const peak = (velocity / 127) * state.audioVolume * 0.18 * attenuationGain;
+  const attenuationGain = Math.pow(10, -Math.min(attenuationCB, 100) / 200);
+  const peak = (velocity / 127) * state.audioVolume * 0.35 * attenuationGain;
+
+  // Volume envelope from SF2 generators (33-38), with sane fallbacks to the
+  // user's synth ADSR. Timecents → seconds: 2^(tc/1200).
+  const tc2s = (tc) => Math.max(0.001, Math.pow(2, tc / 1200));
+  const sf2Attack  = gen(34) != null ? tc2s(gen(34)) : s.attack;
+  const sf2Decay   = gen(36) != null ? tc2s(gen(36)) : s.decay;
+  const sf2Sustain = gen(37) != null
+    ? Math.max(0, 1 - Math.min(gen(37), 1000) / 1000)  // centibels of attenuation → linear (cap at 100 dB)
+    : s.sustain;
+  const sf2Release = gen(38) != null ? tc2s(gen(38)) : s.release;
+  // Cap envelope times so a 10s attack doesn't make the note silent in practice.
+  const aT = Math.min(sf2Attack, 4);
+  const dT = Math.min(sf2Decay, 4);
+  const rT = Math.min(sf2Release, 4);
 
   const env = ctx.createGain();
   env.gain.setValueAtTime(0, t);
-  env.gain.linearRampToValueAtTime(peak, t + s.attack);
-  env.gain.exponentialRampToValueAtTime(Math.max(peak * s.sustain, 0.0001), t + s.attack + s.decay);
-  env.gain.setValueAtTime(peak * s.sustain, t + s.attack + s.decay);
+  env.gain.linearRampToValueAtTime(peak, t + aT);
+  env.gain.exponentialRampToValueAtTime(Math.max(peak * sf2Sustain, 0.0001), t + aT + dT);
+  env.gain.setValueAtTime(peak * sf2Sustain, t + aT + dT);
   env.connect(ctx._out);
 
   const lp = ctx.createBiquadFilter();
@@ -1037,12 +1052,14 @@ function startSf2Note(midiNote, velocity, at, autoRelease, instrumentId) {
   if (state.pitchBendCents) src.detune.value = state.pitchBendCents;
   src.start(t);
   const node = { oscs, env, startTime: t, peak };
+  // Stash sustain/release on the node so stopAudioNote can use SF2-specific values.
+  node.sustainLevel = sf2Sustain;
+  node.releaseTime  = rT;
   if (autoRelease !== null) {
     const rel = t + autoRelease;
-    const relDur = 0.05;
-    node.env.gain.setValueAtTime(peak * s.sustain, rel);
-    node.env.gain.exponentialRampToValueAtTime(0.0001, rel + relDur);
-    src.stop(rel + relDur + 0.005);
+    node.env.gain.setValueAtTime(peak * sf2Sustain, rel);
+    node.env.gain.exponentialRampToValueAtTime(0.0001, rel + rT);
+    src.stop(rel + rT + 0.01);
   }
   return node;
 }
@@ -1052,6 +1069,7 @@ function stopAudioNote(node) {
   const ctx = getAudioCtx();
   const s   = state.synth;
   const now = ctx.currentTime;
+  const releaseT = node.releaseTime ?? s.release;
   const releaseAt = Math.max(now, (node.startTime || 0) + s.attack + 0.02);
   node.env.gain.cancelScheduledValues(releaseAt);
   const gainAtRelease = releaseAt > now ? node.peak : node.env.gain.value;
@@ -1060,8 +1078,8 @@ function stopAudioNote(node) {
     return;
   }
   node.env.gain.setValueAtTime(gainAtRelease, releaseAt);
-  node.env.gain.exponentialRampToValueAtTime(0.0001, releaseAt + s.release);
-  node.oscs.forEach(o => o.stop(releaseAt + s.release));
+  node.env.gain.exponentialRampToValueAtTime(0.0001, releaseAt + releaseT);
+  node.oscs.forEach(o => o.stop(releaseAt + releaseT));
 }
 
 function startBassNote(midiNote, at = null, autoRelease = null, instrumentOverride = null) {
