@@ -2652,12 +2652,13 @@ function currentScaleAbsolute() {
 }
 
 function buildPianoSVG(rootPitch, chordQ, scaleOverride, scale = 1) {
-  const W = 22, H = 68, BW = 12, BH = 40;
+  const W = 22, H = 68, BW = 12, BH = 40, TOP = 14;
   // white key layout: [pitchClass, xLeft]
   const whites = [[0,0],[2,22],[4,44],[5,66],[7,88],[9,110],[11,132]];
   // black key layout: centered on white-key boundaries (22,44,88,110,132)
   const blacks = [[1,16],[3,38],[6,82],[8,104],[10,126]];
   const totalW = 7 * W;
+  const totalH = H + TOP;
 
   const DIM_SCALE = [0, 2, 3, 5, 6, 8, 9, 11]; // whole-half diminished
   const scaleTones = state.showScaleTones
@@ -2669,6 +2670,13 @@ function buildPianoSVG(rootPitch, chordQ, scaleOverride, scale = 1) {
     : new Set();
   const chordTones  = new Set(CHORD_INTERVALS[chordQ].map(i => (rootPitch + i) % 12));
 
+  const spelling = buildSpelling(rootPitch, 'major');
+  const labelFor = (pc) => {
+    if (pc === rootPitch)   return { name: spelling[pc], color: '#ffffff' };
+    if (chordTones.has(pc)) return { name: spelling[pc], color: '#ffaa33' };
+    return null;
+  };
+
   function dotAttrs(pc, isBlack) {
     if (pc === rootPitch)     return `fill="#ffffff"`;
     if (chordTones.has(pc))   return `fill="#ffaa33"`;
@@ -2676,26 +2684,37 @@ function buildPianoSVG(rootPitch, chordQ, scaleOverride, scale = 1) {
     return null;
   }
 
-  let s = `<svg width="${Math.round(totalW * scale)}" height="${Math.round(H * scale)}" viewBox="0 0 ${totalW} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block">
+  let s = `<svg width="${Math.round(totalW * scale)}" height="${Math.round(totalH * scale)}" viewBox="0 0 ${totalW} ${totalH}" xmlns="http://www.w3.org/2000/svg" style="display:block">
   <defs><filter id="ds"><feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-color="#000" flood-opacity="0.35"/></filter></defs>`;
+
+  // Note labels above keys (chord tones + root)
+  const labelEsc = (n) => n.replace(/♯/g,'&#9839;').replace(/♭/g,'&#9837;');
+  whites.forEach(([pc, x]) => {
+    const lab = labelFor(pc);
+    if (lab) s += `<text x="${x + W/2}" y="${TOP - 4}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" font-weight="600" fill="${lab.color}">${labelEsc(lab.name)}</text>`;
+  });
+  blacks.forEach(([pc, x]) => {
+    const lab = labelFor(pc);
+    if (lab) s += `<text x="${x + BW/2}" y="${TOP - 4}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" font-weight="600" fill="${lab.color}">${labelEsc(lab.name)}</text>`;
+  });
 
   // White keys
   whites.forEach(([pc, x]) => {
-    s += `<rect x="${x+0.5}" y="0.5" width="${W-1}" height="${H-1}" fill="#f0ece4" rx="2" stroke="#888" stroke-width="0.5"/>`;
+    s += `<rect x="${x+0.5}" y="${TOP+0.5}" width="${W-1}" height="${H-1}" fill="#f0ece4" rx="2" stroke="#888" stroke-width="0.5"/>`;
   });
   // Black keys
   blacks.forEach(([pc, x]) => {
-    s += `<rect x="${x}" y="0" width="${BW}" height="${BH}" fill="#1a1a1a" rx="2"/>`;
+    s += `<rect x="${x}" y="${TOP}" width="${BW}" height="${BH}" fill="#1a1a1a" rx="2"/>`;
   });
   // Dots on white keys
   whites.forEach(([pc, x]) => {
     const a = dotAttrs(pc, false);
-    if (a) s += `<circle cx="${x + W/2}" cy="${H - 9}" r="4.5" ${a} filter="url(#ds)"/>`;
+    if (a) s += `<circle cx="${x + W/2}" cy="${TOP + H - 9}" r="4.5" ${a} filter="url(#ds)"/>`;
   });
   // Dots on black keys
   blacks.forEach(([pc, x]) => {
     const a = dotAttrs(pc, true);
-    if (a) s += `<circle cx="${x + BW/2}" cy="${BH - 8}" r="4.5" ${a}/>`;
+    if (a) s += `<circle cx="${x + BW/2}" cy="${TOP + BH - 8}" r="4.5" ${a}/>`;
   });
 
   s += '</svg>';
