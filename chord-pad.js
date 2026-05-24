@@ -571,28 +571,46 @@ function midiToFreq(note) {
 // ============================================================
 // All 88 semitones A0–C8
 const SAMPLE_MIDIS = Array.from({length: 88}, (_, i) => i + 21);
-const SOUNDFONT_BASE       = 'https://raw.githubusercontent.com/gleitz/midi-js-soundfonts/gh-pages/FluidR3_GM/';
-const SOUNDFONT_BASE_LONG  = 'https://raw.githubusercontent.com/gleitz/midi-js-soundfonts/gh-pages/MusyngKite/';
+const SOUNDFONT_BASE      = 'https://raw.githubusercontent.com/gleitz/midi-js-soundfonts/gh-pages/FluidR3_GM/';
+const SALAMANDER_BASE     = 'https://tonejs.github.io/audio/salamander/';
+
+// Salamander has only sparse MIDI samples (A, C, D#, F# per octave) but they're
+// long (~4× FluidR3) — used to demo "option 4: replace with longer samples".
+const SALAMANDER_MIDIS = [
+  21,                                  // A0
+  24, 27, 30,                          // C1 Ds1 Fs1
+  33, 36, 39, 42,                      // A1 C2 Ds2 Fs2
+  45, 48, 51, 54,                      // A2 C3 Ds3 Fs3
+  57, 60, 63, 66,                      // A3 C4 Ds4 Fs4
+  69, 72, 75, 78,                      // A4 C5 Ds5 Fs5
+  81, 84, 87, 90,                      // A5 C6 Ds6 Fs6
+  93, 96, 99, 102,                     // A6 C7 Ds7 Fs7
+  105, 108,                            // A7 C8
+];
+
 const SAMPLE_DEFS = {
   piano:        { dir: 'acoustic_grand_piano-mp3', decay: true },
   epiano:       { dir: 'electric_piano_1-mp3',     decay: true },
-  'epiano-long':{ dir: 'electric_piano_1-mp3',     decay: true, base: SOUNDFONT_BASE_LONG },
   epiano2:      { dir: 'electric_piano_2-mp3',     decay: true },
   organ:        { dir: 'drawbar_organ-mp3' },
   strings:      { dir: 'string_ensemble_1-mp3' },
   choir:        { dir: 'choir_aahs-mp3' },
   vibes:        { dir: 'vibraphone-mp3',           decay: true },
   pad:          { dir: 'pad_2_warm-mp3' },
+  'piano-long': { dir: '',                         decay: true, base: SALAMANDER_BASE, noteNaming: 'sharp', midis: SALAMANDER_MIDIS },
 };
 const sampleCache = Object.fromEntries(Object.keys(SAMPLE_DEFS).map(k => [k, {}]));
 
-function midiToSampleName(midi) {
-  const names = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+const FLAT_NAMES  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+const SHARP_NAMES = ['C','Cs','D','Ds','E','F','Fs','G','Gs','A','As','B'];
+function midiToSampleName(midi, naming = 'flat') {
+  const names = naming === 'sharp' ? SHARP_NAMES : FLAT_NAMES;
   return names[midi % 12] + (Math.floor(midi / 12) - 1);
 }
 
 function nearestSampleMidi(instrument, midiNote) {
-  return SAMPLE_MIDIS.reduce((best, m) => Math.abs(m - midiNote) < Math.abs(best - midiNote) ? m : best, SAMPLE_MIDIS[0]);
+  const list = SAMPLE_DEFS[instrument]?.midis || SAMPLE_MIDIS;
+  return list.reduce((best, m) => Math.abs(m - midiNote) < Math.abs(best - midiNote) ? m : best, list[0]);
 }
 
 function fetchSample(instrument, midiNote) {
@@ -600,7 +618,9 @@ function fetchSample(instrument, midiNote) {
   if (cached instanceof AudioBuffer) return Promise.resolve(cached);
   if (cached instanceof Promise) return cached;
   const def = SAMPLE_DEFS[instrument];
-  const url = (def.base || SOUNDFONT_BASE) + def.dir + '/' + midiToSampleName(midiNote) + '.mp3';
+  const baseUrl = def.base || SOUNDFONT_BASE;
+  const subdir  = def.dir ? def.dir + '/' : '';
+  const url = baseUrl + subdir + midiToSampleName(midiNote, def.noteNaming) + '.mp3';
   const p = new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     xhr.open('GET', url, true);
@@ -646,7 +666,7 @@ async function preloadSamples(instrument) {
   const el = document.getElementById('synth-loading');
   el.style.color = 'var(--accent)';
   el.style.display = '';
-  const midis = SAMPLE_MIDIS;
+  const midis = SAMPLE_DEFS[instrument]?.midis || SAMPLE_MIDIS;
   let done = 0;
   el.textContent = `loading 0/${midis.length}…`;
   await Promise.all(midis.map(m => fetchSample(instrument, m).then(r => {
@@ -2481,7 +2501,7 @@ function invFlfo(v)      { return Math.round(v / 8); }
 const INSTRUMENT_PRESETS = {
   piano:   { attack:0.005, decay:0.8,  sustain:0.2,  release:2.0,  filterFreq:5000, filterQ:0.5, overtones:0.2, reverb:0.4,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   epiano:  { attack:0.008, decay:0.5,  sustain:0.35, release:1.5,  filterFreq:3000, filterQ:1.5, overtones:0.2, reverb:0.35, detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0.40, delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
-  'epiano-long': { attack:0.008, decay:0.5,  sustain:0.35, release:1.5,  filterFreq:3000, filterQ:1.5, overtones:0.2, reverb:0.35, detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0.40, delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
+  'piano-long': { attack:0.005, decay:0.8,  sustain:0.2,  release:2.5,  filterFreq:5000, filterQ:0.5, overtones:0.2, reverb:0.45, detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   epiano2: { attack:0.008, decay:0.4,  sustain:0.4,  release:1.2,  filterFreq:3500, filterQ:1.0, overtones:0.2, reverb:0.3,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   organ:   { attack:0.02,  decay:0.1,  sustain:0.9,  release:0.08, filterFreq:4000, filterQ:0.5, overtones:0.2, reverb:0.3,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:6, tremoloDepth:0.1,  delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   strings: { attack:0.4,   decay:0.3,  sustain:0.8,  release:1.5,  filterFreq:3000, filterQ:1.0, overtones:0.2, reverb:0.6,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
@@ -5489,7 +5509,7 @@ requestAnimationFrame(seqUpdateHints);
 const TRACK_LANE_MAP = { chords: 'seq-lane', melody: 'seq-note-lane', free: 'seq-midi-lane' };
 const TRACK_NAMES = { chords: 'Chords', melody: 'Melody', free: 'Free' };
 const INSTRUMENT_OPTIONS = [
-  ['synth', 'Synth'], ['piano', 'Piano'], ['epiano', 'E-Piano'], ['epiano-long', 'E-Piano (long)'], ['epiano2', 'E-Piano 2'],
+  ['synth', 'Synth'], ['piano', 'Piano'], ['piano-long', 'Piano (long)'], ['epiano', 'E-Piano'], ['epiano2', 'E-Piano 2'],
   ['organ', 'Organ'], ['strings', 'Strings'], ['choir', 'Choir'], ['vibes', 'Vibes'], ['pad', 'Pad'],
 ];
 
