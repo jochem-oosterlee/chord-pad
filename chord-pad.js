@@ -3258,6 +3258,7 @@ function seqRender() {
   initSeqLoopStart();
   seqUpdateLoopVisible();
   syncTrackLabelHeights();
+  seqRenderRuler();
   refreshLucide();
   seqSave();
 }
@@ -3275,6 +3276,7 @@ function seqRenderNotes() {
   seqRollAddLines(lane);
   seqUpdateLoopEnd();
   syncTrackLabelHeights();
+  seqRenderRuler();
   refreshLucide();
   seqSave();
 }
@@ -3582,6 +3584,7 @@ function seqRenderMidi() {
   seqRollAddLines(lane);
   seqUpdateLoopEnd();
   syncTrackLabelHeights();
+  seqRenderRuler();
   refreshLucide();
   seqSave();
 }
@@ -5156,6 +5159,31 @@ document.getElementById('seq-metro-btn').addEventListener('click', () => {
 function seqUpdateBarLine() {
   document.documentElement.style.setProperty('--bar-px',  (state.beatsPerBar * BEAT_PX) + 'px');
   document.documentElement.style.setProperty('--beat-px', BEAT_PX + 'px');
+  seqRenderRuler();
+}
+
+function seqRenderRuler() {
+  const ruler = document.getElementById('seq-ruler');
+  if (!ruler) return;
+  const widthPx = Math.max(
+    seqLaneWidth(SEQ.items),
+    seqLaneWidth(SEQ.noteItems),
+    seqLaneWidth(SEQ.midiItems),
+    4 * BEAT_PX + 64
+  );
+  ruler.style.width = widthPx + 'px';
+  const bpb = state.beatsPerBar;
+  const totalBeats = Math.ceil(widthPx / BEAT_PX);
+  const totalBars  = Math.ceil(totalBeats / bpb) + 1;
+  let html = '';
+  for (let bar = 0; bar < totalBars; bar++) {
+    const left = bar * bpb * BEAT_PX;
+    html += `<div class="seq-ruler-bar" style="left:${left}px"><span>${bar + 1}</span></div>`;
+    for (let b = 1; b < bpb; b++) {
+      html += `<div class="seq-ruler-beat" style="left:${left + b * BEAT_PX}px"></div>`;
+    }
+  }
+  ruler.innerHTML = html;
 }
 
 document.getElementById('seq-timesig').addEventListener('change', (e) => {
