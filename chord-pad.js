@@ -621,6 +621,24 @@ function fetchSample(instrument, midiNote) {
   return p;
 }
 
+// Defer sample preloading until the first user gesture so we don't construct
+// an AudioContext before it's allowed (Chrome autoplay policy warning).
+let _firstGestureSeen = false;
+const _pendingPreloads = new Set();
+function preloadSamplesOnGesture(instrument) {
+  if (_firstGestureSeen) preloadSamples(instrument);
+  else _pendingPreloads.add(instrument);
+}
+function _onFirstGesture() {
+  if (_firstGestureSeen) return;
+  _firstGestureSeen = true;
+  for (const inst of _pendingPreloads) preloadSamples(inst);
+  _pendingPreloads.clear();
+}
+window.addEventListener('pointerdown', _onFirstGesture, { capture: true, once: true });
+window.addEventListener('keydown',     _onFirstGesture, { capture: true, once: true });
+window.addEventListener('touchstart',  _onFirstGesture, { capture: true, once: true });
+
 async function preloadSamples(instrument) {
   const el = document.getElementById('synth-loading');
   el.style.color = 'var(--accent)';
@@ -5437,7 +5455,7 @@ handleTempoInput(document.getElementById('ctrl-tempo'));
 document.getElementById('synth-instrument').value = state.instrument;
 if (state.instrument !== 'synth') {
   applySynthPreset(INSTRUMENT_PRESETS[state.instrument]);
-  preloadSamples(state.instrument);
+  preloadSamplesOnGesture(state.instrument);
 }
 updateSynthOnlyVisibility();
 
@@ -5544,7 +5562,7 @@ buildTrackHeaders();
 // Preload samples for any per-track instrument that isn't already covered by the global one
 for (const tr of Object.values(SEQ.tracks)) {
   if (tr.instrument && tr.instrument !== 'synth' && tr.instrument !== state.instrument) {
-    preloadSamples(tr.instrument);
+    preloadSamplesOnGesture(tr.instrument);
   }
 }
 
