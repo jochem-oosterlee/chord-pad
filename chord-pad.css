@@ -1602,7 +1602,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   flex-direction: column;
   gap: 6px;
   flex-shrink: 0;
-  padding-top: 28px; /* ruler-height (18) + ruler-margin (4) + tracks-inner gap (6) */
+  padding-top: 50px; /* lane-wrap padding (22) + ruler (18) + ruler margin (4) + tracks-inner gap (6) */
   padding-bottom: 4px;
 }
 .seq-track-label {
