@@ -1578,7 +1578,7 @@ function buildChordLibraryBoard() {
     'aug': '♯5',
     'power': 'no3',
     'sus2': 'add9 no3',
-    'sus4': 'add11 no3',
+    'sus4': 'sus',
     'sus24': 'sus4add9',
     'maj6': 'M6',
     'min6': '−6',

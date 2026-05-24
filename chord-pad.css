@@ -851,7 +851,7 @@ input[type="range"]::-moz-range-thumb {
 }
 .pad-alt {
   position: absolute;
-  bottom: 5px; right: 6px;
+  bottom: -1px; right: -3px;
   pointer-events: none;
   font-family: 'JetBrains Mono', monospace;
   font-weight: 500;
