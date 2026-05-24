@@ -169,8 +169,9 @@ option { background: var(--bg); color: var(--text); }
   position: relative;
   padding: 28px 36px 24px 36px;
   max-width: 1240px;
-  margin-left: auto;
-  margin-right: auto;
+  margin: 8px auto;
+  border-radius: 8px;
+  overflow: hidden;
 }
 .card.prog {
   background-color: var(--prog-card);
