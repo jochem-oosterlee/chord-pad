@@ -168,6 +168,9 @@ option { background: var(--bg); color: var(--text); }
 .card {
   position: relative;
   padding: 28px 36px 24px 36px;
+  max-width: 1240px;
+  margin-left: auto;
+  margin-right: auto;
 }
 .card.prog {
   background-color: var(--prog-card);
