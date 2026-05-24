@@ -760,6 +760,9 @@ function startSampleNote(midiNote, velocity, at = null, autoRelease = null, inst
 
 function startAudioNote(midiNote, velocity, at = null, autoRelease = null, instrumentOverride = null) {
   const instrument = instrumentOverride ?? state.instrument;
+  if (instrument && instrument.startsWith('sf2:')) {
+    return startSf2Note(midiNote, velocity, at, autoRelease, instrument);
+  }
   if (instrument !== 'synth') return startSampleNote(midiNote, velocity, at, autoRelease, instrument);
   const ctx = getAudioCtx();
   const t   = at ?? ctx.currentTime;
@@ -889,6 +892,136 @@ function startAudioNote(midiNote, velocity, at = null, autoRelease = null, instr
     synthNode.oscs.forEach(o => { try { o.stop(rel + relDur + 0.005); } catch(e) {} });
   }
   return synthNode;
+}
+
+// ============================================================
+// SF2 (SoundFont) playback — loops a sample between embedded loop points
+// for true sustained notes (the openDAW approach).
+// ============================================================
+const SF2_FILES = {
+  vintage: { url: 'sf2/VintageDreamsWaves-v2.sf2', sf2: null, loading: null },
+};
+const SF2_BUFFER_CACHE = new Map(); // sample identity → AudioBuffer
+
+function loadSf2(fileKey) {
+  const entry = SF2_FILES[fileKey];
+  if (!entry) return Promise.resolve(null);
+  if (entry.sf2)     return Promise.resolve(entry.sf2);
+  if (entry.loading) return entry.loading;
+  if (typeof window.SoundFont2 === 'undefined') return Promise.resolve(null);
+  entry.loading = fetch(entry.url)
+    .then(r => r.arrayBuffer())
+    .then(buf => { entry.sf2 = new window.SoundFont2(new Uint8Array(buf)); return entry.sf2; })
+    .catch(err => { console.error('SF2 load failed', entry.url, err); return null; });
+  return entry.loading;
+}
+
+function sf2BufferFromSample(ctx, sample) {
+  const cached = SF2_BUFFER_CACHE.get(sample);
+  if (cached) return cached;
+  const data = sample.data;
+  const sr = sample.header.sampleRate || 44100;
+  const buf = ctx.createBuffer(1, data.length, sr);
+  const ch = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) ch[i] = data[i] / 32768;
+  SF2_BUFFER_CACHE.set(sample, buf);
+  return buf;
+}
+
+// instrumentId format: "sf2:<fileKey>:<presetNumber>"
+function parseSf2InstrumentId(id) {
+  if (!id || !id.startsWith('sf2:')) return null;
+  const [, fileKey, presetStr] = id.split(':');
+  const preset = parseInt(presetStr, 10);
+  if (isNaN(preset)) return null;
+  return { fileKey, preset };
+}
+
+function startSf2Note(midiNote, velocity, at, autoRelease, instrumentId) {
+  const parsed = parseSf2InstrumentId(instrumentId);
+  if (!parsed) return null;
+  const entry = SF2_FILES[parsed.fileKey];
+  if (!entry || !entry.sf2) {
+    // Kick off background load; user will hear it on next note.
+    loadSf2(parsed.fileKey);
+    return null;
+  }
+  const sf2 = entry.sf2;
+  const keyData = sf2.getKeyData(midiNote, 0, parsed.preset);
+  if (!keyData || !keyData.sample) return null;
+
+  const ctx = getAudioCtx();
+  const t   = at ?? ctx.currentTime;
+  const s   = state.synth;
+  const sample = keyData.sample;
+  const sr     = sample.header.sampleRate || 44100;
+  const buffer = sf2BufferFromSample(ctx, sample);
+
+  const peak = (velocity / 127) * state.audioVolume * 1.2;
+
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(peak, t + s.attack);
+  env.gain.exponentialRampToValueAtTime(Math.max(peak * s.sustain, 0.0001), t + s.attack + s.decay);
+  env.gain.setValueAtTime(peak * s.sustain, t + s.attack + s.decay);
+  env.connect(ctx._out);
+
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = s.filterFreq; lp.Q.value = s.filterQ;
+  const tremGain = ctx.createGain(); tremGain.gain.value = 1;
+  lp.connect(tremGain); tremGain.connect(env);
+
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  // Pitch: shift by (midi - originalPitch) + pitchCorrection cents
+  const semitones = (midiNote - sample.header.originalPitch) + (sample.header.pitchCorrection || 0) / 100;
+  src.playbackRate.value = Math.pow(2, semitones / 12);
+  // Loop between SF2's embedded markers (relative to this sample's data)
+  const loopStartFrames = sample.header.startLoop;
+  const loopEndFrames   = sample.header.endLoop;
+  if (loopEndFrames > loopStartFrames && loopEndFrames <= buffer.length) {
+    src.loop = true;
+    src.loopStart = loopStartFrames / sr;
+    src.loopEnd   = loopEndFrames   / sr;
+  }
+  src.connect(lp);
+
+  if (ctx._reverb) {
+    ctx._reverbWet.gain.value = s.reverb;
+    const rs = ctx.createGain(); rs.gain.value = 0.5;
+    env.connect(rs); rs.connect(ctx._reverb);
+  }
+  if (ctx._delay) {
+    ctx._delay.delayTime.value = s.delayTime;
+    ctx._delayFb.gain.value = s.delayFeedback;
+    ctx._delayWet.gain.value = s.delayWet;
+    env.connect(ctx._delay);
+  }
+
+  const oscs = [src];
+  if (s.tremoloDepth > 0) {
+    tremGain.gain.value = 1 - s.tremoloDepth * 0.5;
+    const tLfo = ctx.createOscillator(); tLfo.frequency.value = s.tremoloRate;
+    const tg = ctx.createGain(); tg.gain.value = s.tremoloDepth * 0.5;
+    tLfo.connect(tg); tg.connect(tremGain.gain); tLfo.start(t); oscs.push(tLfo);
+  }
+  if (s.filterLfoDepth > 0) {
+    const fLfo = ctx.createOscillator(); fLfo.frequency.value = 1.0;
+    const fg = ctx.createGain(); fg.gain.value = s.filterLfoDepth;
+    fLfo.connect(fg); fg.connect(lp.frequency); fLfo.start(t); oscs.push(fLfo);
+  }
+
+  if (state.pitchBendCents) src.detune.value = state.pitchBendCents;
+  src.start(t);
+  const node = { oscs, env, startTime: t, peak };
+  if (autoRelease !== null) {
+    const rel = t + autoRelease;
+    const relDur = 0.05;
+    node.env.gain.setValueAtTime(peak * s.sustain, rel);
+    node.env.gain.exponentialRampToValueAtTime(0.0001, rel + relDur);
+    src.stop(rel + relDur + 0.005);
+  }
+  return node;
 }
 
 function stopAudioNote(node) {
@@ -2386,7 +2519,11 @@ document.getElementById('synth-instrument').addEventListener('change', async (e)
   savedPresets[prev] = { ...state.synth };
   state.instrument = next;
   updateSynthOnlyVisibility();
-  if (next !== 'synth') {
+  if (next.startsWith('sf2:')) {
+    applySynthPreset(savedPresets[next] || INSTRUMENT_PRESETS['sf2:default']);
+    const parsed = parseSf2InstrumentId(next);
+    if (parsed) loadSf2(parsed.fileKey);
+  } else if (next !== 'synth') {
     applySynthPreset(savedPresets[next] || INSTRUMENT_PRESETS[next]);
     await preloadSamples(next);
   } else if (savedPresets.synth) {
@@ -2502,6 +2639,7 @@ const INSTRUMENT_PRESETS = {
   piano:   { attack:0.005, decay:0.8,  sustain:0.2,  release:2.0,  filterFreq:5000, filterQ:0.5, overtones:0.2, reverb:0.4,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   epiano:  { attack:0.008, decay:0.5,  sustain:0.35, release:1.5,  filterFreq:3000, filterQ:1.5, overtones:0.2, reverb:0.35, detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0.40, delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   'piano-long': { attack:0.005, decay:0.8,  sustain:0.2,  release:2.5,  filterFreq:5000, filterQ:0.5, overtones:0.2, reverb:0.45, detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
+  'sf2:default':  { attack:0.02,  decay:0.3,  sustain:0.85, release:0.6,  filterFreq:5000, filterQ:0.5, overtones:0.2, reverb:0.45, detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   epiano2: { attack:0.008, decay:0.4,  sustain:0.4,  release:1.2,  filterFreq:3500, filterQ:1.0, overtones:0.2, reverb:0.3,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   organ:   { attack:0.02,  decay:0.1,  sustain:0.9,  release:0.08, filterFreq:4000, filterQ:0.5, overtones:0.2, reverb:0.3,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:6, tremoloDepth:0.1,  delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   strings: { attack:0.4,   decay:0.3,  sustain:0.8,  release:1.5,  filterFreq:3000, filterQ:1.0, overtones:0.2, reverb:0.6,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
@@ -5511,6 +5649,10 @@ const TRACK_NAMES = { chords: 'Chords', melody: 'Melody', free: 'Free' };
 const INSTRUMENT_OPTIONS = [
   ['synth', 'Synth'], ['piano', 'Piano'], ['piano-long', 'Piano (long)'], ['epiano', 'E-Piano'], ['epiano2', 'E-Piano 2'],
   ['organ', 'Organ'], ['strings', 'Strings'], ['choir', 'Choir'], ['vibes', 'Vibes'], ['pad', 'Pad'],
+  ['sf2:vintage:90', 'SF2 · Dreamy Pad'],
+  ['sf2:vintage:12', 'SF2 · Church Organ'],
+  ['sf2:vintage:86', 'SF2 · Sustained Harp'],
+  ['sf2:vintage:89', 'SF2 · Techno Bells'],
 ];
 
 function buildTrackHeaders() {
@@ -5550,7 +5692,12 @@ function buildTrackHeaders() {
     });
     label.querySelector('.seq-th-inst').addEventListener('change', (e) => {
       tr.instrument = e.target.value; seqSave();
-      if (tr.instrument !== 'synth') preloadSamples(tr.instrument);
+      if (tr.instrument.startsWith('sf2:')) {
+        const parsed = parseSf2InstrumentId(tr.instrument);
+        if (parsed) loadSf2(parsed.fileKey);
+      } else if (tr.instrument !== 'synth') {
+        preloadSamples(tr.instrument);
+      }
     });
     label.querySelector('.seq-th-m').addEventListener('click', (e) => {
       tr.muted = !tr.muted; e.currentTarget.classList.toggle('on', tr.muted); seqSave();
@@ -5585,7 +5732,11 @@ function toggleTrackCollapse(label) {
 buildTrackHeaders();
 // Preload samples for any per-track instrument that isn't already covered by the global one
 for (const tr of Object.values(SEQ.tracks)) {
-  if (tr.instrument && tr.instrument !== 'synth' && tr.instrument !== state.instrument) {
+  if (!tr.instrument || tr.instrument === 'synth' || tr.instrument === state.instrument) continue;
+  if (tr.instrument.startsWith('sf2:')) {
+    const parsed = parseSf2InstrumentId(tr.instrument);
+    if (parsed) loadSf2(parsed.fileKey);
+  } else {
     preloadSamplesOnGesture(tr.instrument);
   }
 }
