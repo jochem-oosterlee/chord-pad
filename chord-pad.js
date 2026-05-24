@@ -2585,6 +2585,21 @@ function getBaseKey(e) {
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   const key = getBaseKey(e);
+
+  // Sequencer shortcuts: undo/redo, copy/cut/paste, delete selection
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    if (key === 'z' && !e.shiftKey) { e.preventDefault(); seqUndo(); return; }
+    if (key === 'z' && e.shiftKey)  { e.preventDefault(); seqRedo(); return; }
+    if (key === 'y' && !e.shiftKey) { e.preventDefault(); seqRedo(); return; }
+    if (key === 'c' && !e.shiftKey) { e.preventDefault(); seqCopySelection(); return; }
+    if (key === 'x' && !e.shiftKey) { e.preventDefault(); seqCutSelection(); return; }
+    if (key === 'v' && !e.shiftKey) { e.preventDefault(); seqPasteSelection(); return; }
+    if (key === 'a' && !e.shiftKey) { e.preventDefault(); seqSelectAll(); return; }
+  }
+  if (key === 'delete' || key === 'backspace') {
+    if (SEQ.selection.length > 0) { e.preventDefault(); seqDeleteSelection(); return; }
+  }
+
   if (heldKeys.has(key)) return;
   heldKeys.add(key);
   if (key === ' ') { e.preventDefault(); flashHint('hint-space'); if (SEQ.playing) seqStop(); else seqPlay(); return; }
@@ -2880,7 +2895,148 @@ const SEQ = {
     melody: { instrument: 'epiano', channel: 0, volume: 1.0, muted: false, soloed: false },
     free:   { instrument: 'epiano', channel: 0, volume: 1.0, muted: false, soloed: false },
   },
+
+  // Undo / redo
+  _undoStack: [],
+  _redoStack: [],
+
+  // Selection / clipboard (for copy/paste)
+  selection: [], // [{track: 'chords'|'melody'|'free', idx}]
+  clipboard: null, // { items: [...with rel start...], length }
 };
+
+// ---------- Undo / Redo ----------
+const SEQ_UNDO_LIMIT = 60;
+function seqSnapshot() {
+  return JSON.stringify({
+    items: SEQ.items, noteItems: SEQ.noteItems, midiItems: SEQ.midiItems,
+    loopStart: SEQ.loopStart, loopEnd: SEQ.loopEnd, loop: SEQ.loop,
+  });
+}
+function seqCheckpoint() {
+  const snap = seqSnapshot();
+  const stack = SEQ._undoStack;
+  if (stack.length > 0 && stack[stack.length - 1] === snap) return;
+  stack.push(snap);
+  if (stack.length > SEQ_UNDO_LIMIT) stack.shift();
+  SEQ._redoStack.length = 0;
+}
+function seqApplySnapshot(json) {
+  try {
+    const d = JSON.parse(json);
+    SEQ.items     = d.items     || [];
+    SEQ.noteItems = d.noteItems || [];
+    SEQ.midiItems = d.midiItems || [];
+    if (typeof d.loopStart === 'number') SEQ.loopStart = d.loopStart;
+    if (typeof d.loopEnd   === 'number') SEQ.loopEnd   = d.loopEnd;
+    if (typeof d.loop      === 'boolean') SEQ.loop     = d.loop;
+    SEQ.selection = []; // identity broken on parse
+    SEQ.pendingIdx = 0; SEQ.notePendingIdx = 0; SEQ.midiPendingIdx = 0;
+    seqRender();
+    seqRenderNotes();
+    seqRenderMidi();
+  } catch (_) {}
+}
+function seqUndo() {
+  if (SEQ._undoStack.length === 0) return;
+  SEQ._redoStack.push(seqSnapshot());
+  seqApplySnapshot(SEQ._undoStack.pop());
+}
+function seqRedo() {
+  if (SEQ._redoStack.length === 0) return;
+  SEQ._undoStack.push(seqSnapshot());
+  seqApplySnapshot(SEQ._redoStack.pop());
+}
+
+// ---------- Selection / clipboard ----------
+function seqTrackItems(track) {
+  if (track === 'chords') return SEQ.items;
+  if (track === 'melody') return SEQ.noteItems;
+  if (track === 'free')   return SEQ.midiItems;
+  return [];
+}
+function seqIsSelected(track, item) {
+  return SEQ.selection.some(s => s.track === track && s.item === item);
+}
+function seqSelectionToggle(track, item, additive) {
+  if (!additive) SEQ.selection = [];
+  const i = SEQ.selection.findIndex(s => s.track === track && s.item === item);
+  if (i >= 0) SEQ.selection.splice(i, 1);
+  else SEQ.selection.push({ track, item });
+  seqRefreshSelectionVisuals();
+}
+function seqClearSelection() {
+  if (SEQ.selection.length === 0) return;
+  SEQ.selection = [];
+  seqRefreshSelectionVisuals();
+}
+function seqRefreshSelectionVisuals() {
+  document.querySelectorAll('.seq-lane .seq-block, .seq-lane .roll-note')
+    .forEach(el => el.classList.remove('selected'));
+  for (const sel of SEQ.selection) {
+    const items = seqTrackItems(sel.track);
+    const idx = items.indexOf(sel.item);
+    if (idx < 0) continue;
+    const laneId = TRACK_LANE_MAP[sel.track];
+    const lane   = document.getElementById(laneId);
+    if (!lane) continue;
+    const blocks = lane.querySelectorAll('.seq-block, .roll-note');
+    if (blocks[idx]) blocks[idx].classList.add('selected');
+  }
+}
+function seqSelectAll() {
+  SEQ.selection = [];
+  SEQ.items.forEach(it => SEQ.selection.push({ track: 'chords', item: it }));
+  SEQ.noteItems.forEach(it => SEQ.selection.push({ track: 'melody', item: it }));
+  SEQ.midiItems.forEach(it => SEQ.selection.push({ track: 'free', item: it }));
+  seqRefreshSelectionVisuals();
+}
+function seqDeleteSelection() {
+  if (SEQ.selection.length === 0) return;
+  seqCheckpoint();
+  for (const sel of SEQ.selection) {
+    const items = seqTrackItems(sel.track);
+    const i = items.indexOf(sel.item);
+    if (i >= 0) items.splice(i, 1);
+  }
+  SEQ.selection = [];
+  seqRender(); seqRenderNotes(); seqRenderMidi();
+}
+function seqCopySelection() {
+  if (SEQ.selection.length === 0) return;
+  const minStart = Math.min(...SEQ.selection.map(s => s.item.start));
+  SEQ.clipboard = {
+    items: SEQ.selection.map(s => ({
+      track: s.track,
+      data:  JSON.parse(JSON.stringify(s.item)),
+      relStart: s.item.start - minStart,
+    })),
+  };
+}
+function seqCutSelection() {
+  if (SEQ.selection.length === 0) return;
+  seqCopySelection();
+  seqDeleteSelection();
+}
+function seqPasteSelection() {
+  if (!SEQ.clipboard || SEQ.clipboard.items.length === 0) return;
+  seqCheckpoint();
+  const baseBeat = SEQ.loopEnd;
+  const newSelection = [];
+  let maxEnd = baseBeat;
+  for (const e of SEQ.clipboard.items) {
+    const newItem = { ...e.data, start: e.relStart + baseBeat };
+    seqTrackItems(e.track).push(newItem);
+    newSelection.push({ track: e.track, item: newItem });
+    maxEnd = Math.max(maxEnd, newItem.start + (newItem.beats || 1));
+  }
+  SEQ.items.sort((a, b) => a.start - b.start);
+  SEQ.noteItems.sort((a, b) => a.start - b.start);
+  SEQ.midiItems.sort((a, b) => a.start - b.start);
+  SEQ.selection = newSelection;
+  seqAutoExtendLoop(maxEnd);
+  seqRender(); seqRenderNotes(); seqRenderMidi();
+}
 
 function seqTrackAudible(trackId) {
   const t = SEQ.tracks[trackId];
@@ -3063,6 +3219,7 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
   del.addEventListener('mousedown', (e) => { e.stopPropagation(); e.preventDefault(); });
   del.addEventListener('click', (e) => {
     e.stopPropagation();
+    seqCheckpoint();
     if (isMidi) {
       SEQ.midiItems.splice(idx, 1);
       if (SEQ.midiPendingIdx >= SEQ.midiItems.length) SEQ.midiPendingIdx = 0;
@@ -3085,6 +3242,7 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
   resize.innerHTML = '<i data-lucide="grip-vertical"></i>';
   resize.addEventListener('pointerdown', (e) => {
     e.stopPropagation(); e.preventDefault();
+    seqCheckpoint();
     resize.setPointerCapture(e.pointerId);
     const startX = e.clientX, startBts = item.beats;
     const snap = 0.5;
@@ -3115,6 +3273,7 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
   block.addEventListener('pointerdown', (e) => {
     if (e.target.closest('.seq-resize') || e.target.closest('.seq-delete')) return;
     e.preventDefault();
+    seqCheckpoint();
     block.setPointerCapture(e.pointerId);
     if (state.audioEnabled) {
       let previewNodes;
@@ -3143,7 +3302,8 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
       block.style.left = (item.start * BEAT_PX) + 'px';
       if (lane) lane.style.minWidth = seqLaneWidth(items) + 'px';
     };
-    const onUp = () => {
+    const trackId = isMidi ? 'free' : isNote ? 'melody' : 'chords';
+    const onUp = (ev) => {
       block.removeEventListener('pointermove', onMove);
       block.removeEventListener('pointerup', onUp);
       block.classList.remove('moving');
@@ -3152,6 +3312,8 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
         items.sort((a, b) => a.start - b.start);
         seqAutoExtendLoop(item.start + item.beats);
         if (isMidi) seqRenderMidi(); else if (isNote) seqRenderNotes(); else seqRender();
+      } else {
+        seqSelectionToggle(trackId, item, ev.ctrlKey || ev.metaKey || ev.shiftKey);
       }
     };
     block.addEventListener('pointermove', onMove);
@@ -3260,6 +3422,7 @@ function seqRender() {
   syncTrackLabelHeights();
   seqRenderRuler();
   refreshLucide();
+  seqRefreshSelectionVisuals();
   seqSave();
 }
 
@@ -3278,6 +3441,7 @@ function seqRenderNotes() {
   syncTrackLabelHeights();
   seqRenderRuler();
   refreshLucide();
+  seqRefreshSelectionVisuals();
   seqSave();
 }
 
@@ -3586,6 +3750,7 @@ function seqRenderMidi() {
   syncTrackLabelHeights();
   seqRenderRuler();
   refreshLucide();
+  seqRefreshSelectionVisuals();
   seqSave();
 }
 
@@ -4140,6 +4305,7 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
         }
       }
       if (!hitLaneId) return;
+      seqCheckpoint();
       if (hitLaneId === 'seq-midi-lane') {
         if (isChord) {
           const notes = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
@@ -4318,6 +4484,7 @@ function initSeqLanePan() {
         document.removeEventListener('touchend',  onUp);
         document.removeEventListener('touchcancel', onUp);
         ghost.remove();
+        seqCheckpoint();
         SEQ.midiItems.push({ midi, label: midiNoteLabel(midi), beats, start: startBeat });
         SEQ.midiItems.sort((a, b) => a.start - b.start);
         seqAutoExtendLoop(startBeat + beats);
@@ -4352,6 +4519,11 @@ function initSeqLanePan() {
     if (target.closest(EXCLUDE)) return;
     const laneEl = target.closest('#seq-lane, #seq-note-lane, #seq-midi-lane');
     if (!laneEl) return;
+    // Click on empty lane area clears selection (unless modifier or pen tool)
+    if (!target.closest('.seq-block, .roll-note') && !e.ctrlKey && !e.metaKey && !e.shiftKey
+        && !(SEQ.rollTool === 'pen' && laneEl.id === 'seq-midi-lane')) {
+      seqClearSelection();
+    }
 
     // Pen tool: draw note on roll background — drag sets duration
     if (SEQ.rollTool === 'pen' && laneEl.id === 'seq-midi-lane') {
@@ -4380,6 +4552,7 @@ function initSeqLanePan() {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
         ghost.remove();
+        seqCheckpoint();
         SEQ.midiItems.push({ midi, label: midiNoteLabel(midi), beats, start: startBeat });
         SEQ.midiItems.sort((a, b) => a.start - b.start);
         seqAutoExtendLoop(startBeat + beats);
@@ -4446,6 +4619,7 @@ function initSeqMidiLane() {
     if (rawChord) {
       const data  = JSON.parse(rawChord);
       const notes = chordNotesAtY(lane, e.clientY, data.interval, data.q);
+      seqCheckpoint();
       notes.forEach(midi => SEQ.midiItems.push({ midi, label: midiNoteLabel(midi), beats: state.beatsPerBar, start: dropBeat }));
       SEQ.midiItems.sort((a, b) => a.start - b.start);
       seqAutoExtendLoop(dropBeat + state.beatsPerBar);
@@ -4456,6 +4630,7 @@ function initSeqMidiLane() {
     const raw = e.dataTransfer.getData('application/x-note');
     if (!raw) return;
     const data  = JSON.parse(raw);
+    seqCheckpoint();
     SEQ.midiItems.push({ midi: data.midi, label: data.label, beats: 1, start: dropBeat });
     SEQ.midiItems.sort((a, b) => a.start - b.start);
     seqAutoExtendLoop(dropBeat + 1);
@@ -4493,6 +4668,7 @@ function initSeqNoteLane() {
     const rect  = lane.getBoundingClientRect();
     const dropBeat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
     const start = dropBeat;
+    seqCheckpoint();
     SEQ.noteItems.push({ midi: data.midi, label: data.label, beats: 1, start });
     SEQ.noteItems.sort((a, b) => a.start - b.start);
     seqAutoExtendLoop(start + 1);
@@ -4562,6 +4738,7 @@ function initSeqLane() {
     const rect  = lane.getBoundingClientRect();
     const dropBeat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
     const start = dropBeat;
+    seqCheckpoint();
     SEQ.items.push({
       interval:     data.interval,
       q:            data.q,
@@ -5228,6 +5405,7 @@ document.getElementById('seq-loop-btn').addEventListener('click', () => {
 
 document.getElementById('seq-clear-btn').addEventListener('click', () => {
   seqStop();
+  if (SEQ.items.length || SEQ.noteItems.length || SEQ.midiItems.length) seqCheckpoint();
   SEQ.items = [];
   SEQ.noteItems = [];
   SEQ.midiItems = [];

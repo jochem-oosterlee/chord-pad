@@ -1838,6 +1838,11 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   overflow: hidden;
 }
 .seq-block:hover { border-color: rgba(255,255,255,0.35); }
+.seq-block.selected, .roll-note.selected {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 1px var(--accent), 0 0 10px rgba(255,170,51,0.35);
+}
 .seq-block.active {
   background: rgba(255,170,51,0.2);
   border-color: var(--accent);
