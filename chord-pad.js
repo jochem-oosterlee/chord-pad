@@ -641,8 +641,8 @@ async function preloadSamples(instrument) {
   }
 }
 
-function startSampleNote(midiNote, velocity, at = null, autoRelease = null) {
-  const instrument = state.instrument;
+function startSampleNote(midiNote, velocity, at = null, autoRelease = null, instrumentOverride = null) {
+  const instrument = instrumentOverride ?? state.instrument;
   const ctx = getAudioCtx();
   const t = at ?? ctx.currentTime;
   const s = state.synth;
@@ -717,8 +717,9 @@ function startSampleNote(midiNote, velocity, at = null, autoRelease = null) {
   return sampleNode;
 }
 
-function startAudioNote(midiNote, velocity, at = null, autoRelease = null) {
-  if (state.instrument !== 'synth') return startSampleNote(midiNote, velocity, at, autoRelease);
+function startAudioNote(midiNote, velocity, at = null, autoRelease = null, instrumentOverride = null) {
+  const instrument = instrumentOverride ?? state.instrument;
+  if (instrument !== 'synth') return startSampleNote(midiNote, velocity, at, autoRelease, instrument);
   const ctx = getAudioCtx();
   const t   = at ?? ctx.currentTime;
   const s   = state.synth;
@@ -866,9 +867,10 @@ function stopAudioNote(node) {
   node.oscs.forEach(o => o.stop(releaseAt + s.release));
 }
 
-function startBassNote(midiNote, at = null, autoRelease = null) {
-  if (state.instrument !== 'synth') {
-    const instrument = state.instrument;
+function startBassNote(midiNote, at = null, autoRelease = null, instrumentOverride = null) {
+  const effInstrument = instrumentOverride ?? state.instrument;
+  if (effInstrument !== 'synth') {
+    const instrument = effInstrument;
     const ctx = getAudioCtx();
     const t = at ?? ctx.currentTime;
     const sampleMidi = nearestSampleMidi(instrument, midiNote);
@@ -1011,14 +1013,16 @@ function refreshInputs() {
   attachMidiInput();
 }
 
-function sendNoteOn(note, velocity) {
+function sendNoteOn(note, velocity, channelOverride = null) {
   if (!state.midiEnabled || !state.output) return;
-  state.output.send([0x90 | state.channel, note & 0x7F, velocity & 0x7F]);
+  const ch = channelOverride ?? state.channel;
+  state.output.send([0x90 | ch, note & 0x7F, velocity & 0x7F]);
   blinkLed();
 }
-function sendNoteOff(note) {
+function sendNoteOff(note, channelOverride = null) {
   if (!state.midiEnabled || !state.output) return;
-  state.output.send([0x80 | state.channel, note & 0x7F, 0]);
+  const ch = channelOverride ?? state.channel;
+  state.output.send([0x80 | ch, note & 0x7F, 0]);
 }
 function panic() {
   if (state.output) {
@@ -2869,7 +2873,27 @@ const SEQ = {
   _dragLabel: '',
   _dragChord: null,
   _dragHoverId: null,
+
+  // Per-track mixer (instrument / MIDI channel / volume / mute / solo)
+  tracks: {
+    chords: { instrument: 'epiano', channel: 0, volume: 1.0, muted: false, soloed: false },
+    melody: { instrument: 'epiano', channel: 0, volume: 1.0, muted: false, soloed: false },
+    free:   { instrument: 'epiano', channel: 0, volume: 1.0, muted: false, soloed: false },
+  },
 };
+
+function seqTrackAudible(trackId) {
+  const t = SEQ.tracks[trackId];
+  if (!t) return true;
+  const anySolo = Object.values(SEQ.tracks).some(tr => tr.soloed);
+  if (anySolo) return t.soloed;
+  return !t.muted;
+}
+function seqTrackVel(trackId, base) {
+  const t = SEQ.tracks[trackId];
+  if (!t) return base;
+  return Math.max(1, Math.min(127, Math.round(base * t.volume)));
+}
 
 function seqBeatDur() { return 60 / state.tempo; }
 
@@ -3150,6 +3174,7 @@ function seqSave() {
       loop: SEQ.loop,
       beatsPerBar: state.beatsPerBar,
       tempo: state.tempo,
+      tracks: SEQ.tracks,
     }));
   } catch (_) {}
 }
@@ -3167,6 +3192,11 @@ function seqLoad() {
     if (typeof d.loop        === 'boolean') SEQ.loop           = d.loop;
     if (typeof d.beatsPerBar === 'number')  state.beatsPerBar  = d.beatsPerBar;
     if (typeof d.tempo       === 'number')  state.tempo        = d.tempo;
+    if (d.tracks && typeof d.tracks === 'object') {
+      for (const id of ['chords', 'melody', 'free']) {
+        if (d.tracks[id]) Object.assign(SEQ.tracks[id], d.tracks[id]);
+      }
+    }
   } catch (_) {}
 }
 
@@ -3583,26 +3613,33 @@ function seqTick() {
     const bassNote = state.bassEnabled ? (state.bassOctave + 1) * 12 + (item.keyRoot + bassInt) % 12 : null;
     const offDelay = Math.max(0, (t + dur * 0.95 - now) * 1000);
 
-    if (state.audioEnabled) {
-      const audioNodes = notes.map((n, i) => startAudioNote(n, state.velocity, t + i * 0.002));
+    const trChord = SEQ.tracks.chords;
+    const chordAudible = seqTrackAudible('chords');
+    const vChord = seqTrackVel('chords', state.velocity);
+    if (state.audioEnabled && chordAudible) {
+      const audioNodes = notes.map((n, i) => startAudioNote(n, vChord, t + i * 0.002, null, trChord.instrument));
       audioNodes.forEach(n => SEQ.activeNodes.add(n));
       seqTimeout(() => audioNodes.forEach(n => { stopAudioNote(n); SEQ.activeNodes.delete(n); }), offDelay);
       if (bassNote !== null) {
-        const bassNode = startBassNote(bassNote, t);
+        const bassNode = startBassNote(bassNote, t, null, trChord.instrument);
         SEQ.activeNodes.add(bassNode);
         seqTimeout(() => { stopAudioNote(bassNode); SEQ.activeNodes.delete(bassNode); }, offDelay);
       }
     }
     const capturedNotes = [...notes], capturedBass = bassNote;
     seqTimeout(() => {
-      capturedNotes.forEach(n => sendNoteOn(n, state.velocity));
-      if (capturedBass !== null) sendNoteOn(capturedBass, state.velocity);
+      if (chordAudible) {
+        capturedNotes.forEach(n => sendNoteOn(n, vChord, trChord.channel));
+        if (capturedBass !== null) sendNoteOn(capturedBass, vChord, trChord.channel);
+      }
       SEQ.nowChord = chordDisplayName(item.keyRoot, item.interval, item.q) + ' [' + capturedNotes.map(midiNoteName).join(' · ') + ']';
       seqUpdateNowPlaying();
     }, onDelay);
     seqTimeout(() => {
-      capturedNotes.forEach(n => sendNoteOff(n));
-      if (capturedBass !== null) sendNoteOff(capturedBass);
+      if (chordAudible) {
+        capturedNotes.forEach(n => sendNoteOff(n, trChord.channel));
+        if (capturedBass !== null) sendNoteOff(capturedBass, trChord.channel);
+      }
       SEQ.nowChord = '';
       seqUpdateNowPlaying();
     }, offDelay);
@@ -3636,19 +3673,22 @@ function seqTick() {
     const onDelay  = Math.max(0, (t - now) * 1000);
     const offDelay = Math.max(0, (t + dur * 0.95 - now) * 1000);
 
-    if (state.audioEnabled) {
-      const node = startAudioNote(item.midi, state.velocity, t);
+    const trMel = SEQ.tracks.melody;
+    const melAudible = seqTrackAudible('melody');
+    const vMel = seqTrackVel('melody', state.velocity);
+    if (state.audioEnabled && melAudible) {
+      const node = startAudioNote(item.midi, vMel, t, null, trMel.instrument);
       SEQ.activeNodes.add(node);
       seqTimeout(() => { stopAudioNote(node); SEQ.activeNodes.delete(node); }, offDelay);
     }
     const capturedMidi = item.midi, capturedLabel = item.label;
     seqTimeout(() => {
-      sendNoteOn(capturedMidi, state.velocity);
+      if (melAudible) sendNoteOn(capturedMidi, vMel, trMel.channel);
       SEQ.nowNote = capturedLabel;
       seqUpdateNowPlaying();
     }, onDelay);
     seqTimeout(() => {
-      sendNoteOff(capturedMidi);
+      if (melAudible) sendNoteOff(capturedMidi, trMel.channel);
       SEQ.nowNote = '';
       seqUpdateNowPlaying();
     }, offDelay);
@@ -3682,19 +3722,22 @@ function seqTick() {
     const onDelay  = Math.max(0, (t - now) * 1000);
     const offDelay = Math.max(0, (t + dur * 0.95 - now) * 1000);
 
-    if (state.audioEnabled) {
-      const node = startAudioNote(item.midi, state.velocity, t);
+    const trFree = SEQ.tracks.free;
+    const freeAudible = seqTrackAudible('free');
+    const vFree = seqTrackVel('free', state.velocity);
+    if (state.audioEnabled && freeAudible) {
+      const node = startAudioNote(item.midi, vFree, t, null, trFree.instrument);
       SEQ.activeNodes.add(node);
       seqTimeout(() => { stopAudioNote(node); SEQ.activeNodes.delete(node); }, offDelay);
     }
     const capturedMidi = item.midi, capturedLabel = item.label;
     seqTimeout(() => {
-      sendNoteOn(capturedMidi, state.velocity);
+      if (freeAudible) sendNoteOn(capturedMidi, vFree, trFree.channel);
       SEQ.nowNote = capturedLabel;
       seqUpdateNowPlaying();
     }, onDelay);
     seqTimeout(() => {
-      sendNoteOff(capturedMidi);
+      if (freeAudible) sendNoteOff(capturedMidi, trFree.channel);
       SEQ.nowNote = '';
       seqUpdateNowPlaying();
     }, offDelay);
@@ -5216,19 +5259,81 @@ refreshLucide();
 requestAnimationFrame(seqUpdateHints);
 
 const TRACK_LANE_MAP = { chords: 'seq-lane', melody: 'seq-note-lane', free: 'seq-midi-lane' };
+const TRACK_NAMES = { chords: 'Chords', melody: 'Melody', free: 'Free' };
+const INSTRUMENT_OPTIONS = [
+  ['synth', 'Synth'], ['piano', 'Piano'], ['epiano', 'E-Piano'], ['epiano2', 'E-Piano 2'],
+  ['organ', 'Organ'], ['strings', 'Strings'], ['choir', 'Choir'], ['vibes', 'Vibes'], ['pad', 'Pad'],
+];
 
-document.querySelectorAll('.seq-track-label[data-track]').forEach(label => {
-  label.addEventListener('click', () => {
-    const track = label.dataset.track;
-    const isNowCollapsed = label.classList.toggle('track-collapsed');
-    const lane = document.getElementById(TRACK_LANE_MAP[track]);
-    if (lane) lane.classList.toggle('track-collapsed', isNowCollapsed);
-    if (track === 'free') seqRenderMidi();
-    const icon = label.querySelector('[data-lucide]');
-    if (icon) { icon.setAttribute('data-lucide', isNowCollapsed ? 'chevrons-up-down' : 'chevrons-down-up'); refreshLucide(); }
-    syncTrackLabelHeights();
+function buildTrackHeaders() {
+  document.querySelectorAll('.seq-track-label[data-track]').forEach(label => {
+    const trackId = label.dataset.track;
+    const tr = SEQ.tracks[trackId];
+    label.innerHTML = `
+      <div class="seq-th-row seq-th-top">
+        <span class="seq-th-name">${TRACK_NAMES[trackId]}</span>
+        <button class="seq-th-collapse" title="Collapse / expand"><i data-lucide="chevrons-down-up"></i></button>
+      </div>
+      <div class="seq-th-row seq-th-mid">
+        <select class="seq-th-inst" title="Instrument">
+          ${INSTRUMENT_OPTIONS.map(([v, n]) => `<option value="${v}"${tr.instrument === v ? ' selected' : ''}>${n}</option>`).join('')}
+        </select>
+      </div>
+      <div class="seq-th-row seq-th-bot">
+        <button class="seq-th-m${tr.muted ? ' on' : ''}" title="Mute">M</button>
+        <button class="seq-th-s${tr.soloed ? ' on' : ''}" title="Solo">S</button>
+        <span class="seq-th-ch-wrap" title="MIDI channel">
+          <span class="seq-th-ch-lbl">Ch</span>
+          <input type="number" class="seq-th-ch" min="1" max="16" value="${tr.channel + 1}">
+        </span>
+        <input type="range" class="seq-th-vol" min="0" max="150" value="${Math.round(tr.volume * 100)}" title="Volume">
+      </div>
+    `;
+
+    const stop = (e) => e.stopPropagation();
+    label.querySelectorAll('select, input, button').forEach(el => {
+      el.addEventListener('mousedown', stop);
+      el.addEventListener('click', stop);
+    });
+
+    label.querySelector('.seq-th-collapse').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleTrackCollapse(label);
+    });
+    label.querySelector('.seq-th-inst').addEventListener('change', (e) => {
+      tr.instrument = e.target.value; seqSave();
+    });
+    label.querySelector('.seq-th-m').addEventListener('click', (e) => {
+      tr.muted = !tr.muted; e.currentTarget.classList.toggle('on', tr.muted); seqSave();
+    });
+    label.querySelector('.seq-th-s').addEventListener('click', (e) => {
+      tr.soloed = !tr.soloed; e.currentTarget.classList.toggle('on', tr.soloed); seqSave();
+    });
+    label.querySelector('.seq-th-ch').addEventListener('change', (e) => {
+      const v = Math.max(1, Math.min(16, parseInt(e.target.value) || 1));
+      e.target.value = v;
+      tr.channel = v - 1; seqSave();
+    });
+    label.querySelector('.seq-th-vol').addEventListener('input', (e) => {
+      tr.volume = parseInt(e.target.value) / 100;
+    });
+    label.querySelector('.seq-th-vol').addEventListener('change', seqSave);
   });
-});
+  refreshLucide();
+}
+
+function toggleTrackCollapse(label) {
+  const track = label.dataset.track;
+  const isNowCollapsed = label.classList.toggle('track-collapsed');
+  const lane = document.getElementById(TRACK_LANE_MAP[track]);
+  if (lane) lane.classList.toggle('track-collapsed', isNowCollapsed);
+  if (track === 'free') seqRenderMidi();
+  const icon = label.querySelector('.seq-th-collapse [data-lucide]');
+  if (icon) { icon.setAttribute('data-lucide', isNowCollapsed ? 'chevrons-up-down' : 'chevrons-down-up'); refreshLucide(); }
+  syncTrackLabelHeights();
+}
+
+buildTrackHeaders();
 
 function rollSnapBeat(val) {
   if (!SEQ.rollSnap) return val;
