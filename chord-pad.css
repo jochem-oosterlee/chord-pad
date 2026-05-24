@@ -27,8 +27,8 @@
   --accent: #ffaa33;
   --pad-glow: rgba(255, 170, 51, 0.4);
 
-  --prog-card: #5a86a5;
-  --prog-card-deep: #4a7191;
+  --major-card: #5a86a5;
+  --major-card-deep: #4a7191;
   --minor-card: #3a4d7a;
   --minor-card-deep: #2e3e65;
   --lib-card: #b88a32;
@@ -175,8 +175,8 @@ option { background: var(--bg); color: var(--text); }
   border-radius: 8px;
   overflow: hidden;
 }
-.card.prog {
-  background-color: var(--prog-card);
+.card.major {
+  background-color: var(--major-card);
   background-image:
     linear-gradient(180deg, rgba(255,255,255,0.05), rgba(0,0,0,0.18)),
     radial-gradient(ellipse at 20% 0%, rgba(255,255,255,0.08), transparent 60%);
@@ -287,11 +287,11 @@ option { background: var(--bg); color: var(--text); }
 /* ─────────── chord chart ─────────── */
 .board { position: relative; z-index: 1; }
 
-/* Progressions: 3 horizontal rows */
-.prog-section { margin-bottom: 18px; }
-.prog-section:last-of-type { margin-bottom: 0; }
+/* Major Harmony: 3 horizontal rows */
+.major-section { margin-bottom: 18px; }
+.major-section:last-of-type { margin-bottom: 0; }
 
-.prog-flow-label {
+.major-flow-label {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -302,20 +302,20 @@ option { background: var(--bg); color: var(--text); }
   color: rgba(255,255,255,0.78);
   font-weight: 500;
 }
-.prog-flow-label .icon { width: 14px; height: 14px; flex-shrink: 0; }
-.prog-flow-label .icon path,
-.prog-flow-label .icon line,
-.prog-flow-label .icon circle { stroke: rgba(255,255,255,0.85); fill: none; stroke-width: 1.2; }
+.major-flow-label .icon { width: 14px; height: 14px; flex-shrink: 0; }
+.major-flow-label .icon path,
+.major-flow-label .icon line,
+.major-flow-label .icon circle { stroke: rgba(255,255,255,0.85); fill: none; stroke-width: 1.2; }
 
-.prog-row {
+.major-row {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   gap: 12px;
 }
-[data-board="progressions"].v2 .prog-row {
+[data-board="major-harmony"].v2 .major-row {
   grid-template-columns: repeat(7, 1fr);
 }
-.prog-row .pad-cell.empty { visibility: hidden; }
+.major-row .pad-cell.empty { visibility: hidden; }
 
 /* Minor Harmony rows */
 .minor-section {
@@ -375,9 +375,9 @@ option { background: var(--bg); color: var(--text); }
 }
 
 /* ─────────── group borders (rows with group-level arrows) ─────────── */
-.prog-row.secdom,
-.prog-row.main,
-.prog-row.modal,
+.major-row.secdom,
+.major-row.main,
+.major-row.modal,
 .minor-row.sd_v,
 .minor-row.main,
 .minor-row.sd_iv,
@@ -518,19 +518,19 @@ option { background: var(--bg); color: var(--text); }
   border-color: rgba(120, 220, 180, 0.4);
 }
 
-/* Stronger suggestion highlight on the blue prog card */
-.card.prog .pad.suggested:not(.active) .pad-button {
+/* Stronger suggestion highlight on the blue major card */
+.card.major .pad.suggested:not(.active) .pad-button {
   border-color: rgba(120, 220, 180, 0.9);
   box-shadow:
     0 0 0 1px rgba(120, 220, 180, 0.8),
     0 0 22px rgba(120, 220, 180, 0.45),
     inset 0 0 14px rgba(120, 220, 180, 0.18);
 }
-.card.prog .pad.suggested:not(.active) .pad-button .pad-name {
+.card.major .pad.suggested:not(.active) .pad-button .pad-name {
   color: rgb(120, 220, 180);
   text-shadow: 0 0 8px rgba(120, 220, 180, 0.6);
 }
-.card.prog .pad.suggested:not(.active) .pad-button .pad-key {
+.card.major .pad.suggested:not(.active) .pad-button .pad-key {
   color: rgba(120, 220, 180, 0.95);
   border-color: rgba(120, 220, 180, 0.7);
 }
@@ -588,7 +588,7 @@ option { background: var(--bg); color: var(--text); }
   stroke: rgba(120, 220, 180, 0.85);
   filter: drop-shadow(0 0 4px rgba(120, 220, 180, 0.55));
 }
-.prog-row.conn-active,
+.major-row.conn-active,
 .minor-row.conn-active {
   box-shadow: 0 0 0 2px rgba(120, 220, 180, 0.75), 0 0 14px rgba(120, 220, 180, 0.2);
 }
@@ -1061,7 +1061,7 @@ input[type="range"]::-moz-range-thumb {
   gap: 12px;
 }
 /* ─────────── shared cell styles (all tabs) ─────────── */
-.prog-row .pad-cell,
+.major-row .pad-cell,
 .minor-row .pad-cell,
 .scale-cell {
   display: flex;
@@ -1070,7 +1070,7 @@ input[type="range"]::-moz-range-thumb {
   position: relative;
   min-height: 50px;
 }
-.prog-row .pad-cell.empty,
+.major-row .pad-cell.empty,
 .minor-row .pad-cell.empty,
 .scale-cell-empty { visibility: hidden; }
 
@@ -1125,9 +1125,9 @@ input[type="range"]::-moz-range-thumb {
   .key-btn { font-size: 9px; padding: 6px 0; }
   select { min-width: 0; }
   .tab { padding: 10px 14px; font-size: 9px; }
-  .prog-row, .minor-row, .scale-row { gap: 6px; }
-  .prog-row .pad-cell, .minor-row .pad-cell, .scale-cell { min-height: 70px; }
-  .prog-flow-label, .minor-flow-label, .scale-row-label { font-size: 8px; letter-spacing: 0.18em; }
+  .major-row, .minor-row, .scale-row { gap: 6px; }
+  .major-row .pad-cell, .minor-row .pad-cell, .scale-cell { min-height: 70px; }
+  .major-flow-label, .minor-flow-label, .scale-row-label { font-size: 8px; letter-spacing: 0.18em; }
 }
 
 @media (max-width: 880px) and (orientation: portrait) {
@@ -1137,7 +1137,7 @@ input[type="range"]::-moz-range-thumb {
   .pad-ext { display: none; }
   .tab { white-space: nowrap; padding: 10px 8px; letter-spacing: 0.1em; }
   .help { display: none; }
-  .prog-row .pad-cell,
+  .major-row .pad-cell,
   .minor-row .pad-cell,
   .scale-cell { align-items: stretch; min-height: 0; }
   .pad { justify-content: stretch; }
@@ -1166,17 +1166,17 @@ input[type="range"]::-moz-range-thumb {
   .key-btn { padding: 4px 0; font-size: 9px; }
   .key-row .key-label-text { display: none; }
 
-  .prog-section { margin-bottom: 8px; }
+  .major-section { margin-bottom: 8px; }
   .minor-section { margin-bottom: 8px; }
-  .prog-flow-label, .minor-flow-label { padding-bottom: 4px; font-size: 7px; gap: 6px; }
-  .prog-flow-label .icon, .minor-flow-label .icon { width: 10px; height: 10px; }
+  .major-flow-label, .minor-flow-label { padding-bottom: 4px; font-size: 7px; gap: 6px; }
+  .major-flow-label .icon, .minor-flow-label .icon { width: 10px; height: 10px; }
 
-  .prog-row, .minor-row, .scale-row { gap: 5px; }
-  .prog-row .pad-cell, .minor-row .pad-cell, .scale-cell { min-height: 48px; }
+  .major-row, .minor-row, .scale-row { gap: 5px; }
+  .major-row .pad-cell, .minor-row .pad-cell, .scale-cell { min-height: 48px; }
 
-  .prog-row.secdom,
-  .prog-row.main,
-  .prog-row.modal,
+  .major-row.secdom,
+  .major-row.main,
+  .major-row.modal,
   .minor-row.sd_v,
   .minor-row.main,
   .minor-row.sd_iv,

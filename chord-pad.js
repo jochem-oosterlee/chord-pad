@@ -155,8 +155,8 @@ const ICON_UP = `<svg class="icon" viewBox="0 0 16 16"><line x1="8" y1="13.5" x2
 // TEMPLATES
 // ============================================================
 const TEMPLATES = {
-  'progressions': {
-    name: 'Progressions',
+  'major-harmony': {
+    name: 'Major Harmony',
     defaultKey: 0,
     keyMode: 'major',
     sections: [
@@ -280,7 +280,7 @@ const TEMPLATES = {
 };
 
 const V2_SECTIONS = {
-  'progressions': [
+  'major-harmony': [
     {
       id: 'secdom', flowIcon: ICON_NOLOOP, flowText: "DON'T MIX CHORDS", label: 'Secondary Dominants',
       chords: [
@@ -351,7 +351,7 @@ const V2_SECTIONS = {
 };
 
 const V2_KEYMAPS = {
-  'progressions': {
+  'major-harmony': {
     '1':['secdom',0],'2':['secdom',1],'3':['secdom',2],'4':['secdom',3],'5':['secdom',4],'6':['secdom',5],
     'q':['main',0],'w':['main',1],'e':['main',2],'r':['main',3],'t':['main',4],'y':['main',5],'u':['main',6],
     'a':['modal',0],'s':['modal',1],'d':['modal',2],'f':['modal',3],'g':['modal',4],
@@ -369,8 +369,8 @@ const V2_KEYMAPS = {
 // STATE
 // ============================================================
 const state = {
-  currentTemplate: 'progressions',
-  keys: { 'progressions': 0, 'minor-harmony': 9, 'scale-chords': 0, 'chord-library': 0 },
+  currentTemplate: 'major-harmony',
+  keys: { 'major-harmony': 0, 'minor-harmony': 9, 'scale-chords': 0, 'chord-library': 0 },
   scaleType: 'major',
   octave: 4,
   velocity: 100,
@@ -394,7 +394,7 @@ const state = {
   playStyle: 'off',
   tempo: 120,
   beatsPerBar: 4,
-  version: { 'progressions': 2, 'minor-harmony': 2 },
+  version: { 'major-harmony': 2, 'minor-harmony': 2 },
   bassOctave: 2,
   showPianoHover: false,
   synth: {
@@ -1054,31 +1054,31 @@ function showError(msg) {
 function getNextChords(currentPadId) {
   if (!currentPadId) return [];
 
-  if (state.currentTemplate === 'progressions') {
-    const m = currentPadId.match(/^prog-pad-(\w+)-(\d+)$/);
+  if (state.currentTemplate === 'major-harmony') {
+    const m = currentPadId.match(/^major-pad-(\w+)-(\d+)$/);
     if (!m) return [];
     const [, section, idxStr] = m;
     const idx = parseInt(idxStr, 10);
 
     if (section === 'main') {
-      const mainCount = state.version['progressions'] === 2 ? 7 : 6;
+      const mainCount = state.version['major-harmony'] === 2 ? 7 : 6;
       const result = [];
       for (let i = 0; i < mainCount; i++) {
-        if (i !== idx) result.push(`prog-pad-main-${i}`);
+        if (i !== idx) result.push(`major-pad-main-${i}`);
       }
-      for (let i = 0; i < 6; i++) result.push(`prog-pad-secdom-${i}`);
+      for (let i = 0; i < 6; i++) result.push(`major-pad-secdom-${i}`);
       // DOWN: I (0), IV (2), V (4) → any modal chord
       if (idx === 0 || idx === 2 || idx === 4) {
-        for (let i = 0; i < 5; i++) result.push(`prog-pad-modal-${i}`);
+        for (let i = 0; i < 5; i++) result.push(`major-pad-modal-${i}`);
       }
       return result;
     }
-    if (section === 'secdom') return [`prog-pad-main-${idx}`];
+    if (section === 'secdom') return [`major-pad-main-${idx}`];
     if (section === 'modal') {
       // UP: any modal → I (0), IV (2), V (4)
-      const result = ['prog-pad-main-0', 'prog-pad-main-2', 'prog-pad-main-4'];
+      const result = ['major-pad-main-0', 'major-pad-main-2', 'major-pad-main-4'];
       for (let i = 0; i < 5; i++) {
-        if (i !== idx) result.push(`prog-pad-modal-${i}`);
+        if (i !== idx) result.push(`major-pad-modal-${i}`);
       }
       return result;
     }
@@ -1724,14 +1724,14 @@ function buildChordLibraryBoard() {
   board.appendChild(boardEl);
 }
 
-function buildProgressionsBoard() {
-  const tpl = TEMPLATES['progressions'];
-  const board = document.querySelector('[data-board="progressions"]');
+function buildMajorHarmonyBoard() {
+  const tpl = TEMPLATES['major-harmony'];
+  const board = document.querySelector('[data-board="major-harmony"]');
   board.innerHTML = '';
-  const ver = state.version['progressions'];
+  const ver = state.version['major-harmony'];
   board.classList.toggle('v2', ver === 2);
-  const sections = ver === 2 ? V2_SECTIONS['progressions'] : tpl.sections;
-  const keymap  = ver === 2 ? V2_KEYMAPS['progressions']  : tpl.keymap;
+  const sections = ver === 2 ? V2_SECTIONS['major-harmony'] : tpl.sections;
+  const keymap  = ver === 2 ? V2_KEYMAPS['major-harmony']  : tpl.keymap;
 
   const reverseKeymap = {};
   for (const [k, v] of Object.entries(keymap)) {
@@ -1740,21 +1740,21 @@ function buildProgressionsBoard() {
 
   sections.forEach((section) => {
     const sectionEl = document.createElement('div');
-    sectionEl.className = 'prog-section';
+    sectionEl.className = 'major-section';
 
     const flowEl = document.createElement('div');
-    flowEl.className = 'prog-flow-label';
+    flowEl.className = 'major-flow-label';
     flowEl.innerHTML = `<span>${section.label}</span><span style="opacity:.45; margin-left:8px">${section.flowText}</span>`;
     sectionEl.appendChild(flowEl);
 
     const row = document.createElement('div');
-    row.className = `prog-row ${section.id}`;
+    row.className = `major-row ${section.id}`;
 
     section.chords.forEach((chord, cIdx) => {
       const cell = document.createElement('div');
       cell.className = 'pad-cell' + (chord ? '' : ' empty');
       if (chord) {
-        const padId = `prog-pad-${section.id}-${cIdx}`;
+        const padId = `major-pad-${section.id}-${cIdx}`;
         const keyLabel = reverseKeymap[`${section.id},${cIdx}`] || '';
         cell.appendChild(createPad(padId, chord, keyLabel, false));
       }
@@ -1856,20 +1856,20 @@ function buildMinorHarmonyBoard() {
 // CONNECTION ARROWS (SVG overlay)
 // ============================================================
 const CONNECTIONS = {
-  'progressions': [
+  'major-harmony': [
     // Main → Sec.Dom (group: one-way up)
-    { fromRow: '.prog-row.main', toRow: '.prog-row.secdom', type: 'oneway' },
+    { fromRow: '.major-row.main', toRow: '.major-row.secdom', type: 'oneway' },
     // Sec.Dom → Main (1-to-1: each secondary dominant resolves to its target)
-    { from: 'prog-pad-secdom-0', to: 'prog-pad-main-0', type: 'oneway' },
-    { from: 'prog-pad-secdom-1', to: 'prog-pad-main-1', type: 'oneway' },
-    { from: 'prog-pad-secdom-2', to: 'prog-pad-main-2', type: 'oneway' },
-    { from: 'prog-pad-secdom-3', to: 'prog-pad-main-3', type: 'oneway' },
-    { from: 'prog-pad-secdom-4', to: 'prog-pad-main-4', type: 'oneway' },
-    { from: 'prog-pad-secdom-5', to: 'prog-pad-main-5', type: 'oneway' },
+    { from: 'major-pad-secdom-0', to: 'major-pad-main-0', type: 'oneway' },
+    { from: 'major-pad-secdom-1', to: 'major-pad-main-1', type: 'oneway' },
+    { from: 'major-pad-secdom-2', to: 'major-pad-main-2', type: 'oneway' },
+    { from: 'major-pad-secdom-3', to: 'major-pad-main-3', type: 'oneway' },
+    { from: 'major-pad-secdom-4', to: 'major-pad-main-4', type: 'oneway' },
+    { from: 'major-pad-secdom-5', to: 'major-pad-main-5', type: 'oneway' },
     // I, IV, V ↕ modal (twoway)
-    { fromPad: 'prog-pad-main-0', toRow: '.prog-row.modal', type: 'twoway' },
-    { fromPad: 'prog-pad-main-2', toRow: '.prog-row.modal', type: 'twoway' },
-    { fromPad: 'prog-pad-main-4', toRow: '.prog-row.modal', type: 'twoway' },
+    { fromPad: 'major-pad-main-0', toRow: '.major-row.modal', type: 'twoway' },
+    { fromPad: 'major-pad-main-2', toRow: '.major-row.modal', type: 'twoway' },
+    { fromPad: 'major-pad-main-4', toRow: '.major-row.modal', type: 'twoway' },
   ],
   'minor-harmony': [
     // main → sd_v (group up, starts at 1/3 of main row height)
@@ -2112,7 +2112,7 @@ function rebuildBoard() {
 
     setTimeout(() => {
       if (tpl !== state.currentTemplate) return; // tab changed during animation
-      if (tpl === 'progressions') buildProgressionsBoard();
+      if (tpl === 'major-harmony') buildMajorHarmonyBoard();
       else if (tpl === 'minor-harmony') { buildMinorHarmonyBoard(); updateNeapolitanSplit(); }
       else if (tpl === 'scale-chords') buildScaleChordsBoard();
       else if (tpl === 'chord-library') buildChordLibraryBoard();
@@ -2124,7 +2124,7 @@ function rebuildBoard() {
       });
     }, 100);
   } else {
-    if (state.currentTemplate === 'progressions') buildProgressionsBoard();
+    if (state.currentTemplate === 'major-harmony') buildMajorHarmonyBoard();
     else if (state.currentTemplate === 'minor-harmony') { buildMinorHarmonyBoard(); updateNeapolitanSplit(); }
     else if (state.currentTemplate === 'scale-chords') buildScaleChordsBoard();
     else if (state.currentTemplate === 'chord-library') buildChordLibraryBoard();
@@ -2136,7 +2136,7 @@ function rebuildBoard() {
 // KEY SELECTOR
 // ============================================================
 function buildKeyTracks() {
-  ['progressions', 'minor-harmony', 'scale-chords', 'chord-library'].forEach(tplId => {
+  ['major-harmony', 'minor-harmony', 'scale-chords', 'chord-library'].forEach(tplId => {
     const track = document.querySelector(`[data-key-track="${tplId}"]`);
     track.innerHTML = '';
     const isMinor = ['minor', 'harmonic-minor'].includes(TEMPLATES[tplId].keyMode);
@@ -2157,7 +2157,7 @@ function buildKeyTracks() {
 }
 
 function updateKeySelectors() {
-  ['progressions', 'minor-harmony', 'scale-chords', 'chord-library'].forEach(tplId => {
+  ['major-harmony', 'minor-harmony', 'scale-chords', 'chord-library'].forEach(tplId => {
     const currentKey = state.keys[tplId];
     document.querySelectorAll(`[data-key-track="${tplId}"] .key-btn`).forEach(btn => {
       btn.classList.toggle('active', parseInt(btn.dataset.keyIdx, 10) === currentKey);
@@ -2552,7 +2552,7 @@ function findChordByKey(key) {
   const mapping = keymap[key];
   if (!mapping) return null;
   const [section, idx] = mapping;
-  const prefix = state.currentTemplate === 'progressions' ? 'prog' : 'minor';
+  const prefix = state.currentTemplate === 'major-harmony' ? 'major' : 'minor';
   if (section === 'neapolitan') {
     const sec = sections.find(s => s.neapolitan);
     if (!sec) return null;

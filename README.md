@@ -3,7 +3,7 @@
 Chord Pad is a browser tool for exploring, playing and arranging chord progressions. It runs entirely in the browser — open `chord-pad.html` and you're in. No installation, no account.
 
 Use it to:
-- **Discover** what chords fit together in a key (Progressions, Minor Harmony, Scale Chords).
+- **Discover** what chords fit together in a key (Major Harmony, Minor Harmony, Scale Chords).
 - **Look up** any chord and its alternative notations (Chord Library).
 - **Sketch** a progression in the built-in sequencer.
 - **Play** out loud through the built-in synth, or send MIDI to your DAW.
@@ -14,7 +14,7 @@ Use it to:
 
 Across the top you'll find four tabs. Each one shows chords for the currently selected key, but organised around a different idea.
 
-### Progressions
+### Major Harmony
 
 The classic starting point. Pick a key with the **SET THE KEY** slider, then click any pad to hear it.
 
@@ -26,7 +26,7 @@ The arrows between rows show common voice-leading paths. Use **v1 / v2** to swit
 
 ### Minor Harmony
 
-Same idea as Progressions, but built around minor / harmonic-minor key centres. The grouping highlights:
+Same idea as Major Harmony, but built around minor / harmonic-minor key centres. The grouping highlights:
 
 - the secondary diminished chords pulling toward V and IV,
 - the harmonic-minor main chords,
@@ -164,7 +164,7 @@ Hold a key to keep the chord ringing (unless Sustain is on, in which case clicks
 
 - The **piano tooltip** is the quickest way to see what a chord actually contains. Toggle it on if you're learning.
 - In **Scale Chords**, use the **Rows** menu to declutter — most people only need triads and sevenths.
-- For songwriting, start in **Progressions** with the Main Chords, then sprinkle in Secondary Dominants and Modal Interchange chords to taste.
+- For songwriting, start in **Major Harmony** with the Main Chords, then sprinkle in Secondary Dominants and Modal Interchange chords to taste.
 - For unusual or jazzy chords, the **Chord Library** is the fastest way to hear them and see all the ways they might be written.
 - Drop chords into the **Sequencer** to lock in a progression, then tweak it with the pen tool.
 
