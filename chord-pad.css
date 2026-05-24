@@ -78,7 +78,7 @@ body::before {
   position: relative;
   z-index: 2;
   width: 100%;
-  max-width: min(100%, 1920px);
+  max-width: 100%;
   background: linear-gradient(180deg, var(--panel) 0%, #131419 100%);
   border: 1px solid var(--panel-edge);
   border-radius: 12px;
