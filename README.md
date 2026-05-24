@@ -126,18 +126,48 @@ Three lanes are stacked:
 - **Melody** — record notes from MIDI input or draw them with the pen tool.
 - **Free** — same as melody but unaffected by transposition.
 
-Controls along the top:
+A **bar/beat ruler** runs along the top so you can see exactly where you are.
+
+### Per-track mixer
+
+Each lane has its own little mixer in the sidebar on the left:
+- **Instrument** dropdown — pick a different sound per track (e.g. piano for chords, organ for melody).
+- **M / S** — mute and solo. When any track is soloed, only soloed tracks play.
+- **Ch** — which MIDI channel this track sends on (1–16). Lets you route Chords to one synth and Melody to another.
+- **Volume** slider — per-track level (visible only when expanded).
+- **▾** — collapse / expand the track.
+
+### Transport (top row)
+
 - **Play / Rec / Metro / Loop** — transport.
 - **Time signature** — 2/4, 3/4, 4/4 or 6/8.
 - **Tempo** — beats per minute.
 
-Tool buttons on the right:
+### Tools (right side)
+
 - **Zoom in / out / fit**.
 - **Pen** — draw notes.
 - **Erase** — remove notes.
 - **Piano** — switch the melody lane to a piano-roll view.
 - **Snap** + value — snap drawn / dropped events to a grid (1/4, 1/8 etc.).
 - **Clear** — empty all lanes.
+
+### Editing blocks
+
+- **Click** a block to select it; selected blocks get an orange outline.
+- **Ctrl / Shift + click** to add more blocks to the selection (across any track).
+- **Drag** the body of a block to move it; drag the right grip to resize.
+- **Click the X** on a block to delete it.
+
+### Editing shortcuts
+
+| Key                | Action                                |
+| ------------------ | ------------------------------------- |
+| `Ctrl + Z`         | Undo (up to 60 steps)                 |
+| `Ctrl + Shift + Z` / `Ctrl + Y` | Redo                     |
+| `Ctrl + C / X / V` | Copy / cut / paste the selection (paste lands at the end of the loop) |
+| `Ctrl + A`         | Select everything across all lanes    |
+| `Delete` / `Backspace` | Delete the selection              |
 
 You can drag chords directly from any tab into the chord lane while the sequencer is open. The chord lane will follow the selected key, so transposing the key transposes the progression.
 
