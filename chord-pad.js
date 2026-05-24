@@ -960,7 +960,17 @@ function startSf2Note(midiNote, velocity, at, autoRelease, instrumentId) {
   const sr     = sample.header.sampleRate || 44100;
   const buffer = sf2BufferFromSample(ctx, sample);
 
-  const peak = (velocity / 127) * state.audioVolume * 1.2;
+  // Helper: pull a numeric generator value (the lib wraps it as {id, value}).
+  const gen = (id) => {
+    const g = keyData.generators?.[id];
+    if (g == null) return undefined;
+    return typeof g === 'object' ? g.value : g;
+  };
+
+  // Initial attenuation: centibels (1/10 dB) of reduction baked into the SF2.
+  const attenuationCB = gen(48) ?? 0;
+  const attenuationGain = Math.pow(10, -attenuationCB / 200); // cB → linear
+  const peak = (velocity / 127) * state.audioVolume * 0.6 * attenuationGain;
 
   const env = ctx.createGain();
   env.gain.setValueAtTime(0, t);
@@ -976,13 +986,23 @@ function startSf2Note(midiNote, velocity, at, autoRelease, instrumentId) {
 
   const src = ctx.createBufferSource();
   src.buffer = buffer;
-  // Pitch: shift by (midi - originalPitch) + pitchCorrection cents
-  const semitones = (midiNote - sample.header.originalPitch) + (sample.header.pitchCorrection || 0) / 100;
+  // Pitch — generators can override root pitch and add coarse/fine tune.
+  const overridingRoot = gen(58);
+  const rootPitch = (overridingRoot != null && overridingRoot >= 0) ? overridingRoot : sample.header.originalPitch;
+  const coarseTune = gen(51) ?? 0;                              // semitones
+  const fineTune   = (gen(52) ?? 0) + (sample.header.pitchCorrection || 0); // cents
+  const semitones  = (midiNote - rootPitch) + coarseTune + fineTune / 100;
   src.playbackRate.value = Math.pow(2, semitones / 12);
-  // Loop between SF2's embedded markers (relative to this sample's data)
+  // Loop between SF2's embedded markers, honoring the sampleModes generator (54).
+  //   0 / undefined = no loop
+  //   1            = loop continuously
+  //   3            = loop until release (we treat as continuous for now)
+  const sampleModes = gen(54) ?? 0;
+  const wantLoop = sampleModes === 1 || sampleModes === 3;
   const loopStartFrames = sample.header.startLoop;
   const loopEndFrames   = sample.header.endLoop;
-  if (loopEndFrames > loopStartFrames && loopEndFrames <= buffer.length) {
+  const loopLenFrames   = loopEndFrames - loopStartFrames;
+  if (wantLoop && loopLenFrames > 8 && loopEndFrames <= buffer.length) {
     src.loop = true;
     src.loopStart = loopStartFrames / sr;
     src.loopEnd   = loopEndFrames   / sr;
