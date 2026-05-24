@@ -5693,10 +5693,10 @@ const TRACK_NAMES = { chords: 'Chords', melody: 'Melody', free: 'Free' };
 const INSTRUMENT_OPTIONS = [
   ['synth', 'Synth'], ['piano', 'Piano'], ['piano-long', 'Piano (long)'], ['epiano', 'E-Piano'], ['epiano2', 'E-Piano 2'],
   ['organ', 'Organ'], ['strings', 'Strings'], ['choir', 'Choir'], ['vibes', 'Vibes'], ['pad', 'Pad'],
-  ['sf2:vintage:90', 'SF2 · Dreamy Pad'],
-  ['sf2:vintage:12', 'SF2 · Church Organ'],
   ['sf2:vintage:86', 'SF2 · Sustained Harp'],
-  ['sf2:vintage:89', 'SF2 · Techno Bells'],
+  ['sf2:vintage:124', 'SF2 · New Age Organ'],
+  ['sf2:vintage:126', 'SF2 · Wonderland Xylo'],
+  ['sf2:vintage:127', 'SF2 · Space Flute'],
 ];
 
 function buildTrackHeaders() {
