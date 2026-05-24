@@ -999,8 +999,6 @@ input[type="range"]::-moz-range-thumb {
   position: fixed;
   z-index: 220;
   display: none;
-  flex-wrap: wrap;
-  gap: 4px 8px;
   max-width: 320px;
   background: #111215;
   border: 1px solid rgba(255,255,255,0.13);
@@ -1008,6 +1006,11 @@ input[type="range"]::-moz-range-thumb {
   padding: 8px 10px;
   box-shadow: 0 12px 36px rgba(0,0,0,0.75);
   pointer-events: none;
+}
+#chord-syn-tooltip .syn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
 }
 #chord-syn-tooltip .syn {
   font-family: 'JetBrains Mono', monospace;
@@ -1017,6 +1020,19 @@ input[type="range"]::-moz-range-thumb {
   background: rgba(255,255,255,0.06);
   border-radius: 3px;
   white-space: nowrap;
+}
+#chord-syn-tooltip .syn-equiv {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+#chord-syn-tooltip .syn-equiv-line {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.6);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
 }
 .scale-section { display: flex; flex-direction: column; gap: 18px; }
 .scale-section + .scale-section { margin-top: 12px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.08); }

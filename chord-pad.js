@@ -94,6 +94,16 @@ const CHORD_INTERVALS = {
   'minadd2': [0, 2, 3, 7],
   'majadd4': [0, 4, 5, 7],
   'minadd4': [0, 3, 5, 7],
+  'maj6add9':[0, 2, 4, 7, 9],
+  'dom13':   [0, 4, 7, 10, 14, 21],
+  'maj13':   [0, 4, 7, 11, 14, 21],
+  'min13':   [0, 3, 7, 10, 14, 17, 21],
+  '7b5':     [0, 4, 6, 10],
+  '7b9':     [0, 1, 4, 7, 10],
+  '7s9':     [0, 3, 4, 7, 10],
+  '7s11':    [0, 4, 6, 7, 10, 14],
+  '7b13':    [0, 4, 7, 8, 10, 14],
+  '7alt':    [0, 1, 3, 4, 8, 10],
 };
 
 // Average interval per chord type — used to center the chord's midpoint on the key root
@@ -113,6 +123,9 @@ const CHORD_SUFFIX = {
   'dom11': '11', 'maj11': 'maj11', 'min11': 'm11',
   'majadd2': 'add2', 'minadd2': 'madd2',
   'majadd4': 'add4', 'minadd4': 'madd4',
+  'maj6add9': '6/9',
+  'dom13': '13', 'maj13': 'maj13', 'min13': 'm13',
+  '7b5': '7♭5', '7b9': '7♭9', '7s9': '7♯9', '7s11': '7♯11', '7b13': '7♭13', '7alt': '7alt',
 };
 
 const QUALITY_GLYPH = {
@@ -127,6 +140,9 @@ const QUALITY_GLYPH = {
   'dom11': '11', 'maj11': 'maj11', 'min11': 'm11',
   'majadd2': 'add2', 'minadd2': 'madd2',
   'majadd4': 'add4', 'minadd4': 'madd4',
+  'maj6add9': '6/9',
+  'dom13': '13', 'maj13': 'maj13', 'min13': 'm13',
+  '7b5': '7♭5', '7b9': '7♭9', '7s9': '7♯9', '7s11': '7♯11', '7b13': '7♭13', '7alt': '7alt',
 };
 
 // SVG icons for flow labels
@@ -1565,10 +1581,16 @@ function getSynTooltipEl() {
   }
   return synTooltipEl;
 }
-function showSynonymTooltip(padEl, rootName, syns) {
+function showSynonymTooltip(padEl, rootName, syns, equivs = []) {
   const el = getSynTooltipEl();
-  el.innerHTML = syns.map(s => `<span class="syn">${rootName}${s}</span>`).join('');
-  el.style.display = 'flex';
+  const synsHtml = syns.length
+    ? `<div class="syn-row">${syns.map(s => `<span class="syn">${rootName}${s}</span>`).join('')}</div>`
+    : '';
+  const equivsHtml = equivs.length
+    ? `<div class="syn-equiv">${equivs.map(line => `<div class="syn-equiv-line">${line}</div>`).join('')}</div>`
+    : '';
+  el.innerHTML = synsHtml + equivsHtml;
+  el.style.display = 'block';
   const r  = padEl.getBoundingClientRect();
   const tw = el.offsetWidth;
   const th = el.offsetHeight;
@@ -1588,14 +1610,16 @@ function buildChordLibraryBoard() {
   board.innerHTML = '';
 
   const SECTIONS = [
-    { label: 'Triads',       qs: ['maj', 'min', 'dim', 'aug'] },
-    { label: 'Power & Sus',  qs: ['power', 'sus2', 'sus4', 'sus24'] },
-    { label: 'Sixths',       qs: ['maj6', 'min6'] },
-    { label: 'Add',          qs: ['majadd2', 'minadd2', 'majadd4', 'minadd4'] },
-    { label: 'Sevenths',     qs: ['maj7', 'dom7', 'min7', 'mmaj7', 'm7b5', 'dim7', 'augmaj7', 'aug7'] },
-    { label: 'Seventh Sus',  qs: ['7sus2', '7sus4'] },
-    { label: 'Ninths',       qs: ['maj9', 'dom9', 'min9'] },
-    { label: 'Elevenths',    qs: ['maj11', 'dom11', 'min11'] },
+    { label: 'Triads',           qs: ['maj', 'min', 'dim', 'aug'] },
+    { label: 'Sus',              qs: ['sus2', 'sus4', 'sus24'] },
+    { label: 'Sixths',           qs: ['maj6', 'min6', 'maj6add9'] },
+    { label: 'Add',              qs: ['majadd2', 'minadd2', 'majadd4', 'minadd4'] },
+    { label: 'Sevenths',         qs: ['maj7', 'dom7', 'min7', 'mmaj7', 'm7b5', 'dim7', 'augmaj7', 'aug7'] },
+    { label: 'Seventh Sus',      qs: ['7sus2', '7sus4'] },
+    { label: 'Ninths',           qs: ['maj9', 'dom9', 'min9'] },
+    { label: 'Elevenths',        qs: ['maj11', 'dom11', 'min11'] },
+    { label: 'Thirteenths',      qs: ['maj13', 'dom13', 'min13'] },
+    { label: 'Altered Dominants',qs: ['7b5', 'aug7', '7b9', '7s9', '7s11', '7b13', '7alt'] },
   ];
 
   // Synonym suffixes (root prepended at render time)
@@ -1630,6 +1654,30 @@ function buildChordLibraryBoard() {
     'minadd2': ['m(add9)', 'madd9', '−(add9)'],
     'majadd4': ['add11', '(add11)', '(11)'],
     'minadd4': ['m(add11)', 'madd11', '−(add11)'],
+    'maj6add9': ['6/9', '6add9', '6(9)'],
+    'dom13':    ['13', 'dom13'],
+    'maj13':    ['maj13', 'M13', 'Δ13'],
+    'min13':    ['m13', 'min13', '−13'],
+    '7b5':      ['7♭5', '7(−5)', '7(♭5)'],
+    '7b9':      ['7♭9', '7(−9)', '7(♭9)'],
+    '7s9':      ['7♯9', '7(+9)', '7(♯9)'],
+    '7s11':     ['7♯11', '9♯11'],
+    '7b13':     ['7♭13', '7(♭13)'],
+    '7alt':     ['7alt', '7(♭9♯9♭5♯5)'],
+  };
+
+  // Enharmonic / functional equivalents.
+  // {offset,suffix} → "= <root+offset><suffix>"; {text} → free-form line.
+  const EQUIVS = {
+    'maj6':  [{ prefix: '=', offset: 9, suffix: 'm7' }],
+    'maj7':  [{ prefix: '=', offset: 4, suffix: 'm(add♭6)' }],
+    'min6':  [{ prefix: '=', offset: 9, suffix: 'm7♭5' }, { prefix: '⊂', offset: 5, suffix: '9 (no root)' }],
+    'dim7':  [{ text: 'symmetric — every minor-3rd up is the same chord' }],
+    'aug':   [{ text: 'symmetric — every major-3rd up is the same chord' }],
+    'sus2':  [{ prefix: '=', offset: 7, suffix: 'sus4 (inv)' }],
+    '7b9':   [{ prefix: '⊂', offset: 1, suffix: '°7 (no root)' }],
+    'maj9':  [{ prefix: '⊂', offset: 4, suffix: 'm7 (no root)' }],
+    'dom13': [{ prefix: '⊂', offset: 7, suffix: 'm6 (no root)' }, { prefix: '⊂', offset: 10, suffix: 'maj7♯11' }],
   };
 
   const boardEl = document.createElement('div');
@@ -1653,9 +1701,16 @@ function buildChordLibraryBoard() {
       const padId = `lib-pad-${q}`;
       const pad = createPad(padId, { interval: 0, q, roman: '' }, null, false);
       const syns = SYNONYMS[q];
-      if (syns && syns.length) {
-        const rootName = formatChordRoot(chordRootName(state.keys['chord-library'], 0));
-        pad.addEventListener('mouseenter', () => showSynonymTooltip(pad, rootName, syns));
+      const equivs = EQUIVS[q];
+      if ((syns && syns.length) || (equivs && equivs.length)) {
+        const libRoot = state.keys['chord-library'];
+        const rootName = formatChordRoot(chordRootName(libRoot, 0));
+        const equivLines = (equivs || []).map(eq => {
+          if (eq.text) return eq.text;
+          const altRoot = formatChordRoot(chordRootName(libRoot, eq.offset));
+          return `${eq.prefix} ${altRoot}${eq.suffix}`;
+        });
+        pad.addEventListener('mouseenter', () => showSynonymTooltip(pad, rootName, syns || [], equivLines));
         pad.addEventListener('mouseleave', hideSynonymTooltip);
       }
       cell.appendChild(pad);
