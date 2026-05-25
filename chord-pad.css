@@ -114,6 +114,27 @@ body::before {
   color: var(--text); text-transform: lowercase;
 }
 
+.header-right {
+  display: flex; align-items: center; gap: 12px;
+  margin-left: auto;
+}
+.header-refresh {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.55);
+  border-radius: 4px;
+  padding: 5px 7px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.header-refresh:hover {
+  color: var(--accent);
+  border-color: rgba(255,170,51,0.45);
+  background: rgba(255,170,51,0.08);
+}
+.header-refresh .lucide { width: 13px; height: 13px; }
+
 
 select {
   background: var(--bg); color: var(--text);
@@ -143,8 +164,26 @@ option { background: var(--bg); color: var(--text); }
 }
 .error-banner.show { display: block; }
 
+.sf2-progress {
+  color: var(--accent);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: 'JetBrains Mono', monospace;
+  margin-left: 12px;
+}
+
 /* ─────────── tabs ─────────── */
 .tabs { display: flex; align-items: stretch; border-bottom: 1px solid var(--panel-edge); background: rgba(0,0,0,0.2); }
+.tabs-collapse {
+  margin-left: auto;
+  background: transparent; border: 0; color: var(--text-dim);
+  font-size: 12px; padding: 6px 14px; cursor: pointer;
+  transition: transform 0.15s, color 0.12s;
+}
+.tabs-collapse:hover { color: var(--text); }
+.app.boards-collapsed .tabs-collapse { transform: rotate(-90deg); }
+.app.boards-collapsed .page { display: none !important; }
 .tab {
   background: transparent; border: 0;
   border-right: 1px solid var(--panel-edge);
@@ -660,6 +699,32 @@ option { background: var(--bg); color: var(--text); }
   grid-column: 1 / -1;
   padding-bottom: 4px;
 }
+.synth-target-row {
+  display: flex; align-items: center; gap: 4px;
+  grid-column: 1 / -1;
+  padding: 2px 0 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.synth-target-label {
+  font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: rgba(255,255,255,0.4); margin-right: 4px;
+}
+.synth-target-btn {
+  font-family: inherit; font-size: 10px; letter-spacing: 0.06em;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 3px;
+  color: rgba(255,255,255,0.55);
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.synth-target-btn:hover { color: rgba(255,255,255,0.85); }
+.synth-target-btn.active {
+  color: var(--accent);
+  border-color: rgba(255,170,51,0.5);
+  background: rgba(255,170,51,0.10);
+}
 .synth-instrument-row select {
   background: var(--bg);
   border: 1px solid rgba(255,255,255,0.25);
@@ -764,7 +829,7 @@ input[type="range"] {
   border: 1px solid #2a2d34; border-radius: 2px; cursor: pointer;
 }
 input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 14px; height: 14px;
+  -webkit-appearance: none; width: 10px; height: 10px;
   background: var(--accent); border-radius: 50%;
   box-shadow: 0 0 8px var(--pad-glow); cursor: grab;
 }
@@ -1026,6 +1091,13 @@ input[type="range"]::-moz-range-thumb {
   padding-top: 6px;
   border-top: 1px solid rgba(255,255,255,0.08);
 }
+/* Active state for the piano-roll toggle button next to zoom controls */
+#seq-pianoroll-toggle.active {
+  color: var(--accent);
+  border-color: rgba(255,170,51,0.45);
+  background: rgba(255,170,51,0.10);
+}
+
 #chord-syn-tooltip .syn-equiv-line {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10.5px;
@@ -1360,6 +1432,8 @@ input[type="range"]::-moz-range-thumb {
 .keyboard-panel.collapsed .kb-wrap { display: none; }
 
 .kb-wrap {
+  display: flex;
+  justify-content: center;
   overflow-x: auto;
   padding-bottom: 6px;
   scrollbar-width: thin;
@@ -1623,6 +1697,217 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   font-family: 'JetBrains Mono', monospace;
 }
 .seq-track-label .lucide { width: 10px; height: 10px; flex-shrink: 0; }
+/* Melody track is no longer used — keyboard notes drop on a Free track instead. */
+.seq-track-label[data-track="melody"], #seq-note-lane { display: none !important; }
+
+/* "+ Add Track" button below the sidebar */
+.seq-add-track-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; letter-spacing: 0.08em;
+  background: rgba(255,255,255,0.04);
+  border: 1px dashed rgba(255,255,255,0.18);
+  color: rgba(255,255,255,0.55);
+  border-radius: 4px;
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+  margin-top: 4px;
+}
+.seq-add-track-btn:hover {
+  color: var(--accent);
+  border-color: rgba(255,170,51,0.45);
+  background: rgba(255,170,51,0.06);
+}
+
+/* Piano-roll detail-view, opens at the bottom of the sequencer when a
+   free track is focused */
+.seq-pianoroll {
+  border-top: 1px solid rgba(255,255,255,0.10);
+  background: rgba(0,0,0,0.25);
+  padding: 8px 14px 12px;
+}
+.seq-pianoroll-header {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 6px;
+}
+.seq-pianoroll-tools {
+  display: flex; align-items: center; gap: 4px;
+  flex: 1;
+}
+.seq-pianoroll-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: rgba(255,255,255,0.78);
+  font-weight: 600;
+}
+.seq-pianoroll-close {
+  font-family: inherit; font-size: 12px; line-height: 1;
+  background: transparent; border: 0; padding: 2px 6px;
+  color: rgba(255,255,255,0.45); cursor: pointer;
+  border-radius: 3px;
+}
+.seq-pianoroll-close:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+.seq-pianoroll-body {
+  position: relative;
+  min-height: 200px;
+  background-color: rgba(0,0,0,0.30);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+  background-image:
+    linear-gradient(to right,
+      transparent calc(var(--bar-px) - 1px),
+      rgba(255,255,255,0.12) calc(var(--bar-px) - 1px),
+      rgba(255,255,255,0.12) var(--bar-px),
+      transparent var(--bar-px)
+    ),
+    linear-gradient(to right,
+      transparent calc(var(--beat-px) - 1px),
+      rgba(255,255,255,0.04) calc(var(--beat-px) - 1px),
+      rgba(255,255,255,0.04) var(--beat-px),
+      transparent var(--beat-px)
+    );
+  background-size: var(--bar-px) 100%, var(--beat-px) 100%;
+  background-repeat: repeat-x;
+  overflow: auto;
+  cursor: crosshair;
+}
+.pr-ghost {
+  top: 0; bottom: 0;
+}
+
+
+/* Piano-keyboard sidebar inside the piano-roll. Per-semitone rows so
+   the notes in the body line up exactly. White rows are full width,
+   black rows are narrower (inset from the left edge), giving it a
+   piano-keyboard look. Sticky-left to stay visible during scroll. */
+.pr-keyboard {
+  position: sticky; left: 0; top: 0;
+  /* About a third of the viewport, capped so it doesn't get silly on big screens */
+  width: clamp(140px, 33vw, 280px);
+  z-index: 4;
+  background: #0c0d10;
+  border-right: 1px solid rgba(255,255,255,0.18);
+  pointer-events: none;
+}
+.pr-keyboard-row {
+  position: absolute; left: 0; right: 0;
+  background: #f0ece4;
+  border: 1px solid #888;
+  border-radius: 0 3px 3px 0;
+  box-sizing: border-box;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 7px;
+  color: #888;
+  display: flex; align-items: center; justify-content: flex-end;
+  padding-right: 4px;
+}
+.pr-keyboard-row.black {
+  /* Black keys ≈ 60% of white-key width, inset from the left */
+  left: 40%;
+  background: #1c1c1e;
+  border: 0;
+  border-radius: 0 3px 3px 0;
+  color: rgba(255,255,255,0.4);
+  z-index: 2;
+}
+.pr-empty {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  color: rgba(255,255,255,0.4);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase;
+  pointer-events: none;
+}
+.pr-note {
+  position: absolute;
+  background: linear-gradient(180deg, #4a8cff 0%, #2c6dd9 100%);
+  border: 1px solid rgba(0,0,0,0.4);
+  border-radius: 3px;
+  color: rgba(255,255,255,0.92);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8.5px;
+  padding: 0 4px;
+  line-height: 11px;
+  cursor: grab;
+  white-space: nowrap; overflow: hidden;
+  user-select: none;
+  min-width: 2px;
+}
+.pr-note.selected {
+  outline: 1px solid var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 8px rgba(255,170,51,0.4);
+}
+.pr-note .pr-note-del {
+  position: absolute; top: 0; right: 0; width: 12px; height: 100%;
+  background: transparent; border: 0; padding: 0;
+  color: rgba(255,255,255,0.6); cursor: pointer; font-size: 9px;
+  display: none;
+}
+.pr-note:hover .pr-note-del { display: block; }
+.pr-note .pr-note-del:hover { color: #ff7766; }
+
+/* Visual cue: focused free track lane in the arrangement gets an accent border */
+.seq-lane.focused {
+  border-color: rgba(255,170,51,0.45) !important;
+}
+
+/* Per-track delete (✕) button */
+.seq-th-del {
+  font-family: inherit; font-size: 11px; line-height: 1;
+  background: transparent; border: 0; padding: 0 4px;
+  color: rgba(255,255,255,0.35); cursor: pointer;
+}
+.seq-th-del:hover { color: #ff7766; }
+
+/* "→ Free" convert button on chord-track headers */
+.seq-th-convert {
+  font-family: inherit; font-size: 8.5px; line-height: 1;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 3px;
+  padding: 2px 4px;
+  color: rgba(255,255,255,0.55);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.seq-th-convert:hover {
+  color: var(--accent);
+  border-color: rgba(255,170,51,0.45);
+  background: rgba(255,170,51,0.08);
+}
+
+/* Add-track dropdown menu */
+.seq-add-track-menu {
+  position: absolute;
+  background: #16181d;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px;
+  padding: 4px;
+  z-index: 60;
+  display: flex; flex-direction: column;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  min-width: 120px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+}
+.seq-add-track-menu button {
+  background: transparent; border: 0; color: rgba(255,255,255,0.7);
+  text-align: left; padding: 6px 10px; cursor: pointer; border-radius: 3px;
+}
+.seq-add-track-menu button:hover { background: rgba(255,170,51,0.12); color: var(--accent); }
+
+/* Inline rename input */
+.seq-th-name-input {
+  font-family: inherit; font-size: 10px; letter-spacing: 0.06em;
+  background: rgba(0,0,0,0.5);
+  border: 1px solid rgba(255,170,51,0.5);
+  border-radius: 2px;
+  color: var(--text);
+  padding: 1px 4px;
+  width: 100%;
+  text-transform: uppercase;
+  font-weight: 600;
+}
 .seq-track-label:hover { color: var(--text); }
 .seq-track-label.track-collapsed {
   min-height: 16px; height: 16px !important; padding: 0 6px;
@@ -1636,7 +1921,11 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 .seq-th-name {
   font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
   color: rgba(255,255,255,0.78); font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.12s;
 }
+.seq-th-name:hover { color: var(--accent); }
 .seq-th-collapse {
   background: transparent; border: 0; padding: 0; cursor: pointer;
   color: var(--text-dim); display: inline-flex; align-items: center;
@@ -1839,6 +2128,26 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   overflow: hidden;
 }
 .seq-block:hover { border-color: rgba(255,255,255,0.35); }
+
+/* Free-track clip blocks (mini-roll preview inside) */
+.seq-clip-block { padding: 4px 6px; }
+.seq-clip-label {
+  position: relative; z-index: 2;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; color: rgba(255,255,255,0.85);
+  pointer-events: none;
+}
+.seq-clip-mini {
+  position: absolute; left: 4px; right: 14px; top: 4px; bottom: 4px;
+  pointer-events: none;
+}
+.seq-clip-mini-note {
+  position: absolute;
+  height: 2px;
+  background: rgba(74,140,255,0.85);
+  border-radius: 1px;
+  min-width: 2px;
+}
 .seq-block.selected, .roll-note.selected {
   outline: 1px solid var(--accent);
   outline-offset: 1px;
@@ -2076,7 +2385,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   position: absolute;
   top: 0; bottom: 0;
   width: 1px;
-  background: rgba(255,255,255,0.12);
+  background: rgba(255,170,51,0.55);
   pointer-events: none;
   z-index: 5;
   transform: translateX(-1px);
@@ -2110,7 +2419,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   position: absolute;
   top: 0; bottom: 0;
   width: 1px;
-  background: rgba(255,255,255,0.12);
+  background: rgba(255,170,51,0.55);
   pointer-events: none;
   z-index: 5;
   transform: translateX(-1px);

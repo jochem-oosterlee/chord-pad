@@ -394,7 +394,6 @@ const state = {
   playStyle: 'off',
   tempo: 120,
   beatsPerBar: 4,
-  version: { 'major-harmony': 2, 'minor-harmony': 2 },
   bassOctave: 2,
   showPianoHover: false,
   synth: {
@@ -621,23 +620,13 @@ function fetchSample(instrument, midiNote) {
   return p;
 }
 
-// Defer sample preloading until the first user gesture so we don't construct
-// an AudioContext before it's allowed (Chrome autoplay policy warning).
-let _firstGestureSeen = false;
-const _pendingPreloads = new Set();
-function preloadSamplesOnGesture(instrument) {
-  if (_firstGestureSeen) preloadSamples(instrument);
-  else _pendingPreloads.add(instrument);
-}
-function _onFirstGesture() {
-  if (_firstGestureSeen) return;
-  _firstGestureSeen = true;
-  for (const inst of _pendingPreloads) preloadSamples(inst);
-  _pendingPreloads.clear();
-}
-window.addEventListener('pointerdown', _onFirstGesture, { capture: true, once: true });
-window.addEventListener('keydown',     _onFirstGesture, { capture: true, once: true });
-window.addEventListener('touchstart',  _onFirstGesture, { capture: true, once: true });
+// Instruments load immediately on page-init. Chrome will show a one-time
+// console warning about AudioContext starting before a user gesture; the
+// context stays suspended until the first interaction and audio still
+// plays correctly.
+function preloadSamplesOnGesture(instrument) { return preloadSamples(instrument); }
+// Kick off the (large) SF2 download right away too.
+setTimeout(() => loadSf2('fluid'), 0);
 
 async function preloadSamples(instrument) {
   const el = document.getElementById('synth-loading');
@@ -680,9 +669,21 @@ function startSampleNote(midiNote, velocity, at = null, autoRelease = null, inst
   env.gain.linearRampToValueAtTime(peak, t + s.attack);
   env.gain.exponentialRampToValueAtTime(Math.max(peak * s.sustain, 0.0001), sustainStart);
   env.gain.setValueAtTime(peak * s.sustain, sustainStart);
-  // For decay instruments (piano, vibes): fade envelope with sample's natural length
-  if (SAMPLE_DEFS[instrument].decay && naturalEnd > sustainStart) {
-    env.gain.linearRampToValueAtTime(0.0001, naturalEnd);
+  // Sample has a finite duration: fade the envelope so the buffer ending
+  // doesn't sound like an abrupt cutoff.
+  if (naturalEnd > sustainStart) {
+    if (SAMPLE_DEFS[instrument].decay) {
+      // Decay instruments (piano, e-piano, vibes): one long linear taper —
+      // matches the sample's own decay shape.
+      env.gain.linearRampToValueAtTime(0.0001, naturalEnd);
+    } else {
+      // Sustained instruments (organ, strings, choir, pad): hold the
+      // sustain plateau, then fade out over the final ~0.4 s of the sample.
+      const fadeDur   = 0.4;
+      const fadeStart = Math.max(sustainStart + 0.05, naturalEnd - fadeDur);
+      env.gain.setValueAtTime(peak * s.sustain, fadeStart);
+      env.gain.linearRampToValueAtTime(0.0001, naturalEnd);
+    }
   }
   env.connect(ctx._out);
 
@@ -737,6 +738,19 @@ function startSampleNote(midiNote, velocity, at = null, autoRelease = null, inst
 
 function startAudioNote(midiNote, velocity, at = null, autoRelease = null, instrumentOverride = null) {
   const instrument = instrumentOverride ?? state.instrument;
+  // Try the SF2 path for instruments we have a GM mapping for. If the SF2
+  // isn't loaded yet, kick off the load and fall back to the MP3 sampler
+  // until it arrives.
+  const sf2Preset = INSTRUMENT_TO_SF2[instrument];
+  if (sf2Preset != null) {
+    const entry = SF2_FILES.fluid;
+    if (entry.sf2) {
+      const n = startSf2Voice(midiNote, velocity, at, autoRelease, entry.sf2, sf2Preset);
+      if (n) return n;
+    } else {
+      loadSf2('fluid');
+    }
+  }
   if (instrument !== 'synth') return startSampleNote(midiNote, velocity, at, autoRelease, instrument);
   const ctx = getAudioCtx();
   const t   = at ?? ctx.currentTime;
@@ -868,11 +882,261 @@ function startAudioNote(midiNote, velocity, at = null, autoRelease = null, instr
   return synthNode;
 }
 
+// ============================================================
+// SoundFont 2 (FluidR3_GM) playback path
+// ============================================================
+//
+// We re-use the existing 8 instrument labels (piano / epiano / .../ pad),
+// but route them through the SF2 voice so notes can actually sustain via
+// the SF2's embedded sample loops, with proper per-preset filter, pan,
+// envelope and tuning settings — i.e. how the soundfont author intended.
+
+const SF2_FILES = {
+  fluid: { url: 'sf2/FluidR3_GM.sf2', sf2: null, loading: null, total: 0, loaded: 0 },
+};
+const SF2_BUFFER_CACHE = new Map(); // sample object → AudioBuffer
+
+// Map our instrument labels → GM program numbers in FluidR3_GM (bank 0)
+const INSTRUMENT_TO_SF2 = {
+  piano:   0,   // Yamaha Grand Piano
+  epiano:  4,   // Rhodes EP
+  epiano2: 5,   // Legend EP 2
+  vibes:   11,  // Vibraphone
+  organ:   16,  // Drawbar Organ
+  strings: 48,  // Strings
+  choir:   52,  // Ahh Choir
+  pad:     89,  // Warm Pad
+};
+
+function sf2ProgressEl() { return document.getElementById('sf2-progress'); }
+function sf2UpdateProgress(text) {
+  const el = sf2ProgressEl();
+  if (!el) return;
+  if (!text) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.textContent = text;
+}
+
+function loadSf2(fileKey) {
+  const entry = SF2_FILES[fileKey];
+  if (!entry) return Promise.resolve(null);
+  if (entry.sf2)     return Promise.resolve(entry.sf2);
+  if (entry.loading) return entry.loading;
+  const ns = window.SoundFont2;
+  const Ctor = typeof ns === 'function' ? ns : (ns && ns.SoundFont2);
+  if (typeof Ctor !== 'function') return Promise.resolve(null);
+  sf2UpdateProgress('Loading instruments…');
+  entry.loading = (async () => {
+    try {
+      const resp = await fetch(entry.url);
+      if (!resp.ok || !resp.body) throw new Error('http ' + resp.status);
+      const total = parseInt(resp.headers.get('Content-Length') || '0', 10);
+      entry.total = total;
+      const reader = resp.body.getReader();
+      const chunks = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        entry.loaded += value.length;
+        if (total > 0) {
+          const pct = Math.round(entry.loaded / total * 100);
+          sf2UpdateProgress(`Loading instruments… ${pct}%`);
+        }
+      }
+      const buf = await new Blob(chunks).arrayBuffer();
+      sf2UpdateProgress('Parsing instruments…');
+      // Yield briefly so the UI can paint before the synchronous parse
+      await new Promise(r => setTimeout(r, 16));
+      entry.sf2 = new Ctor(new Uint8Array(buf));
+      sf2UpdateProgress('');
+      return entry.sf2;
+    } catch (err) {
+      console.error('SF2 load failed', entry.url, err);
+      sf2UpdateProgress('Instrument load failed');
+      setTimeout(() => sf2UpdateProgress(''), 4000);
+      return null;
+    }
+  })();
+  return entry.loading;
+}
+
+function sf2BufferFromSample(ctx, sample) {
+  let buf = SF2_BUFFER_CACHE.get(sample);
+  if (buf) return buf;
+  const data = sample.data;
+  const sr = sample.header.sampleRate || 44100;
+  buf = ctx.createBuffer(1, data.length, sr);
+  const ch = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) ch[i] = data[i] / 32768;
+  SF2_BUFFER_CACHE.set(sample, buf);
+  return buf;
+}
+
+// Generator-id constants (SF2 spec 2.04)
+const SF2G = {
+  ModLFOToPitch: 5, VibLFOToPitch: 6, ModEnvToPitch: 7,
+  InitialFilterFc: 8, InitialFilterQ: 9,
+  ModLFOToFilterFc: 10, ModEnvToFilterFc: 11,
+  ModLFOToVolume: 13,
+  Pan: 17,
+  DelayModLFO: 21, FreqModLFO: 22, DelayVibLFO: 23, FreqVibLFO: 24,
+  DelayModEnv: 25, AttackModEnv: 26, HoldModEnv: 27, DecayModEnv: 28,
+  SustainModEnv: 29, ReleaseModEnv: 30,
+  DelayVolEnv: 33, AttackVolEnv: 34, HoldVolEnv: 35, DecayVolEnv: 36,
+  SustainVolEnv: 37, ReleaseVolEnv: 38,
+  InitialAttenuation: 48,
+  CoarseTune: 51, FineTune: 52,
+  SampleModes: 54, ScaleTuning: 56, OverridingRootKey: 58,
+};
+
+function sf2Gen(keyData, id) {
+  const g = keyData.generators?.[id];
+  if (g == null) return undefined;
+  return typeof g === 'object' ? g.value : g;
+}
+
+// SF2 absolute-cents → Hz: f = 8.176 * 2^(cents/1200)
+function absoluteCentsToHz(cents) { return 8.176 * Math.pow(2, cents / 1200); }
+// Timecents → seconds, clamped to a sane minimum
+function timecentsToSec(tc) { return Math.max(0.001, Math.pow(2, tc / 1200)); }
+
+function startSf2Voice(midiNote, velocity, at, autoRelease, sf2, presetNumber) {
+  const keyData = sf2.getKeyData(midiNote, 0, presetNumber);
+  if (!keyData || !keyData.sample) return null;
+  const ctx = getAudioCtx();
+  const t   = at ?? ctx.currentTime;
+  const s   = state.synth;
+  const sample = keyData.sample;
+  const sr     = sample.header.sampleRate || 44100;
+  const buffer = sf2BufferFromSample(ctx, sample);
+  const g = (id) => sf2Gen(keyData, id);
+
+  // --- Pitch ---------------------------------------------------------
+  const overridingRoot = g(SF2G.OverridingRootKey);
+  const rootPitch  = (overridingRoot != null && overridingRoot >= 0) ? overridingRoot : sample.header.originalPitch;
+  const coarseTune = g(SF2G.CoarseTune) ?? 0;
+  const fineTune   = (g(SF2G.FineTune) ?? 0) + (sample.header.pitchCorrection || 0);
+  const scaleTune  = g(SF2G.ScaleTuning) ?? 100; // cents per semitone (100 = ET)
+  const semitones  = ((midiNote - rootPitch) * scaleTune) / 100 + coarseTune + fineTune / 100;
+
+  // --- Filter --------------------------------------------------------
+  // SF2 InitialFilterFc default is 13500 cents (≈ 20 kHz, effectively no filter)
+  const filterCents = g(SF2G.InitialFilterFc) ?? 13500;
+  const filterFreq  = Math.min(20000, Math.max(20, absoluteCentsToHz(filterCents)));
+  const filterQCB   = g(SF2G.InitialFilterQ) ?? 0;
+  const filterQ     = Math.max(0.001, Math.pow(10, filterQCB / 200)); // cB → linear
+
+  // --- Output level (attenuation) -----------------------------------
+  // Honor the SF2's InitialAttenuation in full (no cap). Use the global
+  // Volume slider to boost quietly-balanced presets if they sit too low.
+  const attCB  = g(SF2G.InitialAttenuation) ?? 0;
+  const attGain = Math.pow(10, -attCB / 200);
+  const peak = (velocity / 127) * state.audioVolume * attGain;
+
+  // --- Volume envelope from SF2, with caps so 60s decays don't sound dead
+  const aT = Math.min(g(SF2G.AttackVolEnv)  != null ? timecentsToSec(g(SF2G.AttackVolEnv))  : s.attack,  4);
+  const dT = Math.min(g(SF2G.DecayVolEnv)   != null ? timecentsToSec(g(SF2G.DecayVolEnv))   : s.decay,   8);
+  const sL = g(SF2G.SustainVolEnv) != null
+    ? Math.max(0, 1 - Math.min(g(SF2G.SustainVolEnv), 1000) / 1000)
+    : s.sustain;
+  const rT = Math.min(g(SF2G.ReleaseVolEnv) != null ? timecentsToSec(g(SF2G.ReleaseVolEnv)) : s.release, 6);
+
+  // --- Build graph ---------------------------------------------------
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(peak, t + aT);
+  env.gain.exponentialRampToValueAtTime(Math.max(peak * sL, 0.0001), t + aT + dT);
+  env.gain.setValueAtTime(peak * sL, t + aT + dT);
+  env.connect(ctx._out);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = filterFreq;
+  filter.Q.value = filterQ;
+  filter.connect(env);
+
+  const sampleModes = g(SF2G.SampleModes) ?? 0;
+  const wantLoop = sampleModes === 1 || sampleModes === 3;
+
+  // SF2 sample types: 1 = Mono, 2 = Right, 4 = Left, 8 = Linked.
+  // getKeyData returns only one half of a stereo pair, so honoring its pan
+  // would silence one speaker. Treat non-mono samples as centered.
+  const sampleIsMono = sample.header.type === 1;
+  const sources = [(() => {
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.playbackRate.value = Math.pow(2, semitones / 12);
+    if (wantLoop) {
+      const lS = sample.header.startLoop, lE = sample.header.endLoop;
+      if (lE > lS && lE <= buffer.length) {
+        src.loop = true;
+        src.loopStart = lS / sr;
+        src.loopEnd   = lE / sr;
+      }
+    }
+    const pn = ctx.createStereoPanner();
+    pn.pan.value = sampleIsMono
+      ? Math.max(-1, Math.min(1, ((g(SF2G.Pan) ?? 0) / 500)))
+      : 0;
+    src.connect(pn); pn.connect(filter);
+    return src;
+  })()];
+
+  // --- Vibrato LFO → pitch (subtle, just enough for character) -------
+  const vibLfoToPitch = g(SF2G.VibLFOToPitch);
+  let vibLfo = null;
+  if (vibLfoToPitch && Math.abs(vibLfoToPitch) > 0.01) {
+    const lfoFreq  = absoluteCentsToHz(g(SF2G.FreqVibLFO) ?? -2400);
+    const lfoDelay = timecentsToSec(g(SF2G.DelayVibLFO) ?? -7200);
+    vibLfo = ctx.createOscillator(); vibLfo.frequency.value = lfoFreq;
+    const gAmp = ctx.createGain(); gAmp.gain.value = 0;
+    vibLfo.connect(gAmp);
+    sources.forEach(src => gAmp.connect(src.detune));
+    gAmp.gain.setValueAtTime(0, t);
+    gAmp.gain.setValueAtTime(0, t + lfoDelay);
+    gAmp.gain.linearRampToValueAtTime(vibLfoToPitch, t + lfoDelay + 0.05);
+    vibLfo.start(t);
+  }
+
+  // --- Reverb / delay sends (use the global FX bus) ------------------
+  if (ctx._reverb) {
+    ctx._reverbWet.gain.value = s.reverb;
+    const rs = ctx.createGain(); rs.gain.value = 0.5;
+    env.connect(rs); rs.connect(ctx._reverb);
+  }
+  if (ctx._delay) {
+    ctx._delay.delayTime.value = s.delayTime;
+    ctx._delayFb.gain.value = s.delayFeedback;
+    ctx._delayWet.gain.value = s.delayWet;
+    env.connect(ctx._delay);
+  }
+
+  if (state.pitchBendCents) {
+    sources.forEach(src => { src.detune.value = (src.detune.value || 0) + state.pitchBendCents; });
+  }
+  sources.forEach(src => src.start(t));
+
+  const oscs = [...sources];
+  if (vibLfo) oscs.push(vibLfo);
+  const node = { oscs, env, startTime: t, peak };
+  node.sustainLevel = sL;
+  node.releaseTime  = rT;
+  if (autoRelease !== null) {
+    const rel = t + autoRelease;
+    node.env.gain.setValueAtTime(peak * sL, rel);
+    node.env.gain.exponentialRampToValueAtTime(0.0001, rel + rT);
+    sources.forEach(src => src.stop(rel + rT + 0.01));
+  }
+  return node;
+}
+
 function stopAudioNote(node) {
   if (!node) return;
   const ctx = getAudioCtx();
   const s   = state.synth;
   const now = ctx.currentTime;
+  const releaseT = node.releaseTime ?? s.release;
   const releaseAt = Math.max(now, (node.startTime || 0) + s.attack + 0.02);
   node.env.gain.cancelScheduledValues(releaseAt);
   const gainAtRelease = releaseAt > now ? node.peak : node.env.gain.value;
@@ -881,12 +1145,17 @@ function stopAudioNote(node) {
     return;
   }
   node.env.gain.setValueAtTime(gainAtRelease, releaseAt);
-  node.env.gain.exponentialRampToValueAtTime(0.0001, releaseAt + s.release);
-  node.oscs.forEach(o => o.stop(releaseAt + s.release));
+  node.env.gain.exponentialRampToValueAtTime(0.0001, releaseAt + releaseT);
+  node.oscs.forEach(o => o.stop(releaseAt + releaseT));
 }
 
 function startBassNote(midiNote, at = null, autoRelease = null, instrumentOverride = null) {
   const effInstrument = instrumentOverride ?? state.instrument;
+  // SF2 path for mapped instruments
+  const sf2Preset = INSTRUMENT_TO_SF2[effInstrument];
+  if (sf2Preset != null && SF2_FILES.fluid.sf2) {
+    return startSf2Voice(midiNote, Math.round(state.velocity * 0.9), at, autoRelease, SF2_FILES.fluid.sf2, sf2Preset);
+  }
   if (effInstrument !== 'synth') {
     const instrument = effInstrument;
     const ctx = getAudioCtx();
@@ -1083,7 +1352,7 @@ function getNextChords(currentPadId) {
     const idx = parseInt(idxStr, 10);
 
     if (section === 'main') {
-      const mainCount = state.version['major-harmony'] === 2 ? 7 : 6;
+      const mainCount = 7;
       const result = [];
       for (let i = 0; i < mainCount; i++) {
         if (i !== idx) result.push(`major-pad-main-${i}`);
@@ -1241,12 +1510,13 @@ function releaseChord(padId) {
   if (REC.active && REC.pendingChords.has(padId)) {
     const p = REC.pendingChords.get(padId);
     const beats = Math.max(0.5, Math.round(recCurrentBeat() * 2) / 2 - p.startBeat) || 0.5;
-    SEQ.items.push({ interval: p.interval, q: p.q, bassInterval: p.bassInterval,
+    const trk = ensureTrackOfKind('chord');
+    trk.items.push({ interval: p.interval, q: p.q, bassInterval: p.bassInterval,
       label: p.label, beats, start: p.startBeat, keyRoot: p.keyRoot, template: p.template });
-    SEQ.items.sort((a, b) => a.start - b.start);
+    trk.items.sort((a, b) => a.start - b.start);
     seqAutoExtendLoop(p.startBeat + beats);
-    seqRender();
-    seqResyncChords();
+    seqRenderTrack(trk);
+    seqResyncTrack(trk);
     REC.pendingChords.delete(padId);
   }
 }
@@ -1267,6 +1537,7 @@ function releaseAll() {
 function updateNowPlaying() {
   const all = Array.from(state.activeChords.values());
   const display = document.getElementById('now-playing-notes');
+  if (!display) return; // "Playing" footer was removed
   display.textContent = all.length === 0 ? '—'
     : all.map(c => c.label + ' [' + c.notes.map(midiNoteName).join(' · ') + ']').join('   +   ');
 }
@@ -1747,13 +2018,11 @@ function buildChordLibraryBoard() {
 }
 
 function buildMajorHarmonyBoard() {
-  const tpl = TEMPLATES['major-harmony'];
   const board = document.querySelector('[data-board="major-harmony"]');
   board.innerHTML = '';
-  const ver = state.version['major-harmony'];
-  board.classList.toggle('v2', ver === 2);
-  const sections = ver === 2 ? V2_SECTIONS['major-harmony'] : tpl.sections;
-  const keymap  = ver === 2 ? V2_KEYMAPS['major-harmony']  : tpl.keymap;
+  board.classList.add('v2');
+  const sections = V2_SECTIONS['major-harmony'];
+  const keymap   = V2_KEYMAPS['major-harmony'];
 
   const reverseKeymap = {};
   for (const [k, v] of Object.entries(keymap)) {
@@ -1783,13 +2052,11 @@ function buildMajorHarmonyBoard() {
       row.appendChild(cell);
     });
 
-    if (ver === 2) {
-      const fillerCount = 7 - section.chords.length;
-      for (let i = 0; i < fillerCount; i++) {
-        const cell = document.createElement('div');
-        cell.className = 'pad-cell empty';
-        row.appendChild(cell);
-      }
+    const fillerCount = 7 - section.chords.length;
+    for (let i = 0; i < fillerCount; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'pad-cell empty';
+      row.appendChild(cell);
     }
 
     sectionEl.appendChild(row);
@@ -1811,12 +2078,10 @@ function updateNeapolitanSplit() {
 }
 
 function buildMinorHarmonyBoard() {
-  const tpl = TEMPLATES['minor-harmony'];
   const board = document.querySelector('[data-board="minor-harmony"]');
   board.innerHTML = '';
-  const ver = state.version['minor-harmony'];
-  const sections = ver === 2 ? V2_SECTIONS['minor-harmony'] : tpl.sections;
-  const keymap  = ver === 2 ? V2_KEYMAPS['minor-harmony']  : tpl.keymap;
+  const sections = V2_SECTIONS['minor-harmony'];
+  const keymap   = V2_KEYMAPS['minor-harmony'];
 
   const reverseKeymap = {};
   for (const [k, v] of Object.entries(keymap)) {
@@ -2210,16 +2475,6 @@ document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => setActiveTab(tab.dataset.tab));
 });
 
-document.querySelectorAll('.ver-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const tpl = btn.dataset.tpl;
-    const ver = parseInt(btn.dataset.ver);
-    state.version[tpl] = ver;
-    document.querySelectorAll(`.ver-btn[data-tpl="${tpl}"]`).forEach(b => b.classList.toggle('active', b === btn));
-    if (state.currentTemplate === tpl) rebuildBoard();
-  });
-});
-
 document.querySelectorAll('.scale-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     state.scaleType = btn.dataset.scale;
@@ -2347,32 +2602,88 @@ document.getElementById('ch-up').addEventListener('click', () => {
   state.channel = Math.min(15, state.channel + 1); updateControlDisplays();
 });
 
+// Which voice the Instrument panel is editing: chord-pad ('pad') or one
+// of the sequencer tracks. Reads/writes route to the corresponding synth
+// config + instrument slot.
+state.synthEditTarget = 'pad';
+function editTargetSynth() {
+  return state.synthEditTarget === 'pad' ? state.synth : SEQ.tracks[state.synthEditTarget].synth;
+}
+function editTargetInstrument() {
+  return state.synthEditTarget === 'pad' ? state.instrument : SEQ.tracks[state.synthEditTarget].instrument;
+}
+function setEditTargetInstrument(v) {
+  if (state.synthEditTarget === 'pad') state.instrument = v;
+  else SEQ.tracks[state.synthEditTarget].instrument = v;
+}
+
 document.getElementById('synth-waveform').addEventListener('change', (e) => {
-  state.synth.waveform = e.target.value;
+  editTargetSynth().waveform = e.target.value;
 });
 function updateSynthOnlyVisibility() {
-  const isSynth = state.instrument === 'synth';
+  const isSynth = editTargetInstrument() === 'synth';
   document.querySelectorAll('.synth-param.synth-only').forEach(el => {
     el.classList.toggle('visible', isSynth);
   });
 }
 
 document.getElementById('synth-instrument').addEventListener('change', async (e) => {
-  const prev = state.instrument;
+  const prev = editTargetInstrument();
   const next = e.target.value;
-  savedPresets[prev] = { ...state.synth };
-  state.instrument = next;
+  savedPresets[prev] = { ...editTargetSynth() };
+  setEditTargetInstrument(next);
   updateSynthOnlyVisibility();
+  // Chord-pad voice == chords track. Keep the track header dropdown in sync.
+  if (state.synthEditTarget === 'pad') {
+    const chordHdr = document.querySelector('.seq-track-label[data-track="chords"] .seq-th-inst');
+    if (chordHdr) chordHdr.value = next;
+  }
   if (next !== 'synth') {
     applySynthPreset(savedPresets[next] || INSTRUMENT_PRESETS[next]);
-    await preloadSamples(next);
+    if (INSTRUMENT_TO_SF2[next] != null) {
+      loadSf2('fluid');
+    } else {
+      await preloadSamples(next);
+    }
   } else if (savedPresets.synth) {
     applySynthPreset(savedPresets.synth);
   }
 });
 updateSynthOnlyVisibility();
+
+function setSynthEditTarget(target) {
+  state.synthEditTarget = target;
+  document.querySelectorAll('.synth-target-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.target === target);
+  });
+  // Reflect the target's instrument in the dropdown (no-op for waveform if
+  // not synth) and seed all sliders from the target's stored synth values.
+  const inst = editTargetInstrument();
+  const dd   = document.getElementById('synth-instrument');
+  if (dd) dd.value = inst;
+  const wf = document.getElementById('synth-waveform');
+  if (wf && editTargetSynth().waveform) wf.value = editTargetSynth().waveform;
+  applySynthPreset(editTargetSynth());
+  updateSynthOnlyVisibility();
+}
+document.querySelectorAll('.synth-target-btn').forEach(btn => {
+  btn.addEventListener('click', () => setSynthEditTarget(btn.dataset.target));
+});
+
 document.getElementById('settings-header').addEventListener('click', () => {
   document.querySelector('.controls').classList.toggle('collapsed');
+});
+document.getElementById('tabs-collapse')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.querySelector('.app')?.classList.toggle('boards-collapsed');
+});
+
+document.getElementById('header-refresh')?.addEventListener('click', () => {
+  // Force-refresh — append a cache-bust query so the browser re-fetches
+  // chord-pad.js / chord-pad.css instead of serving them from cache.
+  const url = new URL(window.location.href);
+  url.searchParams.set('_t', Date.now().toString());
+  window.location.replace(url.toString());
 });
 document.getElementById('synth-header').addEventListener('click', () => {
   document.querySelector('.synth-controls').classList.toggle('collapsed');
@@ -2400,6 +2711,18 @@ audioToggleBtn.addEventListener('click', () => {
   audioToggleBtn.textContent = state.audioEnabled ? 'ON' : 'OFF';
   audioToggleBtn.classList.toggle('active', state.audioEnabled);
 });
+
+const audioVolumeSlider = document.getElementById('audio-volume');
+const audioVolumeLabel  = document.getElementById('audio-volume-val');
+if (audioVolumeSlider) {
+  audioVolumeSlider.value = Math.round(state.audioVolume * 100);
+  audioVolumeLabel.textContent = audioVolumeSlider.value + '%';
+  audioVolumeSlider.addEventListener('input', (e) => {
+    const pct = parseInt(e.target.value, 10) || 0;
+    state.audioVolume = pct / 100;
+    audioVolumeLabel.textContent = pct + '%';
+  });
+}
 
 
 const scaleTonesToggleBtn = document.getElementById('scale-tones-toggle');
@@ -2552,9 +2875,12 @@ function fmtHz(hz) {
     const lbl = document.getElementById(valId);
     const update = () => {
       const val = fn(parseInt(el.value, 10));
-      state.synth[key] = val;
+      editTargetSynth()[key] = val;
       lbl.textContent = fmt(val);
-      if (side) side(val);
+      // Side-effects on the live audio bus (reverb wet, delay time, ...)
+      // only make sense when we're editing the chord-pad voice. For tracks
+      // those values get baked into the next note's chain via withSynth.
+      if (side && state.synthEditTarget === 'pad') side(val);
     };
     el.addEventListener('input', update);
     update(); // set initial label
@@ -2568,9 +2894,8 @@ const heldKeys = new Set();
 
 function findChordByKey(key) {
   const tpl = TEMPLATES[state.currentTemplate];
-  const ver = state.version[state.currentTemplate] || 1;
-  const keymap = ver === 2 ? (V2_KEYMAPS[state.currentTemplate] || tpl.keymap) : tpl.keymap;
-  const sections = ver === 2 ? (V2_SECTIONS[state.currentTemplate] || tpl.sections) : tpl.sections;
+  const keymap   = V2_KEYMAPS[state.currentTemplate]  || tpl.keymap;
+  const sections = V2_SECTIONS[state.currentTemplate] || tpl.sections;
   const mapping = keymap[key];
   if (!mapping) return null;
   const [section, idx] = mapping;
@@ -2859,34 +3184,76 @@ function psStop(padId) {
 // ============================================================
 let BEAT_PX = 30; // pixels per beat
 
+// ============================================================
+// SEQUENCER DATA MODEL
+// ============================================================
+// One ordered list of tracks. Each track is fully independent: own kind,
+// items, playback state, instrument, channel, volume, mute/solo, synth.
+//
+//   kind === 'chord'  — items[] are chord blocks      ({interval, q, …})
+//   kind === 'free'   — items[] are CLIPS, each clip
+//                       holds its own notes:
+//                         { id, start, beats, notes:[{midi,start,beats}], label? }
+//                       Chord-pads cannot be dropped on a free lane —
+//                       they go to chord-tracks or into an open piano-roll.
+//
+// Legacy getters (SEQ.items, SEQ.midiItems, SEQ.pendingIdx, …) proxy the
+// FIRST track of each kind so existing code keeps working while we
+// migrate. New code should reach into `track.items`, `track.pendingIdx`,
+// etc. directly via the helpers below.
+
+const INSTRUMENT_OPTIONS = [
+  ['synth', 'Synth'], ['piano', 'Piano'], ['epiano', 'E-Piano'], ['epiano2', 'E-Piano 2'],
+  ['organ', 'Organ'], ['strings', 'Strings'], ['choir', 'Choir'], ['vibes', 'Vibes'], ['pad', 'Pad'],
+];
+
+let _trackIdCounter = 0;
+function newTrackId() { return 'tr-' + (++_trackIdCounter); }
+
+let _clipIdCounter = 0;
+function newClipId() { return 'cl-' + (++_clipIdCounter); }
+
+// A clip on a free track. notes have RELATIVE starts (within the clip).
+function makeClip({ id, start = 0, beats = 1, notes = [], label = null } = {}) {
+  return { id: id || newClipId(), start, beats, notes, label };
+}
+
+// Wrap a single legacy note ({midi, label, beats, start}) into a 1-note clip.
+function clipFromLegacyNote(item) {
+  return makeClip({
+    start: item.start,
+    beats: item.beats,
+    label: item.label || null,
+    notes: [{ midi: item.midi, label: item.label, start: 0, beats: item.beats }],
+  });
+}
+
+function makeTrack(opts = {}) {
+  return {
+    id:         opts.id || newTrackId(),
+    kind:       opts.kind || 'free',
+    name:       opts.name || (opts.kind === 'chord' ? 'Chords' : 'Free'),
+    instrument: opts.instrument ?? 'epiano',
+    channel:    opts.channel ?? 0,
+    volume:     opts.volume ?? 1.0,
+    muted:      !!opts.muted,
+    soloed:     !!opts.soloed,
+    synth:      opts.synth || null, // null = link to chord-pad voice (state.synth)
+    items:      Array.isArray(opts.items) ? opts.items : [],
+    // Per-track playback / drag state
+    pendingIdx: 0, pendingTime: 0, cycleStart: 0,
+    activeIdx: -1, dragSrcIdx: null, dropTarget: null,
+  };
+}
+
 const SEQ = {
-  items: [],       // [{interval, q, bassInterval, label, beats, keyRoot, template}]
-  noteItems: [],   // [{midi, label, beats, start}]
-  midiItems: [],   // [{midi, label, beats, start}]
+  tracksList: [],
 
   rollTool: 'none',
   rollSnap: false,
   rollSnapVal: 1,
   rollKeyboard: false,
   playing: false,
-  pendingIdx: 0,
-  pendingTime: 0,
-  notePendingIdx: 0,
-  notePendingTime: 0,
-  midiPendingIdx: 0,
-  midiPendingTime: 0,
-  activeIdx: -1,
-  noteActiveIdx: -1,
-  midiActiveIdx: -1,
-  dragSrcIdx: null,
-  dropTarget: null,
-  noteDragSrcIdx: null,
-  noteDropTarget: null,
-  midiDragSrcIdx: null,
-  midiDropTarget: null,
-  cycleStart: 0,
-  noteCycleStart: 0,
-  midiCycleStart: 0,
   playStartTime: 0,
   rafId: null,
   pendingTimers: new Set(),
@@ -2897,37 +3264,114 @@ const SEQ = {
   TICK_MS: 25,
   LOOKAHEAD: 0.15,
   loopStart: 0,
-  loopEnd: 4,  // beats; auto-extends when blocks go beyond
+  loopEnd: 4,
   loop: false,
-  animBeat: 0,       // current visual beat position, accumulated each RAF tick
-  animLastTime: 0,   // ctx.currentTime - outputLatency at last RAF tick
-  animLoopLen: 4,    // loop length in beats, cached at init/resync (not during drag)
-  animLoopStart: 0,  // loopStart beat, cached at init/resync
-  _dragLabel: '',
-  _dragChord: null,
-  _dragHoverId: null,
-
-  // Per-track mixer (instrument / MIDI channel / volume / mute / solo)
-  tracks: {
-    chords: { instrument: 'epiano', channel: 0, volume: 1.0, muted: false, soloed: false },
-    melody: { instrument: 'epiano', channel: 0, volume: 1.0, muted: false, soloed: false },
-    free:   { instrument: 'epiano', channel: 0, volume: 1.0, muted: false, soloed: false },
-  },
-
-  // Undo / redo
-  _undoStack: [],
-  _redoStack: [],
-
-  // Selection / clipboard (for copy/paste)
-  selection: [], // [{track: 'chords'|'melody'|'free', idx}]
-  clipboard: null, // { items: [...with rel start...], length }
+  animBeat: 0, animLastTime: 0, animLoopLen: 4, animLoopStart: 0,
+  _dragLabel: '', _dragChord: null, _dragHoverId: null,
+  _undoStack: [], _redoStack: [],
+  selection: [], // [{ trackId, item }]
+  clipboard: null,
 };
+
+// Start with no tracks — user adds what they need via "+ Add Track".
+
+function trackById(id)            { return SEQ.tracksList.find(t => t.id === id); }
+function firstTrackOfKind(kind)   { return SEQ.tracksList.find(t => t.kind === kind); }
+function tracksOfKind(kind)       { return SEQ.tracksList.filter(t => t.kind === kind); }
+
+function addTrack(kind, opts)     { const t = makeTrack({ ...(opts||{}), kind }); SEQ.tracksList.push(t); return t; }
+function removeTrackById(id) {
+  const idx = SEQ.tracksList.findIndex(t => t.id === id);
+  if (idx >= 0) SEQ.tracksList.splice(idx, 1);
+}
+
+// ----- Legacy property aliases ---------------------------------------
+// Keep the bulk of the existing code working until it's migrated.
+// Returned when there's no track of the requested kind. NOT frozen so
+// stray `.push()` calls from legacy paths don't throw — they just write
+// to a throwaway array (silently lost). Critical push sites (recording,
+// chord drop) should call ensureTrackOfKind() first.
+const _STRAY_ITEMS = { chord: [], free: [] };
+function _bindArrAlias(propName, kind) {
+  Object.defineProperty(SEQ, propName, {
+    get() {
+      const t = firstTrackOfKind(kind);
+      if (t) return t.items;
+      // reset the stray bucket every read so it can't grow indefinitely
+      _STRAY_ITEMS[kind] = [];
+      return _STRAY_ITEMS[kind];
+    },
+    set(v) { const t = firstTrackOfKind(kind); if (t) t.items = v; },
+  });
+}
+
+// Ensure a track of the given kind exists; create one (with sidebar +
+// lane DOM) if not. Returns the (first) matching track.
+function ensureTrackOfKind(kind) {
+  let t = firstTrackOfKind(kind);
+  if (t) return t;
+  t = addTrack(kind, { name: kind === 'chord' ? 'Chords' : 'Notes' });
+  if (!t.synth && kind !== 'chord') t.synth = { ...state.synth };
+  rebuildTracksUI();
+  seqRenderAll();
+  return t;
+}
+function _bindFieldAlias(propName, kind, field, defVal) {
+  Object.defineProperty(SEQ, propName, {
+    get() { return firstTrackOfKind(kind)?.[field] ?? defVal; },
+    set(v) { const t = firstTrackOfKind(kind); if (t) t[field] = v; },
+  });
+}
+_bindArrAlias('items',     'chord');
+_bindArrAlias('midiItems', 'free');
+// Melody track is gone — old code paths that push/sort/splice on noteItems
+// (drag-from-keyboard, MIDI recording, etc.) now operate on the FIRST free
+// track. This collapses melody into free as the user requested.
+_bindArrAlias('noteItems', 'free');
+
+_bindFieldAlias('pendingIdx',     'chord', 'pendingIdx',  0);
+_bindFieldAlias('pendingTime',    'chord', 'pendingTime', 0);
+_bindFieldAlias('cycleStart',     'chord', 'cycleStart',  0);
+_bindFieldAlias('activeIdx',      'chord', 'activeIdx',  -1);
+_bindFieldAlias('dragSrcIdx',     'chord', 'dragSrcIdx', null);
+_bindFieldAlias('dropTarget',     'chord', 'dropTarget', null);
+
+_bindFieldAlias('midiPendingIdx',  'free', 'pendingIdx',  0);
+_bindFieldAlias('midiPendingTime', 'free', 'pendingTime', 0);
+_bindFieldAlias('midiCycleStart',  'free', 'cycleStart',  0);
+_bindFieldAlias('midiActiveIdx',   'free', 'activeIdx',  -1);
+_bindFieldAlias('midiDragSrcIdx',  'free', 'dragSrcIdx', null);
+_bindFieldAlias('midiDropTarget',  'free', 'dropTarget', null);
+
+// Melody-related legacy fields: no-op
+for (const f of ['notePendingIdx', 'notePendingTime', 'noteCycleStart', 'noteActiveIdx', 'noteDragSrcIdx', 'noteDropTarget']) {
+  Object.defineProperty(SEQ, f, { get: () => (f.endsWith('Time') ? Infinity : (f.endsWith('Idx') ? 0 : null)), set: () => {} });
+}
+
+// Legacy SEQ.tracks {chords, melody, free} → live mapping to first-of-kind
+Object.defineProperty(SEQ, 'tracks', {
+  get() {
+    // Returned object's properties read/write through to the actual tracks
+    // so existing `SEQ.tracks.chords.volume = 0.5` style assignments work.
+    return {
+      get chords() { return firstTrackOfKind('chord') || {}; },
+      get free()   { return firstTrackOfKind('free')   || {}; },
+      get melody() { return _DEAD_TRACK; },
+    };
+  },
+});
+const _DEAD_TRACK = { instrument: 'epiano', channel: 0, volume: 1.0, muted: false, soloed: false, synth: null };
 
 // ---------- Undo / Redo ----------
 const SEQ_UNDO_LIMIT = 60;
 function seqSnapshot() {
   return JSON.stringify({
-    items: SEQ.items, noteItems: SEQ.noteItems, midiItems: SEQ.midiItems,
+    tracksList: SEQ.tracksList.map(t => ({
+      id: t.id, kind: t.kind, name: t.name,
+      instrument: t.instrument, channel: t.channel, volume: t.volume,
+      muted: t.muted, soloed: t.soloed, synth: t.synth,
+      items: t.items,
+    })),
     loopStart: SEQ.loopStart, loopEnd: SEQ.loopEnd, loop: SEQ.loop,
   });
 }
@@ -2942,17 +3386,29 @@ function seqCheckpoint() {
 function seqApplySnapshot(json) {
   try {
     const d = JSON.parse(json);
-    SEQ.items     = d.items     || [];
-    SEQ.noteItems = d.noteItems || [];
-    SEQ.midiItems = d.midiItems || [];
+    if (Array.isArray(d.tracksList)) {
+      SEQ.tracksList.length = 0;
+      for (const tIn of d.tracksList) {
+        SEQ.tracksList.push(makeTrack({
+          id: tIn.id, kind: tIn.kind || 'free', name: tIn.name,
+          instrument: tIn.instrument, channel: tIn.channel, volume: tIn.volume,
+          muted: tIn.muted, soloed: tIn.soloed, synth: tIn.synth,
+          items: tIn.items || [],
+        }));
+      }
+    } else {
+      // Legacy snapshot shape
+      const chord = firstTrackOfKind('chord');
+      const free  = firstTrackOfKind('free');
+      if (chord) chord.items = d.items     || [];
+      if (free)  free.items  = [...(d.midiItems || []), ...(d.noteItems || [])];
+    }
     if (typeof d.loopStart === 'number') SEQ.loopStart = d.loopStart;
     if (typeof d.loopEnd   === 'number') SEQ.loopEnd   = d.loopEnd;
     if (typeof d.loop      === 'boolean') SEQ.loop     = d.loop;
     SEQ.selection = []; // identity broken on parse
-    SEQ.pendingIdx = 0; SEQ.notePendingIdx = 0; SEQ.midiPendingIdx = 0;
-    seqRender();
-    seqRenderNotes();
-    seqRenderMidi();
+    rebuildTracksUI();
+    seqRenderAll();
   } catch (_) {}
 }
 function seqUndo() {
@@ -2967,20 +3423,32 @@ function seqRedo() {
 }
 
 // ---------- Selection / clipboard ----------
-function seqTrackItems(track) {
-  if (track === 'chords') return SEQ.items;
-  if (track === 'melody') return SEQ.noteItems;
-  if (track === 'free')   return SEQ.midiItems;
-  return [];
+// Selection model — entries are { trackId, item }. Legacy string forms
+// ('chords' | 'free' | 'melody') still resolve via trackByRef().
+function trackByRef(ref) {
+  if (!ref) return null;
+  if (typeof ref === 'object' && ref.kind) return ref;
+  if (ref === 'chords') return firstTrackOfKind('chord');
+  if (ref === 'free')   return firstTrackOfKind('free');
+  if (ref === 'melody') return null;
+  return trackById(ref);
 }
-function seqIsSelected(track, item) {
-  return SEQ.selection.some(s => s.track === track && s.item === item);
+function seqTrackItems(ref) {
+  const t = trackByRef(ref);
+  return t ? t.items : [];
 }
-function seqSelectionToggle(track, item, additive) {
+function _selKey(sel) { return sel.trackId || sel.track; } // legacy compat
+function seqIsSelected(ref, item) {
+  const key = (typeof ref === 'string' ? ref : ref?.id);
+  return SEQ.selection.some(s => _selKey(s) === key && s.item === item);
+}
+function seqSelectionToggle(ref, item, additive) {
+  const t = trackByRef(ref);
+  if (!t) return;
   if (!additive) SEQ.selection = [];
-  const i = SEQ.selection.findIndex(s => s.track === track && s.item === item);
+  const i = SEQ.selection.findIndex(s => _selKey(s) === t.id && s.item === item);
   if (i >= 0) SEQ.selection.splice(i, 1);
-  else SEQ.selection.push({ track, item });
+  else SEQ.selection.push({ trackId: t.id, item });
   seqRefreshSelectionVisuals();
 }
 function seqClearSelection() {
@@ -2992,11 +3460,11 @@ function seqRefreshSelectionVisuals() {
   document.querySelectorAll('.seq-lane .seq-block, .seq-lane .roll-note')
     .forEach(el => el.classList.remove('selected'));
   for (const sel of SEQ.selection) {
-    const items = seqTrackItems(sel.track);
-    const idx = items.indexOf(sel.item);
+    const t = trackByRef(_selKey(sel));
+    if (!t) continue;
+    const idx = t.items.indexOf(sel.item);
     if (idx < 0) continue;
-    const laneId = TRACK_LANE_MAP[sel.track];
-    const lane   = document.getElementById(laneId);
+    const lane = document.querySelector(`.seq-lane[data-track-id="${t.id}"]`);
     if (!lane) continue;
     const blocks = lane.querySelectorAll('.seq-block, .roll-note');
     if (blocks[idx]) blocks[idx].classList.add('selected');
@@ -3004,29 +3472,30 @@ function seqRefreshSelectionVisuals() {
 }
 function seqSelectAll() {
   SEQ.selection = [];
-  SEQ.items.forEach(it => SEQ.selection.push({ track: 'chords', item: it }));
-  SEQ.noteItems.forEach(it => SEQ.selection.push({ track: 'melody', item: it }));
-  SEQ.midiItems.forEach(it => SEQ.selection.push({ track: 'free', item: it }));
+  for (const t of SEQ.tracksList) {
+    for (const it of t.items) SEQ.selection.push({ trackId: t.id, item: it });
+  }
   seqRefreshSelectionVisuals();
 }
 function seqDeleteSelection() {
   if (SEQ.selection.length === 0) return;
   seqCheckpoint();
   for (const sel of SEQ.selection) {
-    const items = seqTrackItems(sel.track);
-    const i = items.indexOf(sel.item);
-    if (i >= 0) items.splice(i, 1);
+    const t = trackByRef(_selKey(sel));
+    if (!t) continue;
+    const i = t.items.indexOf(sel.item);
+    if (i >= 0) t.items.splice(i, 1);
   }
   SEQ.selection = [];
-  seqRender(); seqRenderNotes(); seqRenderMidi();
+  seqRenderAll();
 }
 function seqCopySelection() {
   if (SEQ.selection.length === 0) return;
   const minStart = Math.min(...SEQ.selection.map(s => s.item.start));
   SEQ.clipboard = {
     items: SEQ.selection.map(s => ({
-      track: s.track,
-      data:  JSON.parse(JSON.stringify(s.item)),
+      trackId: _selKey(s),
+      data:    JSON.parse(JSON.stringify(s.item)),
       relStart: s.item.start - minStart,
     })),
   };
@@ -3043,28 +3512,69 @@ function seqPasteSelection() {
   const newSelection = [];
   let maxEnd = baseBeat;
   for (const e of SEQ.clipboard.items) {
+    const t = trackByRef(e.trackId);
+    if (!t) continue;
     const newItem = { ...e.data, start: e.relStart + baseBeat };
-    seqTrackItems(e.track).push(newItem);
-    newSelection.push({ track: e.track, item: newItem });
+    t.items.push(newItem);
+    newSelection.push({ trackId: t.id, item: newItem });
     maxEnd = Math.max(maxEnd, newItem.start + (newItem.beats || 1));
   }
-  SEQ.items.sort((a, b) => a.start - b.start);
-  SEQ.noteItems.sort((a, b) => a.start - b.start);
-  SEQ.midiItems.sort((a, b) => a.start - b.start);
+  for (const t of SEQ.tracksList) t.items.sort((a, b) => a.start - b.start);
   SEQ.selection = newSelection;
   seqAutoExtendLoop(maxEnd);
-  seqRender(); seqRenderNotes(); seqRenderMidi();
+  seqRenderAll();
 }
 
-function seqTrackAudible(trackId) {
-  const t = SEQ.tracks[trackId];
+// Run a function with state.synth temporarily swapped to a per-track config.
+// All audio-trigger functions (startAudioNote / startSampleNote /
+// startSf2Voice / startBassNote) read state.synth synchronously when they
+// schedule their gain / LFO / filter values, so a swap-around-the-call works.
+function withSynth(synth, fn) {
+  if (!synth) return fn();
+  const prev = state.synth;
+  state.synth = synth;
+  try { return fn(); } finally { state.synth = prev; }
+}
+
+// Resolve a track from a legacy kind string (or already a track object).
+//   'chords' → first chord track
+//   'free'   → first free track
+//   'melody' → null (track kind removed)
+//   <object> → as-is
+function resolveTrack(ref) {
+  if (!ref) return null;
+  if (typeof ref === 'object') return ref;
+  if (ref === 'chords') return firstTrackOfKind('chord');
+  if (ref === 'free')   return firstTrackOfKind('free');
+  if (ref === 'melody') return null;
+  return trackById(ref);
+}
+
+// The default (first) Chord track shares its voice with the chord-pad —
+// they're the same instrument. Additional tracks have their own
+// independent synth + instrument config.
+function seqTrackSynth(ref) {
+  const t = resolveTrack(ref);
+  if (!t) return state.synth;
+  if (t === firstTrackOfKind('chord')) return state.synth; // pad-linked
+  return t.synth || state.synth;
+}
+function seqTrackInstrument(ref) {
+  const t = resolveTrack(ref);
+  if (!t) return state.instrument;
+  if (t === firstTrackOfKind('chord')) return state.instrument; // pad-linked
+  return t.instrument;
+}
+
+function seqTrackAudible(ref) {
+  const t = resolveTrack(ref);
   if (!t) return true;
-  const anySolo = Object.values(SEQ.tracks).some(tr => tr.soloed);
+  const anySolo = SEQ.tracksList.some(tr => tr.soloed);
   if (anySolo) return t.soloed;
   return !t.muted;
 }
-function seqTrackVel(trackId, base) {
-  const t = SEQ.tracks[trackId];
+function seqTrackVel(ref, base) {
+  const t = resolveTrack(ref);
   if (!t) return base;
   return Math.max(1, Math.min(127, Math.round(base * t.volume)));
 }
@@ -3077,10 +3587,12 @@ function seqTimeout(fn, delay) {
 }
 
 function seqUpdateNowPlaying() {
+  const el = document.getElementById('now-playing-notes');
+  if (!el) return;
   const parts = [];
   if (SEQ.nowChord) parts.push(SEQ.nowChord);
   if (SEQ.nowNote)  parts.push('♩ ' + SEQ.nowNote);
-  document.getElementById('now-playing-notes').textContent = parts.join('  ·  ') || '—';
+  el.textContent = parts.join('  ·  ') || '—';
 }
 
 function seqAnimatePlayhead() {
@@ -3113,6 +3625,22 @@ function seqAnimatePlayhead() {
     }
   }
   document.querySelectorAll('.seq-playhead').forEach(ph => { ph.style.left = px + 'px'; });
+
+  // Piano-roll playhead is clip-relative: only shown when the playhead is
+  // inside the focused clip's time range, and positioned at (beat - clip.start).
+  const prBody = document.getElementById('seq-pianoroll-body');
+  if (prBody && SEQ.pianoRollOpen) {
+    const prPh = prBody.querySelector('.seq-playhead');
+    if (prPh) {
+      const { clip } = focusedClipObjects();
+      if (clip && SEQ.animBeat >= clip.start && SEQ.animBeat < clip.start + clip.beats) {
+        prPh.style.display = 'block';
+        prPh.style.left    = ((SEQ.animBeat - clip.start) * BEAT_PX) + 'px';
+      } else {
+        prPh.style.display = 'none';
+      }
+    }
+  }
   // Keep roll-mode playhead pinned to visible viewport (absolute child scrolls with content)
   {
     const mLane = document.getElementById('seq-midi-lane');
@@ -3184,8 +3712,7 @@ function seqUpdateLoopVisible() {
 
 function seqUpdateLoopEnd() {
   const px = SEQ.loopEnd * BEAT_PX;
-  const handle = document.getElementById('seq-loop-end');
-  if (handle) handle.style.left = px + 'px';
+  document.querySelectorAll('.seq-loop-end').forEach(h => { h.style.left = px + 'px'; });
   document.querySelectorAll('.seq-loop-line').forEach(l => { l.style.left = px + 'px'; });
   const cLane = document.getElementById('seq-lane');
   const nLane = document.getElementById('seq-note-lane');
@@ -3198,8 +3725,7 @@ function seqUpdateLoopEnd() {
 
 function seqUpdateLoopStart() {
   const px = SEQ.loopStart * BEAT_PX;
-  const handle = document.getElementById('seq-loop-start');
-  if (handle) handle.style.left = Math.max(0, px - 11) + 'px';
+  document.querySelectorAll('.seq-loop-start').forEach(h => { h.style.left = Math.max(0, px - 11) + 'px'; });
   document.querySelectorAll('.seq-loop-start-line').forEach(l => { l.style.left = px + 'px'; });
   seqUpdateLoopVisible();
 }
@@ -3238,19 +3764,17 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
   del.addEventListener('click', (e) => {
     e.stopPropagation();
     seqCheckpoint();
-    if (isMidi) {
-      SEQ.midiItems.splice(idx, 1);
-      if (SEQ.midiPendingIdx >= SEQ.midiItems.length) SEQ.midiPendingIdx = 0;
-      seqRenderMidi();
-    } else if (isNote) {
-      SEQ.noteItems.splice(idx, 1);
-      if (SEQ.notePendingIdx >= SEQ.noteItems.length) SEQ.notePendingIdx = 0;
-      seqRenderNotes();
-    } else {
-      SEQ.items.splice(idx, 1);
-      if (SEQ.pendingIdx >= SEQ.items.length) SEQ.pendingIdx = 0;
-      if (SEQ.activeIdx >= SEQ.items.length) SEQ.activeIdx = SEQ.items.length - 1;
-      seqRender();
+    // Find the owning track via the parent lane's data-track-id, with
+    // legacy-kind fallback for the default lanes.
+    const laneEl = block.parentElement;
+    const owner =
+      (laneEl && laneEl.dataset && laneEl.dataset.trackId && trackById(laneEl.dataset.trackId)) ||
+      (isMidi ? firstTrackOfKind('free') : isNote ? null : firstTrackOfKind('chord'));
+    if (owner) {
+      owner.items.splice(idx, 1);
+      if (owner.pendingIdx >= owner.items.length) owner.pendingIdx = 0;
+      if (owner.activeIdx  >= owner.items.length) owner.activeIdx  = owner.items.length - 1;
+      seqRenderTrack(owner);
     }
   });
   block.appendChild(del);
@@ -3265,7 +3789,10 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
     const startX = e.clientX, startBts = item.beats;
     const snap = 0.5;
     const lane = block.parentElement;
-    const items = isMidi ? SEQ.midiItems : isNote ? SEQ.noteItems : SEQ.items;
+    const ownerResize =
+      (lane && lane.dataset && lane.dataset.trackId && trackById(lane.dataset.trackId)) ||
+      (isMidi ? firstTrackOfKind('free') : isNote ? null : firstTrackOfKind('chord'));
+    const items = ownerResize ? ownerResize.items : (isMidi ? SEQ.midiItems : isNote ? SEQ.noteItems : SEQ.items);
     const onMove = (ev) => {
       item.beats = Math.max(snap, startBts + (ev.clientX - startX) / BEAT_PX);
       block.style.width = (item.beats * BEAT_PX) + 'px';
@@ -3308,9 +3835,15 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
     }
     const startX = e.clientX, startBeat = item.start;
     const snap = 0.5;
-    const items = isMidi ? SEQ.midiItems : isNote ? SEQ.noteItems : SEQ.items;
     const lane  = block.parentElement;
+    // Derive the owning track from the parent lane's data-track-id, falling
+    // back to the legacy kind mapping for the hardcoded default lanes.
+    const ownerTrack =
+      (lane && lane.dataset && lane.dataset.trackId && trackById(lane.dataset.trackId)) ||
+      (isMidi ? firstTrackOfKind('free') : isNote ? null : firstTrackOfKind('chord'));
+    const items = ownerTrack ? ownerTrack.items : (isMidi ? SEQ.midiItems : isNote ? SEQ.noteItems : SEQ.items);
     let moved = false;
+    let ghost = null;
     const onMove = (ev) => {
       const dx = ev.clientX - startX;
       if (!moved && Math.abs(dx) < 4) return;
@@ -3319,19 +3852,29 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
       item.start = Math.max(0, startBeat + dx / BEAT_PX);
       block.style.left = (item.start * BEAT_PX) + 'px';
       if (lane) lane.style.minWidth = seqLaneWidth(items) + 'px';
+      // Snap-target ghost — shows where the block will land on drop.
+      const snapped = Math.max(0, Math.round(item.start / snap) * snap);
+      if (!ghost) {
+        ghost = document.createElement('div');
+        ghost.className = 'seq-ghost';
+        ghost.style.width = (item.beats * BEAT_PX) + 'px';
+        lane.appendChild(ghost);
+      }
+      ghost.style.left = (snapped * BEAT_PX) + 'px';
     };
-    const trackId = isMidi ? 'free' : isNote ? 'melody' : 'chords';
     const onUp = (ev) => {
       block.removeEventListener('pointermove', onMove);
       block.removeEventListener('pointerup', onUp);
       block.classList.remove('moving');
+      if (ghost) { ghost.remove(); ghost = null; }
       if (moved) {
         item.start = Math.max(0, Math.round(item.start / snap) * snap);
         items.sort((a, b) => a.start - b.start);
         seqAutoExtendLoop(item.start + item.beats);
-        if (isMidi) seqRenderMidi(); else if (isNote) seqRenderNotes(); else seqRender();
-      } else {
-        seqSelectionToggle(trackId, item, ev.ctrlKey || ev.metaKey || ev.shiftKey);
+        if (ownerTrack) seqRenderTrack(ownerTrack);
+        else if (isMidi) seqRenderMidi(); else if (isNote) seqRenderNotes(); else seqRender();
+      } else if (ownerTrack) {
+        seqSelectionToggle(ownerTrack, item, ev.ctrlKey || ev.metaKey || ev.shiftKey);
       }
     };
     block.addEventListener('pointermove', onMove);
@@ -3345,16 +3888,20 @@ const SEQ_KEY = 'chord-pad-seq-v1';
 
 function seqSave() {
   try {
+    // Serialize each track minus its transient playback / drag state.
+    const tracksOut = SEQ.tracksList.map(t => ({
+      id: t.id, kind: t.kind, name: t.name,
+      instrument: t.instrument, channel: t.channel, volume: t.volume,
+      muted: t.muted, soloed: t.soloed, synth: t.synth,
+      items: t.items,
+    }));
     localStorage.setItem(SEQ_KEY, JSON.stringify({
-      items: SEQ.items,
-      noteItems: SEQ.noteItems,
-      midiItems: SEQ.midiItems,
+      tracksList: tracksOut,
       loopStart: SEQ.loopStart,
       loopEnd: SEQ.loopEnd,
       loop: SEQ.loop,
       beatsPerBar: state.beatsPerBar,
       tempo: state.tempo,
-      tracks: SEQ.tracks,
     }));
   } catch (_) {}
 }
@@ -3364,20 +3911,65 @@ function seqLoad() {
     const raw = localStorage.getItem(SEQ_KEY);
     if (!raw) return;
     const d = JSON.parse(raw);
-    if (Array.isArray(d.items))     SEQ.items     = d.items;
-    if (Array.isArray(d.noteItems)) SEQ.noteItems = d.noteItems;
-    if (Array.isArray(d.midiItems)) SEQ.midiItems = d.midiItems;
     if (typeof d.loopStart   === 'number')  SEQ.loopStart      = d.loopStart;
     if (typeof d.loopEnd     === 'number')  SEQ.loopEnd        = d.loopEnd;
     if (typeof d.loop        === 'boolean') SEQ.loop           = d.loop;
     if (typeof d.beatsPerBar === 'number')  state.beatsPerBar  = d.beatsPerBar;
     if (typeof d.tempo       === 'number')  state.tempo        = d.tempo;
-    if (d.tracks && typeof d.tracks === 'object') {
-      for (const id of ['chords', 'melody', 'free']) {
-        if (d.tracks[id]) Object.assign(SEQ.tracks[id], d.tracks[id]);
+
+    if (Array.isArray(d.tracksList)) {
+      // New format: full tracks list.
+      SEQ.tracksList.length = 0;
+      for (const tIn of d.tracksList) {
+        let items = Array.isArray(tIn.items) ? tIn.items : [];
+        // Free tracks: ensure every item is a clip. Migrate any legacy
+        // bare-note items (no .notes) by wrapping them in a 1-note clip.
+        if ((tIn.kind || 'free') === 'free') {
+          items = items.map(it => Array.isArray(it.notes) ? it : clipFromLegacyNote(it));
+        }
+        SEQ.tracksList.push(makeTrack({
+          id: tIn.id, kind: tIn.kind || 'free', name: tIn.name,
+          instrument: tIn.instrument, channel: tIn.channel, volume: tIn.volume,
+          muted: tIn.muted, soloed: tIn.soloed, synth: tIn.synth,
+          items,
+        }));
       }
+      return;
     }
+
+    // Legacy format: items / noteItems / midiItems + tracks{chords,melody,free}.
+    const chordItems = Array.isArray(d.items) ? d.items : [];
+    // Old melody items merge into the free track's items (melody kind removed).
+    const legacyFree = [...(Array.isArray(d.midiItems) ? d.midiItems : []),
+                        ...(Array.isArray(d.noteItems) ? d.noteItems : [])];
+    const freeItems  = legacyFree.map(clipFromLegacyNote);
+    const chordCfg = d.tracks?.chords || {};
+    const freeCfg  = d.tracks?.free   || {};
+    SEQ.tracksList.length = 0;
+    SEQ.tracksList.push(makeTrack({
+      id: 'tr-default-chord', kind: 'chord', name: 'Chords',
+      instrument: chordCfg.instrument, channel: chordCfg.channel, volume: chordCfg.volume,
+      muted: chordCfg.muted, soloed: chordCfg.soloed, synth: chordCfg.synth,
+      items: chordItems,
+    }));
+    SEQ.tracksList.push(makeTrack({
+      id: 'tr-default-free', kind: 'free', name: 'Free',
+      instrument: freeCfg.instrument, channel: freeCfg.channel, volume: freeCfg.volume,
+      muted: freeCfg.muted, soloed: freeCfg.soloed, synth: freeCfg.synth,
+      items: freeItems,
+    }));
   } catch (_) {}
+}
+
+// Fill any uninitialised per-track synth with a clone of the chord-pad
+// defaults. Run after seqLoad so persisted track synths survive. The
+// FIRST chord track is pad-linked — its `synth` stays null on purpose.
+function seqInitTrackSynths() {
+  const firstChord = firstTrackOfKind('chord');
+  for (const tr of SEQ.tracksList) {
+    if (tr === firstChord) continue;
+    if (!tr.synth) tr.synth = { ...state.synth };
+  }
 }
 
 function seqUpdateHints() {
@@ -3393,10 +3985,11 @@ function refreshLucide() {
 
 
 function syncTrackLabelHeights() {
-  [['chords', 'seq-lane'], ['melody', 'seq-note-lane'], ['free', 'seq-midi-lane']].forEach(([track, laneId]) => {
-    const label = document.querySelector(`.seq-track-label[data-track="${track}"]`);
-    const lane  = document.getElementById(laneId);
-    if (label && lane) label.style.height = lane.getBoundingClientRect().height + 'px';
+  // Match each label's height to its lane (looked up by data-track-id).
+  document.querySelectorAll('.seq-track-label[data-track-id]').forEach(label => {
+    const id   = label.dataset.trackId;
+    const lane = document.querySelector(`.seq-lane[data-track-id="${id}"]`);
+    if (lane) label.style.height = lane.getBoundingClientRect().height + 'px';
   });
 }
 
@@ -3410,32 +4003,7 @@ function seqRender() {
     lane.style.minWidth = seqLaneWidth(SEQ.items) + 'px';
     SEQ.items.forEach((item, idx) => lane.appendChild(seqMakeBlock(item, idx, false)));
   }
-  const sl = document.createElement('div');
-  sl.className = 'seq-loop-start-line';
-  sl.style.left = (SEQ.loopStart * BEAT_PX) + 'px';
-  lane.appendChild(sl);
-  const sh = document.createElement('div');
-  sh.className = 'seq-loop-start';
-  sh.id = 'seq-loop-start';
-  sh.textContent = '[';
-  sh.style.left = Math.max(0, SEQ.loopStart * BEAT_PX - 11) + 'px';
-  lane.appendChild(sh);
-  const ll = document.createElement('div');
-  ll.className = 'seq-loop-line';
-  ll.style.left = (SEQ.loopEnd * BEAT_PX) + 'px';
-  lane.appendChild(ll);
-  const lh = document.createElement('div');
-  lh.className = 'seq-loop-end';
-  lh.id = 'seq-loop-end';
-  lh.textContent = ']';
-  lh.style.left = (SEQ.loopEnd * BEAT_PX) + 'px';
-  lane.appendChild(lh);
-  const ph = document.createElement('div');
-  ph.className = 'seq-playhead';
-  ph.style.display = SEQ.playing ? 'block' : 'none';
-  lane.appendChild(ph);
-  initSeqLoopEnd();
-  initSeqLoopStart();
+  _appendLaneOverlays(lane);
   seqUpdateLoopVisible();
   syncTrackLabelHeights();
   seqRenderRuler();
@@ -3781,6 +4349,174 @@ function seqHighlightMidi(idx) {
 
 function seqTick() {
   if (!SEQ.playing) return;
+  const ctx = getAudioCtx();
+  const now = ctx.currentTime;
+  const bd  = seqBeatDur();
+  const horizon = now + SEQ.LOOKAHEAD;
+  for (const tr of SEQ.tracksList) {
+    if (tr.kind === 'chord')      seqTickChordTrack(tr, now, bd, horizon);
+    else if (tr.kind === 'free')  seqTickFreeTrack(tr, now, bd, horizon);
+  }
+}
+
+function seqTickChordTrack(track, now, bd, horizon) {
+  while (track.items.length > 0 && track.pendingTime < horizon) {
+    const item = track.items[track.pendingIdx];
+    const t    = track.cycleStart + (item.start - seqLoopOffset()) * bd;
+    const dur  = item.beats * bd;
+    const onDelay  = Math.max(0, (t - now) * 1000);
+    const offDelay = Math.max(0, (t + dur * 0.95 - now) * 1000);
+    const shift    = item.semitoneShift || 0;
+    const notes    = chordToMidiNotes(item.keyRoot, state.octave, item.interval, item.q).map(n => Math.max(0, Math.min(127, n + shift)));
+    const bassInt  = item.bassInterval !== undefined ? item.bassInterval : item.interval;
+    const bassNote = state.bassEnabled ? (state.bassOctave + 1) * 12 + (item.keyRoot + bassInt) % 12 : null;
+
+    const audible   = seqTrackAudible(track);
+    const vel       = seqTrackVel(track, state.velocity);
+    const inst      = seqTrackInstrument(track);
+    const padLinked = (track === firstTrackOfKind('chord'));
+
+    if (state.audioEnabled && audible) {
+      const fire = () => {
+        const audioNodes = notes.map((n, i) => startAudioNote(n, vel, t + i * 0.002, null, inst));
+        audioNodes.forEach(n => SEQ.activeNodes.add(n));
+        seqTimeout(() => audioNodes.forEach(n => { stopAudioNote(n); SEQ.activeNodes.delete(n); }), offDelay);
+        if (bassNote !== null) {
+          const bassNode = startBassNote(bassNote, t, null, inst);
+          SEQ.activeNodes.add(bassNode);
+          seqTimeout(() => { stopAudioNote(bassNode); SEQ.activeNodes.delete(bassNode); }, offDelay);
+        }
+      };
+      if (padLinked) fire(); else withSynth(track.synth, fire);
+    }
+    const capturedNotes = [...notes], capturedBass = bassNote;
+    seqTimeout(() => {
+      if (audible) {
+        capturedNotes.forEach(n => sendNoteOn(n, vel, track.channel));
+        if (capturedBass !== null) sendNoteOn(capturedBass, vel, track.channel);
+      }
+      SEQ.nowChord = chordDisplayName(item.keyRoot, item.interval, item.q) + ' [' + capturedNotes.map(midiNoteName).join(' · ') + ']';
+      seqUpdateNowPlaying();
+    }, onDelay);
+    seqTimeout(() => {
+      if (audible) {
+        capturedNotes.forEach(n => sendNoteOff(n, track.channel));
+        if (capturedBass !== null) sendNoteOff(capturedBass, track.channel);
+      }
+      SEQ.nowChord = '';
+      seqUpdateNowPlaying();
+    }, offDelay);
+
+    if (track.id === 'tr-default-chord') {
+      const capturedIdx = track.pendingIdx;
+      seqTimeout(() => seqHighlight(capturedIdx), onDelay);
+      seqTimeout(() => { if (track.activeIdx === capturedIdx) seqHighlight(-1); }, offDelay);
+    }
+
+    track.pendingIdx++;
+    seqAdvanceTrackPending(track, bd);
+  }
+}
+
+// Compute a flat sorted list of {midi, label, beats, start} from all
+// clips' notes, with absolute start = clip.start + note.start. Cached
+// on the track and invalidated when items change.
+function freeTrackFlatNotes(track) {
+  if (!track._flatNotes || track._flatDirty) {
+    const out = [];
+    for (const clip of track.items) {
+      for (const note of clip.notes) {
+        out.push({
+          midi: note.midi,
+          label: note.label || midiNoteLabel(note.midi),
+          beats: note.beats,
+          start: clip.start + note.start,
+        });
+      }
+    }
+    out.sort((a, b) => a.start - b.start);
+    track._flatNotes = out;
+    track._flatDirty = false;
+  }
+  return track._flatNotes;
+}
+function invalidateFreeTrackFlat(track) { if (track) track._flatDirty = true; }
+
+function seqTickFreeTrack(track, now, bd, horizon) {
+  const notes = freeTrackFlatNotes(track);
+  while (notes.length > 0 && track.pendingTime < horizon) {
+    const item = notes[track.pendingIdx];
+    if (!item) break;
+    const t    = track.cycleStart + (item.start - seqLoopOffset()) * bd;
+    const dur  = item.beats * bd;
+    const onDelay  = Math.max(0, (t - now) * 1000);
+    const offDelay = Math.max(0, (t + dur * 0.95 - now) * 1000);
+    const audible  = seqTrackAudible(track);
+    const vel      = seqTrackVel(track, state.velocity);
+    const inst     = seqTrackInstrument(track);
+    if (state.audioEnabled && audible) {
+      withSynth(track.synth, () => {
+        const node = startAudioNote(item.midi, vel, t, null, inst);
+        SEQ.activeNodes.add(node);
+        seqTimeout(() => { stopAudioNote(node); SEQ.activeNodes.delete(node); }, offDelay);
+      });
+    }
+    const capturedMidi = item.midi, capturedLabel = item.label;
+    seqTimeout(() => {
+      if (audible) sendNoteOn(capturedMidi, vel, track.channel);
+      SEQ.nowNote = capturedLabel;
+      seqUpdateNowPlaying();
+    }, onDelay);
+    seqTimeout(() => {
+      if (audible) sendNoteOff(capturedMidi, track.channel);
+      SEQ.nowNote = '';
+      seqUpdateNowPlaying();
+    }, offDelay);
+
+    track.pendingIdx++;
+    seqAdvanceTrackPendingFlat(track, notes, bd);
+  }
+}
+
+function seqAdvanceTrackPendingFlat(track, notes, bd) {
+  const nextIdx = seqFindNextInRange(notes, track.pendingIdx);
+  if (nextIdx < 0) {
+    if (SEQ.loop) {
+      track.cycleStart += seqTotalDur();
+      const fi = seqFindNextInRange(notes, 0);
+      track.pendingIdx  = fi >= 0 ? fi : 0;
+      track.pendingTime = fi >= 0 ? track.cycleStart + (notes[fi].start - SEQ.loopStart) * bd : Infinity;
+    } else {
+      track.pendingTime = Infinity;
+    }
+  } else {
+    track.pendingIdx  = nextIdx;
+    track.pendingTime = track.cycleStart + (notes[nextIdx].start - seqLoopOffset()) * bd;
+  }
+}
+
+// Advance a track's pendingIdx / pendingTime past the end (or to the next
+// looped iteration). Shared by chord and free track tickers.
+function seqAdvanceTrackPending(track, bd) {
+  const nextIdx = seqFindNextInRange(track.items, track.pendingIdx);
+  if (nextIdx < 0) {
+    if (SEQ.loop) {
+      track.cycleStart += seqTotalDur();
+      const fi = seqFindNextInRange(track.items, 0);
+      track.pendingIdx  = fi >= 0 ? fi : 0;
+      track.pendingTime = fi >= 0 ? track.cycleStart + (track.items[fi].start - SEQ.loopStart) * bd : Infinity;
+    } else {
+      track.pendingTime = Infinity;
+    }
+  } else {
+    track.pendingIdx  = nextIdx;
+    track.pendingTime = track.cycleStart + (track.items[nextIdx].start - seqLoopOffset()) * bd;
+  }
+}
+
+// Legacy single-track tick body retained below for reference but no longer used.
+function _seqTickLegacy_unused() {
+  if (!SEQ.playing) return;
   const ctx  = getAudioCtx();
   const now  = ctx.currentTime;
   const bd   = seqBeatDur();
@@ -3802,12 +4538,14 @@ function seqTick() {
     const trChord = SEQ.tracks.chords;
     const chordAudible = seqTrackAudible('chords');
     const vChord = seqTrackVel('chords', state.velocity);
+    const chordInst = seqTrackInstrument('chords'); // === state.instrument
     if (state.audioEnabled && chordAudible) {
-      const audioNodes = notes.map((n, i) => startAudioNote(n, vChord, t + i * 0.002, null, trChord.instrument));
+      // Chord track shares the chord-pad voice — no withSynth swap needed.
+      const audioNodes = notes.map((n, i) => startAudioNote(n, vChord, t + i * 0.002, null, chordInst));
       audioNodes.forEach(n => SEQ.activeNodes.add(n));
       seqTimeout(() => audioNodes.forEach(n => { stopAudioNote(n); SEQ.activeNodes.delete(n); }), offDelay);
       if (bassNote !== null) {
-        const bassNode = startBassNote(bassNote, t, null, trChord.instrument);
+        const bassNode = startBassNote(bassNote, t, null, chordInst);
         SEQ.activeNodes.add(bassNode);
         seqTimeout(() => { stopAudioNote(bassNode); SEQ.activeNodes.delete(bassNode); }, offDelay);
       }
@@ -3863,9 +4601,11 @@ function seqTick() {
     const melAudible = seqTrackAudible('melody');
     const vMel = seqTrackVel('melody', state.velocity);
     if (state.audioEnabled && melAudible) {
-      const node = startAudioNote(item.midi, vMel, t, null, trMel.instrument);
-      SEQ.activeNodes.add(node);
-      seqTimeout(() => { stopAudioNote(node); SEQ.activeNodes.delete(node); }, offDelay);
+      withSynth(trMel.synth, () => {
+        const node = startAudioNote(item.midi, vMel, t, null, trMel.instrument);
+        SEQ.activeNodes.add(node);
+        seqTimeout(() => { stopAudioNote(node); SEQ.activeNodes.delete(node); }, offDelay);
+      });
     }
     const capturedMidi = item.midi, capturedLabel = item.label;
     seqTimeout(() => {
@@ -3912,9 +4652,11 @@ function seqTick() {
     const freeAudible = seqTrackAudible('free');
     const vFree = seqTrackVel('free', state.velocity);
     if (state.audioEnabled && freeAudible) {
-      const node = startAudioNote(item.midi, vFree, t, null, trFree.instrument);
-      SEQ.activeNodes.add(node);
-      seqTimeout(() => { stopAudioNote(node); SEQ.activeNodes.delete(node); }, offDelay);
+      withSynth(trFree.synth, () => {
+        const node = startAudioNote(item.midi, vFree, t, null, trFree.instrument);
+        SEQ.activeNodes.add(node);
+        seqTimeout(() => { stopAudioNote(node); SEQ.activeNodes.delete(node); }, offDelay);
+      });
     }
     const capturedMidi = item.midi, capturedLabel = item.label;
     seqTimeout(() => {
@@ -3951,8 +4693,14 @@ function seqTick() {
 }
 
 
-function seqResyncChords() {
-  if (!SEQ.playing || SEQ.items.length === 0) return;
+// Generic per-track resync: recomputes pendingIdx / pendingTime / cycleStart
+// so the next note plays at the right time relative to the current clock.
+// For free tracks, indexing is over the flattened note list rather than clips.
+function seqResyncTrack(track) {
+  if (!SEQ.playing || !track) return;
+  invalidateFreeTrackFlat(track);
+  const list = track.kind === 'free' ? freeTrackFlatNotes(track) : track.items;
+  if (list.length === 0) return;
   const bd    = seqBeatDur();
   const tRef  = SEQ.playStartTime + 0.05;
   const total = seqTotalDur();
@@ -3960,99 +4708,53 @@ function seqResyncChords() {
   const ls    = seqLoopOffset();
   const cycleNum   = SEQ.loop ? Math.max(0, Math.floor((now - tRef) / total)) : 0;
   const cycleStart = tRef + cycleNum * total;
-  for (let i = 0; i < SEQ.items.length; i++) {
-    if (!seqItemInRange(SEQ.items[i])) continue;
-    const t = cycleStart + (SEQ.items[i].start - ls) * bd;
+  for (let i = 0; i < list.length; i++) {
+    if (!seqItemInRange(list[i])) continue;
+    const t = cycleStart + (list[i].start - ls) * bd;
     if (t > now) {
-      SEQ.cycleStart = cycleStart; SEQ.pendingIdx = i; SEQ.pendingTime = t;
+      track.cycleStart  = cycleStart;
+      track.pendingIdx  = i;
+      track.pendingTime = t;
       seqResyncAnimLoop();
       return;
     }
   }
-  if (!SEQ.loop) { SEQ.pendingTime = Infinity; return; }
+  if (!SEQ.loop) { track.pendingTime = Infinity; return; }
   const next = cycleStart + total;
-  const fi = seqFindNextInRange(SEQ.items, 0);
-  SEQ.cycleStart = next; SEQ.pendingIdx = fi >= 0 ? fi : 0;
-  SEQ.pendingTime = fi >= 0 ? next + (SEQ.items[fi].start - SEQ.loopStart) * bd : Infinity;
+  const fi = seqFindNextInRange(list, 0);
+  track.cycleStart  = next;
+  track.pendingIdx  = fi >= 0 ? fi : 0;
+  track.pendingTime = fi >= 0 ? next + (list[fi].start - SEQ.loopStart) * bd : Infinity;
   seqResyncAnimLoop();
 }
 
-function seqResyncNotes() {
-  if (!SEQ.playing || SEQ.noteItems.length === 0) return;
-  const bd    = seqBeatDur();
-  const tRef  = SEQ.playStartTime + 0.05;
-  const total = seqTotalDur();
-  const now   = getAudioCtx().currentTime;
-  const ls    = seqLoopOffset();
-  const cycleNum   = SEQ.loop ? Math.max(0, Math.floor((now - tRef) / total)) : 0;
-  const cycleStart = tRef + cycleNum * total;
-  for (let i = 0; i < SEQ.noteItems.length; i++) {
-    if (!seqItemInRange(SEQ.noteItems[i])) continue;
-    const t = cycleStart + (SEQ.noteItems[i].start - ls) * bd;
-    if (t > now) {
-      SEQ.noteCycleStart = cycleStart; SEQ.notePendingIdx = i; SEQ.notePendingTime = t;
-      seqResyncAnimLoop();
-      return;
-    }
-  }
-  if (!SEQ.loop) { SEQ.notePendingTime = Infinity; return; }
-  const next = cycleStart + total;
-  const fn = seqFindNextInRange(SEQ.noteItems, 0);
-  SEQ.noteCycleStart = next; SEQ.notePendingIdx = fn >= 0 ? fn : 0;
-  SEQ.notePendingTime = fn >= 0 ? next + (SEQ.noteItems[fn].start - SEQ.loopStart) * bd : Infinity;
-  seqResyncAnimLoop();
-}
+function seqResyncAll() { for (const t of SEQ.tracksList) seqResyncTrack(t); }
 
-function seqResyncMidi() {
-  if (!SEQ.playing || SEQ.midiItems.length === 0) return;
-  const bd    = seqBeatDur();
-  const tRef  = SEQ.playStartTime + 0.05;
-  const total = seqTotalDur();
-  const now   = getAudioCtx().currentTime;
-  const ls    = seqLoopOffset();
-  const cycleNum   = SEQ.loop ? Math.max(0, Math.floor((now - tRef) / total)) : 0;
-  const cycleStart = tRef + cycleNum * total;
-  for (let i = 0; i < SEQ.midiItems.length; i++) {
-    if (!seqItemInRange(SEQ.midiItems[i])) continue;
-    const t = cycleStart + (SEQ.midiItems[i].start - ls) * bd;
-    if (t > now) {
-      SEQ.midiCycleStart = cycleStart; SEQ.midiPendingIdx = i; SEQ.midiPendingTime = t;
-      seqResyncAnimLoop();
-      return;
-    }
-  }
-  if (!SEQ.loop) { SEQ.midiPendingTime = Infinity; return; }
-  const next = cycleStart + total;
-  const fm = seqFindNextInRange(SEQ.midiItems, 0);
-  SEQ.midiCycleStart = next; SEQ.midiPendingIdx = fm >= 0 ? fm : 0;
-  SEQ.midiPendingTime = fm >= 0 ? next + (SEQ.midiItems[fm].start - SEQ.loopStart) * bd : Infinity;
-  seqResyncAnimLoop();
-}
+function seqResyncChords() { seqResyncTrack(firstTrackOfKind('chord')); }
+
+function seqResyncNotes() { /* melody removed — no-op */ }
+
+function seqResyncMidi() { seqResyncTrack(firstTrackOfKind('free')); }
 
 function seqInitPlay(t0) {
   const bd  = seqBeatDur();
   const ls  = seqLoopOffset();
   SEQ.playing        = true;
   SEQ.playStartTime  = t0 - 0.05;
-  SEQ.cycleStart     = t0;
-  SEQ.noteCycleStart = t0;
   SEQ.animBeat      = SEQ.loopStart;
   SEQ.animLastTime  = t0;
   SEQ.animLoopLen   = SEQ.loopEnd - SEQ.loopStart;
   SEQ.animLoopStart = SEQ.loopStart;
-  const fi = seqFindNextInRange(SEQ.items, 0);
-  const fn = seqFindNextInRange(SEQ.noteItems, 0);
-  const fm = seqFindNextInRange(SEQ.midiItems, 0);
-  SEQ.pendingIdx      = fi >= 0 ? fi : 0;
-  SEQ.pendingTime     = fi >= 0 ? t0 + (SEQ.items[fi].start - ls) * bd : Infinity;
-  SEQ.notePendingIdx  = fn >= 0 ? fn : 0;
-  SEQ.notePendingTime = fn >= 0 ? t0 + (SEQ.noteItems[fn].start - ls) * bd : Infinity;
-  SEQ.midiCycleStart  = t0;
-  SEQ.midiPendingIdx  = fm >= 0 ? fm : 0;
-  SEQ.midiPendingTime = fm >= 0 ? t0 + (SEQ.midiItems[fm].start - ls) * bd : Infinity;
-  SEQ.activeIdx       = -1;
-  SEQ.noteActiveIdx   = -1;
-  SEQ.midiActiveIdx   = -1;
+  // Initialize each track's playback cursor independently.
+  for (const tr of SEQ.tracksList) {
+    invalidateFreeTrackFlat(tr);
+    const list = tr.kind === 'free' ? freeTrackFlatNotes(tr) : tr.items;
+    const fi = seqFindNextInRange(list, 0);
+    tr.cycleStart  = t0;
+    tr.pendingIdx  = fi >= 0 ? fi : 0;
+    tr.pendingTime = fi >= 0 ? t0 + (list[fi].start - ls) * bd : Infinity;
+    tr.activeIdx   = -1;
+  }
   if (!SEQ.timer) SEQ.timer = setInterval(seqTick, SEQ.TICK_MS);
   document.querySelectorAll('.seq-playhead').forEach(ph => ph.style.display = 'block');
   if (SEQ.rafId) cancelAnimationFrame(SEQ.rafId);
@@ -4143,7 +4845,8 @@ function seqStop() {
   if (!REC.active) metroHalt();
   document.querySelectorAll('.seq-block').forEach(b => b.classList.remove('active'));
   SEQ.noteActiveIdx = -1;
-  document.getElementById('now-playing-notes').textContent = '—';
+  const npn = document.getElementById('now-playing-notes');
+  if (npn) npn.textContent = '—';
   const btn = document.getElementById('seq-play-btn');
   if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i data-lucide="play"></i> Play'; refreshLucide(); }
 }
@@ -4791,10 +5494,7 @@ function initSeqLoopEnd() {
     const onUp = () => {
       handle.removeEventListener('pointermove', onMove);
       handle.removeEventListener('pointerup', onUp);
-      if (SEQ.playing && SEQ.loop) {
-        seqResyncChords();
-        seqResyncNotes();
-      }
+      if (SEQ.playing && SEQ.loop) seqResyncAll();
       seqSave();
     };
     handle.addEventListener('pointermove', onMove);
@@ -4819,10 +5519,7 @@ function initSeqLoopStart() {
     const onUp = () => {
       handle.removeEventListener('pointermove', onMove);
       handle.removeEventListener('pointerup', onUp);
-      if (SEQ.playing && SEQ.loop) {
-        seqResyncChords();
-        seqResyncNotes();
-      }
+      if (SEQ.playing && SEQ.loop) seqResyncAll();
       seqSave();
     };
     handle.addEventListener('pointermove', onMove);
@@ -4997,8 +5694,7 @@ function applyTempoChange() {
   panic();
   seqHighlight(-1);
   seqHighlightNote(-1);
-  seqResyncChords();
-  seqResyncNotes();
+  seqResyncAll();
 
   // Re-align visual cursor to audio position after tempo change
   if (SEQ.loop) {
@@ -5066,21 +5762,29 @@ function kbNoteOff(midi, sendMidi = true) {
   if (REC.active && REC.pendingNotes.has(midi)) {
     const p = REC.pendingNotes.get(midi);
     const beats = Math.max(0.5, Math.round(recCurrentBeat() * 2) / 2 - p.startBeat) || 0.5;
-    SEQ.noteItems.push({ midi, label: p.label, beats, start: p.startBeat });
-    SEQ.noteItems.sort((a, b) => a.start - b.start);
+    const trk = ensureTrackOfKind('free');
+    trk.items.push(makeClip({
+      start: p.startBeat, beats, label: p.label,
+      notes: [{ midi, label: p.label, start: 0, beats }],
+    }));
+    trk.items.sort((a, b) => a.start - b.start);
     seqAutoExtendLoop(p.startBeat + beats);
-    seqRenderNotes();
-    seqResyncNotes();
+    seqRenderTrack(trk);
+    seqResyncTrack(trk);
     REC.pendingNotes.delete(midi);
   }
   if (REC.active && REC.pendingMidi.has(midi)) {
     const p = REC.pendingMidi.get(midi);
     const beats = Math.max(0.1, recCurrentBeat() - p.startBeat);
-    SEQ.midiItems.push({ midi, label: p.label, beats, start: p.startBeat });
-    SEQ.midiItems.sort((a, b) => a.start - b.start);
+    const trk = ensureTrackOfKind('free');
+    trk.items.push(makeClip({
+      start: p.startBeat, beats, label: p.label,
+      notes: [{ midi, label: p.label, start: 0, beats }],
+    }));
+    trk.items.sort((a, b) => a.start - b.start);
     seqAutoExtendLoop(p.startBeat + beats);
-    seqRenderMidi();
-    seqResyncMidi();
+    seqRenderTrack(trk);
+    seqResyncTrack(trk);
     REC.pendingMidi.delete(midi);
   }
 }
@@ -5469,6 +6173,8 @@ initMidiLaneResize();
 initSeqLanePan();
 initSeqPinchZoom();
 seqLoad();
+seqInitTrackSynths();
+rebuildTracksUI();
 seqUpdateBarLine();
 seqUpdateLoopStart();
 document.getElementById('seq-timesig').value  = String(state.beatsPerBar);
@@ -5478,81 +6184,991 @@ document.getElementById('seq-loop-btn').classList.toggle('active', SEQ.loop);
 seqRender();
 seqRenderNotes();
 seqRenderMidi();
+seqRenderAll(); // render any extra tracks too
 syncTrackLabelHeights();
 refreshLucide();
 requestAnimationFrame(seqUpdateHints);
 
-const TRACK_LANE_MAP = { chords: 'seq-lane', melody: 'seq-note-lane', free: 'seq-midi-lane' };
-const TRACK_NAMES = { chords: 'Chords', melody: 'Melody', free: 'Free' };
-const INSTRUMENT_OPTIONS = [
-  ['synth', 'Synth'], ['piano', 'Piano'], ['epiano', 'E-Piano'], ['epiano2', 'E-Piano 2'],
-  ['organ', 'Organ'], ['strings', 'Strings'], ['choir', 'Choir'], ['vibes', 'Vibes'], ['pad', 'Pad'],
-];
-
-function buildTrackHeaders() {
-  document.querySelectorAll('.seq-track-label[data-track]').forEach(label => {
-    const trackId = label.dataset.track;
-    const tr = SEQ.tracks[trackId];
-    label.innerHTML = `
-      <div class="seq-th-row seq-th-top">
-        <span class="seq-th-name">${TRACK_NAMES[trackId]}</span>
-        <button class="seq-th-collapse" title="Collapse / expand"><i data-lucide="chevrons-down-up"></i></button>
-      </div>
-      <div class="seq-th-row seq-th-mid">
-        <select class="seq-th-inst" title="Instrument">
-          ${INSTRUMENT_OPTIONS.map(([v, n]) => `<option value="${v}"${tr.instrument === v ? ' selected' : ''}>${n}</option>`).join('')}
-        </select>
-      </div>
-      <div class="seq-th-row seq-th-bot">
-        <button class="seq-th-m${tr.muted ? ' on' : ''}" title="Mute">M</button>
-        <button class="seq-th-s${tr.soloed ? ' on' : ''}" title="Solo">S</button>
-        <span class="seq-th-ch-wrap" title="MIDI channel">
-          <span class="seq-th-ch-lbl">Ch</span>
-          <input type="number" class="seq-th-ch" min="1" max="16" value="${tr.channel + 1}">
-        </span>
-        <input type="range" class="seq-th-vol" min="0" max="150" value="${Math.round(tr.volume * 100)}" title="Volume">
-      </div>
-    `;
-
-    const stop = (e) => e.stopPropagation();
-    label.querySelectorAll('select, input, button').forEach(el => {
-      el.addEventListener('mousedown', stop);
-      el.addEventListener('click', stop);
-    });
-
-    label.querySelector('.seq-th-collapse').addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleTrackCollapse(label);
-    });
-    label.querySelector('.seq-th-inst').addEventListener('change', (e) => {
-      tr.instrument = e.target.value; seqSave();
-      if (tr.instrument !== 'synth') preloadSamples(tr.instrument);
-    });
-    label.querySelector('.seq-th-m').addEventListener('click', (e) => {
-      tr.muted = !tr.muted; e.currentTarget.classList.toggle('on', tr.muted); seqSave();
-    });
-    label.querySelector('.seq-th-s').addEventListener('click', (e) => {
-      tr.soloed = !tr.soloed; e.currentTarget.classList.toggle('on', tr.soloed); seqSave();
-    });
-    label.querySelector('.seq-th-ch').addEventListener('change', (e) => {
-      const v = Math.max(1, Math.min(16, parseInt(e.target.value) || 1));
-      e.target.value = v;
-      tr.channel = v - 1; seqSave();
-    });
-    label.querySelector('.seq-th-vol').addEventListener('input', (e) => {
-      tr.volume = parseInt(e.target.value) / 100;
-    });
-    label.querySelector('.seq-th-vol').addEventListener('change', seqSave);
-  });
-  refreshLucide();
+// Find or create the lane DOM element for a track.
+function ensureTrackLane(track) {
+  let lane = document.querySelector(`.seq-lane[data-track-id="${track.id}"]`);
+  if (lane) return lane;
+  lane = document.createElement('div');
+  lane.className = 'seq-lane';
+  lane.dataset.trackId = track.id;
+  document.getElementById('seq-tracks-inner').appendChild(lane);
+  // Wire drag-drop behaviour appropriate for the track's kind
+  if (track.kind === 'chord') initChordLane(lane);
+  else                         initFreeLane(lane);
+  return lane;
 }
 
-function toggleTrackCollapse(label) {
-  const track = label.dataset.track;
+// Find or create the sidebar header for a track.
+function ensureTrackHeader(track) {
+  let label = document.querySelector(`.seq-track-label[data-track-id="${track.id}"]`);
+  if (!label) {
+    label = document.createElement('div');
+    label.className = 'seq-track-label';
+    label.dataset.trackId = track.id;
+    const addBtn = document.getElementById('seq-add-track-btn');
+    document.getElementById('seq-track-sidebar').insertBefore(label, addBtn);
+  }
+  populateTrackHeader(label, track);
+  return label;
+}
+
+function populateTrackHeader(label, track) {
+  const padLinked = (track === firstTrackOfKind('chord'));
+  const convertBtn = track.kind === 'chord'
+    ? `<button class="seq-th-convert" title="Convert to Free (bake chords to notes — one way)">→ Free</button>`
+    : '';
+  label.innerHTML = `
+    <div class="seq-th-row seq-th-top">
+      <span class="seq-th-name" title="Click to focus · double-click to rename">${escapeHtml(track.name)}</span>
+      ${convertBtn}
+      <button class="seq-th-collapse" title="Collapse / expand"><i data-lucide="chevrons-down-up"></i></button>
+      <button class="seq-th-del" title="Remove track">✕</button>
+    </div>`;
+  // Append the rest of the header rows (instrument dropdown, mixer row).
+  label.insertAdjacentHTML('beforeend', `
+    <div class="seq-th-row seq-th-mid">
+      <select class="seq-th-inst" title="Instrument">
+        ${INSTRUMENT_OPTIONS.map(([v, n]) => `<option value="${v}"${seqTrackInstrument(track) === v ? ' selected' : ''}>${n}</option>`).join('')}
+      </select>
+    </div>
+    <div class="seq-th-row seq-th-bot">
+      <button class="seq-th-m${track.muted ? ' on' : ''}" title="Mute">M</button>
+      <button class="seq-th-s${track.soloed ? ' on' : ''}" title="Solo">S</button>
+      <span class="seq-th-ch-wrap" title="MIDI channel">
+        <span class="seq-th-ch-lbl">Ch</span>
+        <input type="number" class="seq-th-ch" min="1" max="16" value="${track.channel + 1}">
+      </span>
+      <input type="range" class="seq-th-vol" min="0" max="150" value="${Math.round(track.volume * 100)}" title="Volume">
+    </div>
+  `);
+  if (track.kind === 'chord') {
+    label.querySelector('.seq-th-convert')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      convertChordToFree(track);
+    });
+  }
+  // Keep events from bubbling up to the lane behind the sidebar
+  const stop = (e) => e.stopPropagation();
+  label.querySelectorAll('select, input, button').forEach(el => {
+    el.addEventListener('mousedown', stop);
+    el.addEventListener('click', stop);
+  });
+
+  label.querySelector('.seq-th-collapse').addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleTrackCollapse(label, track);
+  });
+  // Click → bind Instrument panel. (Piano-roll is opened by clicking a
+  // CLIP block in the arrangement, not by clicking the track name.)
+  // Double-click → rename.
+  const nameEl = label.querySelector('.seq-th-name');
+  nameEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setSynthEditTarget(padLinked ? 'pad' : (track.kind === 'free' ? 'free' : 'pad'));
+    document.querySelector('.synth-controls')?.classList.remove('collapsed');
+  });
+  nameEl.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    startInlineRename(nameEl, track);
+  });
+  label.querySelector('.seq-th-del').addEventListener('click', (e) => {
+    e.stopPropagation();
+    deleteTrack(track.id);
+  });
+
+  label.querySelector('.seq-th-inst').addEventListener('change', (e) => {
+    const nextInst = e.target.value;
+    if (padLinked) {
+      // First chord track shares the chord-pad voice — route through the
+      // global instrument dropdown for preset / SF2 loading.
+      const prevTarget = state.synthEditTarget;
+      state.synthEditTarget = 'pad';
+      const gDD = document.getElementById('synth-instrument');
+      if (gDD) { gDD.value = nextInst; gDD.dispatchEvent(new Event('change')); }
+      if (prevTarget !== 'pad') setSynthEditTarget(prevTarget);
+    } else {
+      track.instrument = nextInst; seqSave();
+      if (INSTRUMENT_TO_SF2[nextInst] != null) loadSf2('fluid');
+      else if (nextInst !== 'synth') preloadSamples(nextInst);
+    }
+  });
+  label.querySelector('.seq-th-m').addEventListener('click', (e) => {
+    track.muted = !track.muted; e.currentTarget.classList.toggle('on', track.muted); seqSave();
+  });
+  label.querySelector('.seq-th-s').addEventListener('click', (e) => {
+    track.soloed = !track.soloed; e.currentTarget.classList.toggle('on', track.soloed); seqSave();
+  });
+  label.querySelector('.seq-th-ch').addEventListener('change', (e) => {
+    const v = Math.max(1, Math.min(16, parseInt(e.target.value) || 1));
+    e.target.value = v;
+    track.channel = v - 1; seqSave();
+  });
+  label.querySelector('.seq-th-vol').addEventListener('input', (e) => {
+    track.volume = parseInt(e.target.value) / 100;
+  });
+  label.querySelector('.seq-th-vol').addEventListener('change', seqSave);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+}
+
+function startInlineRename(nameEl, track) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'seq-th-name-input';
+  input.value = track.name;
+  input.maxLength = 30;
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+  const finish = (commit) => {
+    if (commit) {
+      const v = input.value.trim();
+      if (v) track.name = v;
+      seqSave();
+    }
+    rebuildTracksUI();
+  };
+  input.addEventListener('blur',    () => finish(true));
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter')  { e.preventDefault(); finish(true); }
+    if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+}
+
+// ============================================================
+// Piano-roll detail-view (opens at the bottom of the sequencer when a
+// free track is focused — full-width note editor)
+// ============================================================
+SEQ.focusedClip = null; // { trackId, clipId } or null
+SEQ.pianoRollOpen = false;
+
+function focusedClipObjects() {
+  if (!SEQ.focusedClip) return { track: null, clip: null };
+  const track = trackById(SEQ.focusedClip.trackId);
+  if (!track) return { track: null, clip: null };
+  const clip = track.items.find(c => c.id === SEQ.focusedClip.clipId);
+  return { track, clip };
+}
+
+function showPianoRoll() {
+  SEQ.pianoRollOpen = true;
+  const panel = document.getElementById('seq-pianoroll');
+  if (panel) panel.hidden = false;
+  document.getElementById('seq-pianoroll-toggle')?.classList.add('active');
+  refreshPianoRollTitle();
+  renderPianoRoll();
+}
+
+function hidePianoRoll() {
+  SEQ.pianoRollOpen = false;
+  const panel = document.getElementById('seq-pianoroll');
+  if (panel) panel.hidden = true;
+  document.getElementById('seq-pianoroll-toggle')?.classList.remove('active');
+  document.querySelectorAll('.seq-clip-block.focused').forEach(el => el.classList.remove('focused'));
+}
+
+function togglePianoRoll() {
+  if (SEQ.pianoRollOpen) hidePianoRoll(); else showPianoRoll();
+}
+
+function openPianoRoll(track, clip) {
+  if (!track || track.kind !== 'free' || !clip) return;
+  SEQ.focusedClip = { trackId: track.id, clipId: clip.id };
+  showPianoRoll();
+  refreshPianoRollTitle();
+  document.querySelectorAll('.seq-clip-block.focused').forEach(el => el.classList.remove('focused'));
+  document.querySelector(`.seq-clip-block[data-clip-id="${clip.id}"]`)?.classList.add('focused');
+}
+
+function closePianoRoll() { hidePianoRoll(); }
+
+function refreshPianoRollTitle() {
+  const titleEl = document.getElementById('seq-pianoroll-title');
+  if (!titleEl) return;
+  const { track, clip } = focusedClipObjects();
+  if (!track || !clip) { titleEl.textContent = 'No clip selected'; return; }
+  titleEl.textContent = track.name;
+}
+
+const PR_ROW_H = 12;
+function _prPitchRange(notes) {
+  if (!notes || notes.length === 0) return { lo: 48, hi: 72 };
+  const midis = notes.map(n => n.midi);
+  return { lo: Math.max(0, Math.min(...midis) - 2), hi: Math.min(127, Math.max(...midis) + 2) };
+}
+
+function renderPianoRoll() {
+  const body  = document.getElementById('seq-pianoroll-body');
+  if (!body) return;
+  body.innerHTML = '';
+  const { track, clip } = focusedClipObjects();
+  if (!track || !clip) {
+    body.style.minHeight = '120px';
+    body.style.minWidth  = '';
+    const tip = document.createElement('div');
+    tip.className = 'pr-empty';
+    tip.textContent = 'Click a clip in a free track to edit its notes';
+    body.appendChild(tip);
+    _prAppendOverlays(body);
+    return;
+  }
+  body.dataset.trackId = track.id;
+  body.dataset.clipId  = clip.id;
+  const { lo, hi } = _prPitchRange(clip.notes);
+  const rows = hi - lo + 1;
+  body.style.minHeight = (rows * PR_ROW_H + 8) + 'px';
+  body.style.minWidth  = Math.max(clip.beats, 4) * BEAT_PX + 'px';
+  body._prHi = hi;
+  body._prLo = lo;
+
+  // Piano keyboard sidebar — per-semitone rows so notes line up exactly
+  // with the body grid. Black-key rows are visually narrower for a
+  // piano-like look.
+  if (SEQ.prShowKeyboard) {
+    const kb = document.createElement('div');
+    kb.className = 'pr-keyboard';
+    kb.style.height = (rows * PR_ROW_H + 8) + 'px';
+    for (let m = hi; m >= lo; m--) {
+      const row = document.createElement('div');
+      row.className = 'pr-keyboard-row' + (midiIsBlack(m) ? ' black' : '');
+      row.style.top    = ((hi - m) * PR_ROW_H + 4) + 'px';
+      row.style.height = (PR_ROW_H - 1) + 'px';
+      row.textContent = (m % 12 === 0) ? midiNoteLabel(m) : '';
+      kb.appendChild(row);
+    }
+    body.appendChild(kb);
+  }
+
+  if (clip.notes.length === 0) {
+    const tip = document.createElement('div');
+    tip.className = 'pr-empty';
+    tip.textContent = 'Click and drag to draw a note · drop a chord-pad to add chord notes';
+    body.appendChild(tip);
+  } else {
+    for (let i = 0; i < clip.notes.length; i++) {
+      const note = clip.notes[i];
+      body.appendChild(_prMakeNote(track, clip, note, i, hi));
+    }
+  }
+
+  _prAppendOverlays(body);
+}
+
+// White-key height in the piano-roll sidebar (px). Black keys derive from
+// this. Keyboard total height won't match the body grid exactly — accepted
+// trade-off for a real piano look.
+const PR_KB_WHITE_H = 16;
+const PR_KB_BLACK_H = 11;
+const PR_KB_WIDTH    = 56;
+const PR_KB_BLACK_W  = 36;
+
+function _prBuildPianoKeyboard(lo, hi) {
+  const kb = document.createElement('div');
+  kb.className = 'pr-keyboard';
+  kb.style.width = PR_KB_WIDTH + 'px';
+
+  // Pass 1 (top → bottom): position each white key
+  let whiteIdx = 0;
+  const whiteTop = {}; // midi → y of top edge
+  for (let m = hi; m >= lo; m--) {
+    if (!midiIsBlack(m)) {
+      whiteTop[m] = whiteIdx * PR_KB_WHITE_H;
+      whiteIdx++;
+    }
+  }
+  const totalH = whiteIdx * PR_KB_WHITE_H;
+  kb.style.height = totalH + 'px';
+
+  // White keys
+  for (const m of Object.keys(whiteTop).map(Number)) {
+    const w = document.createElement('div');
+    w.className = 'pr-kb-white' + (m % 12 === 0 ? ' octave' : '');
+    w.style.top    = whiteTop[m] + 'px';
+    w.style.height = (PR_KB_WHITE_H - 1) + 'px';
+    if (m % 12 === 0) {
+      const lbl = document.createElement('span');
+      lbl.className = 'pr-kb-label';
+      lbl.textContent = midiNoteLabel(m);
+      w.appendChild(lbl);
+    }
+    kb.appendChild(w);
+  }
+  // Black keys — centred on the boundary between the white above (m+1) and
+  // the white below (m-1).
+  for (let m = hi; m >= lo; m--) {
+    if (!midiIsBlack(m)) continue;
+    const above = whiteTop[m + 1];
+    const below = whiteTop[m - 1];
+    if (above === undefined || below === undefined) continue;
+    const boundary = above + PR_KB_WHITE_H; // = below
+    const top = boundary - PR_KB_BLACK_H / 2;
+    const b = document.createElement('div');
+    b.className = 'pr-kb-black';
+    b.style.top    = top + 'px';
+    b.style.height = PR_KB_BLACK_H + 'px';
+    kb.appendChild(b);
+  }
+  return kb;
+}
+
+function _prAppendOverlays(body) {
+  // Only a playhead inside the piano-roll — loop tags/lines stay on the
+  // arrangement-view tracks where they belong.
+  const ph = document.createElement('div');
+  ph.className = 'seq-playhead';
+  ph.style.display = 'none'; // shown by seqAnimatePlayhead only while inside the clip
+  body.appendChild(ph);
+}
+
+function _prMakeNote(track, clip, note, idx, hi) {
+  const el = document.createElement('div');
+  el.className = 'pr-note';
+  el.textContent = note.label || midiNoteLabel(note.midi);
+  el.style.left   = (note.start * BEAT_PX) + 'px';
+  el.style.width  = (note.beats * BEAT_PX) + 'px';
+  el.style.top    = ((hi - note.midi) * PR_ROW_H + 4) + 'px';
+  el.style.height = (PR_ROW_H - 2) + 'px';
+  const del = document.createElement('button');
+  del.className = 'pr-note-del';
+  del.textContent = '✕';
+  del.addEventListener('click', (e) => {
+    e.stopPropagation();
+    seqCheckpoint();
+    const i = clip.notes.indexOf(note);
+    if (i >= 0) clip.notes.splice(i, 1);
+    renderPianoRoll();
+    seqRenderTrack(track);
+    seqResyncTrack(track);
+    seqSave();
+  });
+  el.appendChild(del);
+  el.addEventListener('pointerdown', (e) => {
+    if (e.target === del) return;
+    e.preventDefault();
+    e.stopPropagation();
+    el.setPointerCapture(e.pointerId);
+    seqCheckpoint();
+    const body = el.parentElement;
+    const startX = e.clientX, startY = e.clientY;
+    const origStart = note.start, origMidi = note.midi;
+    let moved = false;
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+      moved = true;
+      note.start = Math.max(0, origStart + dx / BEAT_PX);
+      note.midi  = Math.max(0, Math.min(127, origMidi - Math.round(dy / PR_ROW_H)));
+      el.style.left = (note.start * BEAT_PX) + 'px';
+      el.style.top  = ((body._prHi - note.midi) * PR_ROW_H + 4) + 'px';
+    };
+    const onUp = () => {
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      if (moved) {
+        note.start = Math.max(0, Math.round(note.start / 0.5) * 0.5);
+        note.label = midiNoteLabel(note.midi);
+        clip.notes.sort((a, b) => a.start - b.start);
+        renderPianoRoll();
+        seqRenderTrack(track);
+        seqResyncTrack(track);
+        seqSave();
+      }
+    };
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+  });
+  return el;
+}
+
+// Click-and-drag on empty area = draw new note. Drop a chord-pad to add
+// chord notes (all at the click x position, pitch from the chord).
+(function _initPianoRollListeners() {
+  const body = document.getElementById('seq-pianoroll-body');
+  if (!body) return;
+  body.addEventListener('pointerdown', (e) => {
+    if (e.target !== body) return;
+    const { track, clip } = focusedClipObjects();
+    if (!track || !clip) return;
+    e.preventDefault();
+    body.setPointerCapture(e.pointerId);
+    const rect = body.getBoundingClientRect();
+    const beat0 = Math.max(0, ((e.clientX - rect.left + body.scrollLeft) / BEAT_PX));
+    const startBeat = Math.floor(beat0 * 2) / 2;
+    const midi = Math.max(0, Math.min(127, body._prHi - Math.floor((e.clientY - rect.top + body.scrollTop - 4) / PR_ROW_H)));
+    seqCheckpoint();
+    const newNote = { midi, label: midiNoteLabel(midi), beats: 1, start: startBeat };
+    clip.notes.push(newNote);
+    clip.notes.sort((a, b) => a.start - b.start);
+    const ghost = document.createElement('div');
+    ghost.className = 'pr-note';
+    ghost.style.left   = (startBeat * BEAT_PX) + 'px';
+    ghost.style.width  = BEAT_PX + 'px';
+    ghost.style.top    = ((body._prHi - midi) * PR_ROW_H + 4) + 'px';
+    ghost.style.height = (PR_ROW_H - 2) + 'px';
+    ghost.textContent  = midiNoteLabel(midi);
+    body.appendChild(ghost);
+    const onMove = (ev) => {
+      const beat = Math.max(startBeat + 0.25, (ev.clientX - rect.left + body.scrollLeft) / BEAT_PX);
+      newNote.beats = Math.max(0.25, beat - startBeat);
+      ghost.style.width = (newNote.beats * BEAT_PX) + 'px';
+    };
+    const onUp = () => {
+      body.removeEventListener('pointermove', onMove);
+      body.removeEventListener('pointerup', onUp);
+      newNote.beats = Math.max(0.25, Math.round(newNote.beats * 2) / 2);
+      // Extend clip length if note runs past its right edge
+      if (newNote.start + newNote.beats > clip.beats) clip.beats = newNote.start + newNote.beats;
+      seqAutoExtendLoop(clip.start + clip.beats);
+      renderPianoRoll();
+      seqRenderTrack(track);
+      seqResyncTrack(track);
+      seqSave();
+    };
+    body.addEventListener('pointermove', onMove);
+    body.addEventListener('pointerup', onUp);
+  });
+
+  // Chord-pad drop inside the piano-roll → adds the chord's notes to the
+  // focused clip at the drop position. Show a snap-ghost during dragover.
+  let _prGhost = null;
+  body.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer.types.includes('application/x-chord')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    const rect = body.getBoundingClientRect();
+    const beat = Math.max(0, Math.floor(((e.clientX - rect.left + body.scrollLeft) / BEAT_PX) * 2) / 2);
+    if (!_prGhost) {
+      _prGhost = document.createElement('div');
+      _prGhost.className = 'seq-ghost pr-ghost';
+      body.appendChild(_prGhost);
+    }
+    _prGhost.style.left  = (beat * BEAT_PX) + 'px';
+    _prGhost.style.width = (state.beatsPerBar * BEAT_PX) + 'px';
+  });
+  const _clearPrGhost = () => { if (_prGhost) { _prGhost.remove(); _prGhost = null; } };
+  body.addEventListener('dragleave', (e) => {
+    if (!body.contains(e.relatedTarget)) _clearPrGhost();
+  });
+  body.addEventListener('drop', (e) => {
+    _clearPrGhost();
+    const raw = e.dataTransfer.getData('application/x-chord');
+    if (!raw) return;
+    e.preventDefault();
+    const { track, clip } = focusedClipObjects();
+    if (!track || !clip) return;
+    const data = JSON.parse(raw);
+    const rect = body.getBoundingClientRect();
+    const beat = Math.max(0, Math.floor(((e.clientX - rect.left + body.scrollLeft) / BEAT_PX) * 2) / 2);
+    const notes = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
+    seqCheckpoint();
+    notes.forEach(midi => clip.notes.push({
+      midi, label: midiNoteLabel(midi),
+      start: beat, beats: state.beatsPerBar,
+    }));
+    clip.notes.sort((a, b) => a.start - b.start);
+    if (beat + state.beatsPerBar > clip.beats) clip.beats = beat + state.beatsPerBar;
+    seqAutoExtendLoop(clip.start + clip.beats);
+    renderPianoRoll();
+    seqRenderTrack(track);
+    seqResyncTrack(track);
+    seqSave();
+  });
+  document.getElementById('seq-pianoroll-close')?.addEventListener('click', hidePianoRoll);
+  document.getElementById('seq-pianoroll-toggle')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    togglePianoRoll();
+  });
+  // Piano-keyboard sidebar toggle inside the piano-roll
+  const kbBtn = document.getElementById('seq-tool-keyboard');
+  if (kbBtn) {
+    SEQ.prShowKeyboard = false;
+    kbBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      SEQ.prShowKeyboard = !SEQ.prShowKeyboard;
+      kbBtn.classList.toggle('active', SEQ.prShowKeyboard);
+      renderPianoRoll();
+    });
+  }
+})();
+
+// One-way conversion: bake all chord blocks into free-track note items.
+// The track keeps its id, name, instrument, mixer settings and synth, but
+// its kind flips to 'free' and the blocks become individual notes.
+function convertChordToFree(track) {
+  if (!track || track.kind !== 'chord') return;
+  seqCheckpoint();
+  // Rename so the header reflects the kind change (one-way conversion).
+  if (track.name === 'Chords')               track.name = 'Notes';
+  else if (/^Chords (\d+)$/.test(track.name)) track.name = track.name.replace(/^Chords /, 'Notes ');
+  else                                        track.name = track.name + ' · notes';
+  // Each chord-block becomes a CLIP containing that chord's notes.
+  const clips = [];
+  for (const block of track.items) {
+    const shift = block.semitoneShift || 0;
+    const midis = chordToMidiNotes(block.keyRoot, state.octave, block.interval, block.q)
+      .map(n => Math.max(0, Math.min(127, n + shift)));
+    const notes = midis.map(midi => ({
+      midi, label: midiNoteLabel(midi),
+      start: 0, beats: block.beats,
+    }));
+    clips.push(makeClip({
+      start: block.start, beats: block.beats,
+      label: block.label || null,
+      notes,
+    }));
+  }
+  clips.sort((a, b) => a.start - b.start);
+  track.items = clips;
+  track.kind  = 'free';
+  // Reset playback cursor in case we were playing
+  track.pendingIdx = 0;
+  track.pendingTime = 0;
+  // The lane element keeps the same data-track-id but its bound drag-drop
+  // logic was the chord variant — replace it with a fresh free-kind lane
+  // at the SAME DOM position so the visual order is preserved.
+  const oldLane = document.querySelector(`.seq-lane[data-track-id="${track.id}"]`);
+  if (oldLane) {
+    const parent = oldLane.parentNode;
+    const newLane = document.createElement('div');
+    newLane.className = 'seq-lane';
+    newLane.dataset.trackId = track.id;
+    parent.insertBefore(newLane, oldLane);
+    oldLane.remove();
+    initFreeLane(newLane);
+  }
+  rebuildTracksUI();
+  seqRenderAll();
+  seqResyncTrack(track);
+  // Open the piano-roll for the first clip if any, so the user immediately
+  // sees they can now edit notes.
+  if (track.items.length > 0) openPianoRoll(track, track.items[0]);
+  seqSave();
+}
+
+function deleteTrack(id) {
+  if (SEQ.focusedClip?.trackId === id) closePianoRoll();
+  removeTrackById(id);
+  // Clean up DOM for this track
+  document.querySelectorAll(`[data-track-id="${id}"]`).forEach(el => el.remove());
+  rebuildTracksUI();
+  seqRenderAll();
+  seqSave();
+}
+
+function rebuildTracksUI() {
+  // Make sure each track has a sidebar header and a lane element
+  for (const t of SEQ.tracksList) {
+    ensureTrackHeader(t);
+    ensureTrackLane(t);
+  }
+  // Remove DOM for tracks that no longer exist
+  document.querySelectorAll('.seq-track-label[data-track-id]').forEach(label => {
+    if (!trackById(label.dataset.trackId)) label.remove();
+  });
+  document.querySelectorAll('.seq-lane[data-track-id]').forEach(lane => {
+    if (!trackById(lane.dataset.trackId)) lane.remove();
+  });
+  refreshLucide();
+  syncTrackLabelHeights();
+}
+
+// Legacy entry-point kept for places that called buildTrackHeaders before
+function buildTrackHeaders() { rebuildTracksUI(); }
+
+// ----- Add Track button + menu -----
+function openAddTrackMenu(anchor) {
+  document.querySelectorAll('.seq-add-track-menu').forEach(m => m.remove());
+  const menu = document.createElement('div');
+  menu.className = 'seq-add-track-menu';
+  menu.innerHTML = `
+    <button data-kind="chord">+ Chord track</button>
+    <button data-kind="free">+ Free track</button>
+  `;
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = (r.left) + 'px';
+  menu.style.top  = (r.bottom + 4) + 'px';
+  document.body.appendChild(menu);
+  const close = (e) => {
+    if (e && menu.contains(e.target)) return;
+    menu.remove();
+    document.removeEventListener('mousedown', close, true);
+  };
+  setTimeout(() => document.addEventListener('mousedown', close, true), 0);
+  menu.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const kind = btn.dataset.kind;
+      const baseName = kind === 'chord' ? 'Chords' : 'Free';
+      const sameKindCount = tracksOfKind(kind).length;
+      const name = sameKindCount === 0 ? baseName : `${baseName} ${sameKindCount + 1}`;
+      const tr = addTrack(kind, { name });
+      if (!tr.synth) tr.synth = { ...state.synth };
+      seqCheckpoint();
+      rebuildTracksUI();
+      seqRenderAll();
+      seqSave();
+      menu.remove();
+      document.removeEventListener('mousedown', close, true);
+    });
+  });
+}
+document.getElementById('seq-add-track-btn')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  openAddTrackMenu(e.currentTarget);
+});
+
+// ----- Per-lane drag-drop init (called once per track lane DOM element) -----
+function initChordLane(lane) {
+  const getTrack = () => trackById(lane.dataset.trackId);
+  const _hint = () => lane.querySelector('.seq-drop-hint');
+  lane.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer.types.includes('application/x-chord')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    lane.classList.add('drag-over');
+    _hint()?.style.setProperty('color', 'var(--accent)');
+    const rect = lane.getBoundingClientRect();
+    const beat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
+    seqSetGhost(lane, beat, state.beatsPerBar);
+  });
+  lane.addEventListener('dragleave', (e) => {
+    if (!lane.contains(e.relatedTarget)) { lane.classList.remove('drag-over'); seqClearGhost(lane); }
+  });
+  lane.addEventListener('drop', (e) => {
+    e.preventDefault();
+    lane.classList.remove('drag-over');
+    _hint()?.style.removeProperty('color');
+    seqClearGhost(lane);
+    const raw = e.dataTransfer.getData('application/x-chord');
+    if (!raw) return;
+    const t = getTrack();
+    if (!t) return;
+    const data = JSON.parse(raw);
+    const rect = lane.getBoundingClientRect();
+    const dropBeat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
+    seqCheckpoint();
+    t.items.push({
+      interval: data.interval, q: data.q, bassInterval: data.bassInterval, label: data.label,
+      beats: state.beatsPerBar, start: dropBeat,
+      keyRoot: state.keys[state.currentTemplate], template: state.currentTemplate,
+    });
+    t.items.sort((a, b) => a.start - b.start);
+    seqAutoExtendLoop(dropBeat + state.beatsPerBar);
+    seqRenderTrack(t);
+    seqResyncTrack(t);
+  });
+}
+
+function initFreeLane(lane) {
+  const getTrack = () => trackById(lane.dataset.trackId);
+  lane.addEventListener('dragover', (e) => {
+    const hasNote  = e.dataTransfer.types.includes('application/x-note');
+    const hasChord = e.dataTransfer.types.includes('application/x-chord');
+    if (!hasNote && !hasChord) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    lane.classList.add('drag-over');
+    const rect = lane.getBoundingClientRect();
+    const beat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
+    seqSetGhost(lane, beat, hasChord ? state.beatsPerBar : 1);
+  });
+  lane.addEventListener('dragleave', (e) => {
+    if (!lane.contains(e.relatedTarget)) { lane.classList.remove('drag-over'); seqClearGhost(lane); }
+  });
+  lane.addEventListener('drop', (e) => {
+    e.preventDefault();
+    lane.classList.remove('drag-over');
+    seqClearGhost(lane);
+    const t = getTrack();
+    if (!t) return;
+    const rect = lane.getBoundingClientRect();
+    const dropBeat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
+    // Chord-pad drop → create a chord-clip (one bar long, chord notes inside).
+    const rawChord = e.dataTransfer.getData('application/x-chord');
+    if (rawChord) {
+      const data  = JSON.parse(rawChord);
+      const beats = state.beatsPerBar;
+      const midis = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
+      seqCheckpoint();
+      const clip = makeClip({
+        start: dropBeat, beats,
+        label: data.label || null,
+        notes: midis.map(midi => ({ midi, label: midiNoteLabel(midi), start: 0, beats })),
+      });
+      t.items.push(clip);
+      t.items.sort((a, b) => a.start - b.start);
+      seqAutoExtendLoop(dropBeat + beats);
+      seqRenderTrack(t);
+      seqResyncTrack(t);
+      return;
+    }
+    // Single keyboard note drop → 1-note clip (quarter-note default).
+    const raw = e.dataTransfer.getData('application/x-note');
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    seqCheckpoint();
+    const clip = makeClip({
+      start: dropBeat, beats: 1,
+      label: data.label,
+      notes: [{ midi: data.midi, label: data.label, start: 0, beats: 1 }],
+    });
+    t.items.push(clip);
+    t.items.sort((a, b) => a.start - b.start);
+    seqAutoExtendLoop(dropBeat + 1);
+    seqRenderTrack(t);
+    seqResyncTrack(t);
+  });
+}
+
+// ----- Per-track render -----
+function _appendLaneOverlays(lane) {
+  // Loop start/end lines + handles + playhead, identical to seqRender's tail.
+  const sl = document.createElement('div');
+  sl.className = 'seq-loop-start-line';
+  sl.style.left = (SEQ.loopStart * BEAT_PX) + 'px';
+  lane.appendChild(sl);
+  const ll = document.createElement('div');
+  ll.className = 'seq-loop-line';
+  ll.style.left = (SEQ.loopEnd * BEAT_PX) + 'px';
+  lane.appendChild(ll);
+  // Loop drag-tabs on every lane so the user can move them from any track.
+  const sh = document.createElement('div');
+  sh.className = 'seq-loop-start';
+  sh.textContent = '[';
+  sh.style.left = Math.max(0, SEQ.loopStart * BEAT_PX - 11) + 'px';
+  lane.appendChild(sh);
+  _bindLaneLoopHandle(sh, lane, 'start');
+  const eh = document.createElement('div');
+  eh.className = 'seq-loop-end';
+  eh.textContent = ']';
+  eh.style.left = (SEQ.loopEnd * BEAT_PX) + 'px';
+  lane.appendChild(eh);
+  _bindLaneLoopHandle(eh, lane, 'end');
+  const ph = document.createElement('div');
+  ph.className = 'seq-playhead';
+  ph.style.display = SEQ.playing ? 'block' : 'none';
+  lane.appendChild(ph);
+}
+
+function _bindLaneLoopHandle(handle, lane, which) {
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handle.setPointerCapture(e.pointerId);
+    const onMove = (ev) => {
+      const rect = lane.getBoundingClientRect();
+      const beat = Math.max(0, Math.round((ev.clientX - rect.left) / BEAT_PX));
+      if (which === 'start') {
+        SEQ.loopStart = Math.min(beat, SEQ.loopEnd - 1);
+        seqUpdateLoopStart();
+      } else {
+        SEQ.loopEnd = Math.max(beat, SEQ.loopStart + 1);
+        seqUpdateLoopEnd();
+      }
+    };
+    const onUp = () => {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      if (SEQ.playing && SEQ.loop) seqResyncAll();
+      seqSave();
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+  });
+}
+
+function seqRenderTrack(track) {
+  if (!track) return;
+  // Any render of a free track may follow a mutation — invalidate the
+  // cached flat-notes view so playback picks up the latest content.
+  if (track.kind === 'free') invalidateFreeTrackFlat(track);
+  // If the focused clip belongs to this track, keep the piano-roll in sync
+  if (track.kind === 'free' && SEQ.focusedClip?.trackId === track.id) renderPianoRoll();
+  // Default tracks delegate to their legacy renderers — but only while
+  // they still match their original kind.
+  if (track.id === 'tr-default-chord' && track.kind === 'chord') return seqRender();
+  if (track.id === 'tr-default-free'  && track.kind === 'free')  return seqRenderFreeClips(track);
+  const lane = document.querySelector(`.seq-lane[data-track-id="${track.id}"]`);
+  if (!lane) return;
+  lane.innerHTML = '';
+  if (track.items.length > 0) {
+    lane.style.minWidth = seqLaneWidth(track.items) + 'px';
+    if (track.kind === 'free') {
+      // Render each clip as a labeled block with a mini-roll preview.
+      track.items.forEach((clip, idx) => lane.appendChild(seqMakeClipBlock(track, clip, idx)));
+    } else {
+      track.items.forEach((item, idx) => lane.appendChild(seqMakeBlock(item, idx, false, false)));
+    }
+  } else {
+    lane.style.minWidth = '';
+    lane.style.minHeight = '';
+  }
+  _appendLaneOverlays(lane);
+  syncTrackLabelHeights();
+  seqUpdateLoopVisible();
+}
+
+// Render a free-kind default track's lane as clip blocks (used for the
+// hardcoded #seq-midi-lane when its track is free).
+function seqRenderFreeClips(track) {
+  const lane = document.querySelector(`.seq-lane[data-track-id="${track.id}"]`)
+            || document.getElementById('seq-midi-lane');
+  if (!lane) return;
+  lane.innerHTML = '';
+  if (track.items.length > 0) {
+    lane.style.minWidth = seqLaneWidth(track.items) + 'px';
+    track.items.forEach((clip, idx) => lane.appendChild(seqMakeClipBlock(track, clip, idx)));
+  } else {
+    lane.style.minWidth = '';
+  }
+  _appendLaneOverlays(lane);
+  syncTrackLabelHeights();
+  seqUpdateLoopVisible();
+}
+
+// Build a DOM block for a clip on a free track. Includes mini-roll
+// preview of its notes, drag-to-move, ✕ delete, click → open piano-roll.
+function seqMakeClipBlock(track, clip, idx) {
+  const block = document.createElement('div');
+  block.className = 'seq-block seq-clip-block';
+  block.dataset.clipId = clip.id;
+  block.style.left  = (clip.start * BEAT_PX) + 'px';
+  block.style.width = (clip.beats * BEAT_PX) + 'px';
+
+  // No label inside the clip — the mini-roll preview communicates content.
+
+  // Mini-roll preview
+  if (clip.notes.length > 0) {
+    const midis = clip.notes.map(n => n.midi);
+    const hi = Math.max(...midis), lo = Math.min(...midis);
+    const span = Math.max(1, hi - lo);
+    const mini = document.createElement('div');
+    mini.className = 'seq-clip-mini';
+    for (const note of clip.notes) {
+      const n = document.createElement('div');
+      n.className = 'seq-clip-mini-note';
+      n.style.left   = (note.start / clip.beats * 100) + '%';
+      n.style.width  = Math.max(2, (note.beats / clip.beats * 100)) + '%';
+      n.style.bottom = (((note.midi - lo) / span) * 100) + '%';
+      mini.appendChild(n);
+    }
+    block.appendChild(mini);
+  }
+
+  // ✕ delete
+  const del = document.createElement('span');
+  del.className = 'seq-delete';
+  del.innerHTML = '<i data-lucide="x"></i>';
+  del.addEventListener('mousedown', (e) => { e.stopPropagation(); e.preventDefault(); });
+  del.addEventListener('click', (e) => {
+    e.stopPropagation();
+    seqCheckpoint();
+    const i = track.items.indexOf(clip);
+    if (i >= 0) track.items.splice(i, 1);
+    if (SEQ.focusedClip?.clipId === clip.id) closePianoRoll();
+    seqRenderTrack(track);
+    seqResyncTrack(track);
+    seqSave();
+  });
+  block.appendChild(del);
+
+  // Resize handle on right edge
+  const resize = document.createElement('div');
+  resize.className = 'seq-resize';
+  resize.innerHTML = '<i data-lucide="grip-vertical"></i>';
+  resize.addEventListener('pointerdown', (e) => {
+    e.stopPropagation(); e.preventDefault();
+    seqCheckpoint();
+    resize.setPointerCapture(e.pointerId);
+    const startX = e.clientX, startBts = clip.beats;
+    const snap = 0.5;
+    const onMove = (ev) => {
+      clip.beats = Math.max(snap, startBts + (ev.clientX - startX) / BEAT_PX);
+      block.style.width = (clip.beats * BEAT_PX) + 'px';
+    };
+    const onUp = () => {
+      resize.removeEventListener('pointermove', onMove);
+      resize.removeEventListener('pointerup', onUp);
+      clip.beats = Math.max(snap, Math.round(clip.beats / snap) * snap);
+      seqAutoExtendLoop(clip.start + clip.beats);
+      seqRenderTrack(track);
+      seqSave();
+    };
+    resize.addEventListener('pointermove', onMove);
+    resize.addEventListener('pointerup', onUp);
+  });
+  block.appendChild(resize);
+
+  // Move by drag · single click opens the piano-roll for this clip
+  block.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.seq-resize') || e.target.closest('.seq-delete')) return;
+    e.preventDefault();
+    seqCheckpoint();
+    block.setPointerCapture(e.pointerId);
+    const startX = e.clientX, startBeat = clip.start;
+    const snap = 0.5;
+    const lane = block.parentElement;
+    let moved = false;
+    let ghost = null;
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      if (!moved && Math.abs(dx) < 4) return;
+      moved = true;
+      block.classList.add('moving');
+      clip.start = Math.max(0, startBeat + dx / BEAT_PX);
+      block.style.left = (clip.start * BEAT_PX) + 'px';
+      const snapped = Math.max(0, Math.round(clip.start / snap) * snap);
+      if (!ghost) {
+        ghost = document.createElement('div');
+        ghost.className = 'seq-ghost';
+        ghost.style.width = (clip.beats * BEAT_PX) + 'px';
+        lane?.appendChild(ghost);
+      }
+      ghost.style.left = (snapped * BEAT_PX) + 'px';
+    };
+    const onUp = () => {
+      block.removeEventListener('pointermove', onMove);
+      block.removeEventListener('pointerup', onUp);
+      block.classList.remove('moving');
+      if (ghost) { ghost.remove(); ghost = null; }
+      if (moved) {
+        clip.start = Math.max(0, Math.round(clip.start / snap) * snap);
+        track.items.sort((a, b) => a.start - b.start);
+        seqAutoExtendLoop(clip.start + clip.beats);
+        seqRenderTrack(track);
+        seqResyncTrack(track);
+      } else {
+        // Single click = focus + open piano-roll for this clip
+        openPianoRoll(track, clip);
+      }
+    };
+    block.addEventListener('pointermove', onMove);
+    block.addEventListener('pointerup', onUp);
+  });
+
+  return block;
+}
+
+function seqRenderAll() {
+  for (const t of SEQ.tracksList) seqRenderTrack(t);
+}
+
+// Per-track resync (alias kept for older call sites)
+function seqResyncChordsTrack(track) { seqResyncTrack(track); }
+
+function toggleTrackCollapse(label, track) {
   const isNowCollapsed = label.classList.toggle('track-collapsed');
-  const lane = document.getElementById(TRACK_LANE_MAP[track]);
+  const lane = document.querySelector(`.seq-lane[data-track-id="${label.dataset.trackId}"]`);
   if (lane) lane.classList.toggle('track-collapsed', isNowCollapsed);
-  if (track === 'free') seqRenderMidi();
+  if (track && track.kind === 'free' && track.id === 'tr-default-free') seqRenderMidi();
   const icon = label.querySelector('.seq-th-collapse [data-lucide]');
   if (icon) { icon.setAttribute('data-lucide', isNowCollapsed ? 'chevrons-up-down' : 'chevrons-down-up'); refreshLucide(); }
   syncTrackLabelHeights();
@@ -5560,7 +7176,7 @@ function toggleTrackCollapse(label) {
 
 buildTrackHeaders();
 // Preload samples for any per-track instrument that isn't already covered by the global one
-for (const tr of Object.values(SEQ.tracks)) {
+for (const tr of SEQ.tracksList) {
   if (tr.instrument && tr.instrument !== 'synth' && tr.instrument !== state.instrument) {
     preloadSamplesOnGesture(tr.instrument);
   }

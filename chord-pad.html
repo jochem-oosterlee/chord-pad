@@ -22,16 +22,20 @@
 <div class="app">
   <header class="header">
     <span class="brand">chord pad</span>
-    <div class="led" id="midi-led" title="MIDI activity" style="display:none"></div>
+    <div class="header-right">
+      <div class="led" id="midi-led" title="MIDI activity" style="display:none"></div>
+      <button class="header-refresh" id="header-refresh" title="Force refresh"><i data-lucide="refresh-cw"></i></button>
+    </div>
   </header>
 
   <div class="error-banner" id="error-banner"></div>
 
-  <nav class="tabs">
+  <nav class="tabs" id="tabs-nav">
     <button class="tab active" data-tab="major-harmony">Major Harmony</button>
     <button class="tab" data-tab="minor-harmony">Minor Harmony</button>
     <button class="tab" data-tab="scale-chords">Scale Chords</button>
     <button class="tab" data-tab="chord-library">Chord Library</button>
+    <button class="tabs-collapse" id="tabs-collapse" title="Collapse / expand boards" aria-label="Collapse boards">▾</button>
   </nav>
 
   <!-- Major Harmony card -->
@@ -41,10 +45,6 @@
         <span class="key-label-text">SET THE KEY</span>
         <div class="key-track-wrap">
           <div class="key-track" data-key-track="major-harmony"></div>
-        </div>
-        <div class="ver-toggle">
-          <button class="ver-btn" data-tpl="major-harmony" data-ver="1">v1</button>
-          <button class="ver-btn active" data-tpl="major-harmony" data-ver="2">v2</button>
         </div>
       </div>
 
@@ -59,10 +59,6 @@
         <span class="key-label-text">SET THE KEY</span>
         <div class="key-track-wrap">
           <div class="key-track" data-key-track="minor-harmony"></div>
-        </div>
-        <div class="ver-toggle">
-          <button class="ver-btn" data-tpl="minor-harmony" data-ver="1">v1</button>
-          <button class="ver-btn active" data-tpl="minor-harmony" data-ver="2">v2</button>
         </div>
       </div>
 
@@ -112,6 +108,13 @@
         <span class="control-label">Audio</span>
         <div class="control-row">
           <button class="btn active" id="audio-toggle">ON</button>
+        </div>
+      </div>
+      <div class="control wide">
+        <span class="control-label">Volume</span>
+        <div class="control-row">
+          <input type="range" id="audio-volume" min="0" max="200" value="70">
+          <span class="control-value" id="audio-volume-val">70%</span>
         </div>
       </div>
       <div class="control">
@@ -206,6 +209,11 @@
   <div class="synth-controls collapsed">
     <div class="synth-header" id="synth-header">Instrument</div>
     <div class="synth-sliders" id="synth-sliders">
+      <div class="synth-target-row" id="synth-target-row">
+        <span class="synth-target-label">Editing</span>
+        <button class="synth-target-btn active" data-target="pad">Chord Pad · Chords</button>
+        <button class="synth-target-btn" data-target="free">Free</button>
+      </div>
       <div class="synth-instrument-row">
         <select id="synth-instrument">
           <option value="synth">Synth</option>
@@ -356,17 +364,18 @@
       </div>
     </div>
     <div class="seq-track-area">
-      <div class="seq-track-sidebar">
-        <div class="seq-track-label" data-track="chords"></div>
+      <div class="seq-track-sidebar" id="seq-track-sidebar">
+        <div class="seq-track-label" data-track="chords" data-track-id="tr-default-chord"></div>
         <div class="seq-track-label" data-track="melody"></div>
-        <div class="seq-track-label" data-track="free"></div>
+        <div class="seq-track-label" data-track="free" data-track-id="tr-default-free"></div>
+        <button class="seq-add-track-btn" id="seq-add-track-btn" title="Add track">+ Add Track</button>
       </div>
       <div class="seq-lane-wrap" id="seq-lane-wrap">
-        <div class="seq-tracks-inner">
+        <div class="seq-tracks-inner" id="seq-tracks-inner">
           <div class="seq-ruler" id="seq-ruler"></div>
-          <div class="seq-lane" id="seq-lane"></div>
+          <div class="seq-lane" id="seq-lane" data-track-id="tr-default-chord"></div>
           <div class="seq-lane" id="seq-note-lane"></div>
-          <div class="seq-lane" id="seq-midi-lane"></div>
+          <div class="seq-lane" id="seq-midi-lane" data-track-id="tr-default-free"></div>
         </div>
       </div>
     </div>
@@ -375,20 +384,29 @@
       <button class="btn" id="seq-zoom-reset" title="Reset zoom"><i data-lucide="scan-search"></i></button>
       <button class="btn" id="seq-zoom-in"><i data-lucide="plus"></i></button>
       <div class="seq-tool-sep"></div>
-      <button class="btn seq-tool-btn" id="seq-tool-pen" title="Draw note"><i data-lucide="pencil"></i></button>
-      <button class="btn seq-tool-btn" id="seq-tool-erase" title="Erase note"><i data-lucide="eraser"></i></button>
-      <button class="btn seq-tool-btn" id="seq-tool-keyboard" title="Piano keyboard"><i data-lucide="piano"></i></button>
-      <div class="seq-tool-sep"></div>
-      <button class="btn seq-tool-btn" id="seq-tool-snap" title="Snap"><i data-lucide="magnet"></i></button>
-      <button class="btn seq-snap-val-btn" id="seq-snap-val">1</button>
+      <button class="btn" id="seq-pianoroll-toggle" title="Open / close piano-roll"><i data-lucide="music-3"></i></button>
       <button class="seq-clear-btn" id="seq-clear-btn">Clear</button>
+    </div>
+    <div class="seq-pianoroll" id="seq-pianoroll" hidden>
+      <div class="seq-pianoroll-header">
+        <span class="seq-pianoroll-title" id="seq-pianoroll-title">Notes</span>
+        <div class="seq-pianoroll-tools">
+          <button class="btn seq-tool-btn" id="seq-tool-pen" title="Draw note"><i data-lucide="pencil"></i></button>
+          <button class="btn seq-tool-btn" id="seq-tool-erase" title="Erase note"><i data-lucide="eraser"></i></button>
+          <button class="btn seq-tool-btn" id="seq-tool-keyboard" title="Piano keyboard"><i data-lucide="piano"></i></button>
+          <div class="seq-tool-sep"></div>
+          <button class="btn seq-tool-btn" id="seq-tool-snap" title="Snap"><i data-lucide="magnet"></i></button>
+          <button class="btn seq-snap-val-btn" id="seq-snap-val">1</button>
+        </div>
+        <button class="seq-pianoroll-close" id="seq-pianoroll-close" title="Close piano-roll">✕</button>
+      </div>
+      <div class="seq-pianoroll-body" id="seq-pianoroll-body"></div>
     </div>
   </div>
 
   <footer class="footer">
     <div class="now-playing">
-      <span class="label">Playing</span>
-      <span class="notes" id="now-playing-notes">—</span>
+      <span class="sf2-progress" id="sf2-progress" style="display:none"></span>
     </div>
     <div class="help"><span class="hint-key" id="hint-space">SPACE</span> = play · <span id="hint-panic" style="display:none"><span class="hint-key">P</span> = panic · </span><span class="hint-key" id="hint-lr">← →</span> = key · <span class="hint-key" id="hint-ud">↑ ↓</span> = octave</div>
   </footer>
@@ -396,6 +414,7 @@
 
 <div id="piano-tooltip" class="piano-tooltip"></div>
 
+<script src="vendor/soundfont2.js"></script>
 <script src="chord-pad.js"></script>
 </body>
 </html>
