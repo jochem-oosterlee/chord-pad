@@ -508,13 +508,19 @@ function _buildAudioCtx() {
     dummy.pause();
   }
   const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+  // Master gain BEFORE the compressor — keeps the summed voice signal
+  // below 0 dB so transients on 4+ note chords don't overshoot the
+  // compressor input and crackle. Voices connect to ctx._out (this gain).
+  const masterGain = ctx.createGain();
+  masterGain.gain.value = 0.5;
   const comp = ctx.createDynamicsCompressor();
-  comp.threshold.value = -6;
-  comp.ratio.value = 4;
-  comp.attack.value = 0.003;
-  comp.release.value = 0.25;
+  comp.threshold.value = -8;
+  comp.ratio.value = 6;
+  comp.attack.value = 0.002;
+  comp.release.value = 0.20;
+  masterGain.connect(comp);
   comp.connect(ctx.destination);
-  ctx._out = comp;
+  ctx._out = masterGain;
   // Reverb (synthetic impulse response)
   const sr = ctx.sampleRate;
   const len = Math.floor(sr * 2.5);
@@ -1574,12 +1580,14 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
     if (!seqIsOpen()) { e.preventDefault(); return; }
     const label = `${formatChordRoot(root)}${qualityToHTML(glyph)}`;
     e.dataTransfer.effectAllowed = 'copy';
-    e.dataTransfer.setData('application/x-chord', JSON.stringify({
+    const _chordPayload = JSON.stringify({
       interval: chordSpec.interval,
       q: chordSpec.q,
       bassInterval: chordSpec.bassInterval,
       label,
-    }));
+    });
+    e.dataTransfer.setData('application/x-chord', _chordPayload);
+    SEQ._prDragPayload = _chordPayload;
     SEQ._dragLabel = label;
     SEQ._dragChord = { interval: chordSpec.interval, q: chordSpec.q };
     const { el, h } = seqChordDragImage(label, state.beatsPerBar);
@@ -1642,12 +1650,14 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
       if (!seqIsOpen()) { e.preventDefault(); return; }
       const extLabel = `${formatChordRoot(root)}${qualityToHTML(chordSpec.ext)}`;
       e.dataTransfer.effectAllowed = 'copy';
-      e.dataTransfer.setData('application/x-chord', JSON.stringify({
+      const _extPayload = JSON.stringify({
         interval: chordSpec.interval,
         q: extQ,
         bassInterval: chordSpec.bassInterval,
         label: extLabel,
-      }));
+      });
+      e.dataTransfer.setData('application/x-chord', _extPayload);
+      SEQ._prDragPayload = _extPayload;
       SEQ._dragLabel = extLabel;
       SEQ._dragChord = { interval: chordSpec.interval, q: extQ };
       const { el, h } = seqChordDragImage(extLabel, state.beatsPerBar);
@@ -2670,13 +2680,31 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
   btn.addEventListener('click', () => setSynthEditTarget(btn.dataset.target));
 });
 
-document.getElementById('settings-header').addEventListener('click', () => {
-  document.querySelector('.controls').classList.toggle('collapsed');
-});
-document.getElementById('tabs-collapse')?.addEventListener('click', (e) => {
-  e.stopPropagation();
-  document.querySelector('.app')?.classList.toggle('boards-collapsed');
-});
+
+(function _initSectionToggles() {
+  const KEY = 'chordpad.hiddenSections';
+  let hidden = {};
+  try { hidden = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (_) { hidden = {}; }
+  const apply = () => {
+    Object.entries(hidden).forEach(([sec, hide]) => {
+      document.body.classList.toggle('hide-' + sec, !!hide);
+    });
+    document.querySelectorAll('.header-section-toggle').forEach(btn => {
+      const sec = btn.dataset.section;
+      btn.classList.toggle('active', !hidden[sec]);
+    });
+  };
+  apply();
+  document.querySelectorAll('.header-section-toggle').forEach(btn => {
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
+    btn.addEventListener('click', () => {
+      const sec = btn.dataset.section;
+      hidden[sec] = !hidden[sec];
+      apply();
+      try { localStorage.setItem(KEY, JSON.stringify(hidden)); } catch (_) {}
+    });
+  });
+})();
 
 document.getElementById('header-refresh')?.addEventListener('click', () => {
   // Force-refresh — append a cache-bust query so the browser re-fetches
@@ -2684,9 +2712,6 @@ document.getElementById('header-refresh')?.addEventListener('click', () => {
   const url = new URL(window.location.href);
   url.searchParams.set('_t', Date.now().toString());
   window.location.replace(url.toString());
-});
-document.getElementById('synth-header').addEventListener('click', () => {
-  document.querySelector('.synth-controls').classList.toggle('collapsed');
 });
 const VOICINGS = ['auto', 'high', 'low', 'spread', 'root'];
 const VOICING_LABELS = { auto: 'Auto', high: 'High', low: 'Low', spread: 'Spread', root: 'Root' };
@@ -2940,17 +2965,55 @@ document.addEventListener('keydown', (e) => {
     if (key === 'a' && !e.shiftKey) { e.preventDefault(); seqSelectAll(); return; }
   }
   if (key === 'delete' || key === 'backspace') {
+    if (SEQ.prSelection && SEQ.prSelection.size > 0 && SEQ.pianoRollOpen) {
+      e.preventDefault();
+      const { track, clip } = focusedClipObjects();
+      if (clip) {
+        seqCheckpoint();
+        clip.notes = clip.notes.filter(n => !SEQ.prSelection.has(n));
+        SEQ.prSelection.clear();
+        renderPianoRoll();
+        if (track) { seqRenderTrack(track); seqResyncTrack(track); }
+        seqSave();
+      }
+      return;
+    }
     if (SEQ.selection.length > 0) { e.preventDefault(); seqDeleteSelection(); return; }
   }
 
+  if (key === ' ') {
+    const prBody = document.getElementById('seq-pianoroll-body');
+    if (SEQ.pianoRollOpen && prBody && !e.shiftKey) {
+      e.preventDefault();
+      if (!heldKeys.has(key)) {
+        heldKeys.add(key);
+        SEQ._prSpaceHeld = true;
+        prBody.classList.add('pr-pan-mode');
+      }
+      return;
+    }
+    const wrap = document.getElementById('seq-lane-wrap');
+    if (wrap && !e.shiftKey) {
+      e.preventDefault();
+      if (!heldKeys.has(key)) {
+        heldKeys.add(key);
+        SEQ._arrSpaceHeld = true;
+        wrap.classList.add('arr-pan-mode');
+      }
+      return;
+    }
+  }
   if (heldKeys.has(key)) return;
   heldKeys.add(key);
-  if (key === ' ') { e.preventDefault(); flashHint('hint-space'); if (SEQ.playing) seqStop(); else seqPlay(); return; }
+  if (key === ' ' && e.shiftKey) { e.preventDefault(); flashHint('hint-space'); if (SEQ.playing) seqStop(); else seqPlay(); return; }
   if (key === 'p') { e.preventDefault(); panic(); return; }
   if (key === 'arrowleft')  { e.preventDefault(); flashHint('hint-lr'); setKey(state.currentTemplate, (state.keys[state.currentTemplate] + 11) % 12); return; }
   if (key === 'arrowright') { e.preventDefault(); flashHint('hint-lr'); setKey(state.currentTemplate, (state.keys[state.currentTemplate] + 1)  % 12); return; }
   if (key === 'arrowdown')  { e.preventDefault(); flashHint('hint-ud'); state.octave = Math.max(0, state.octave - 1); updateControlDisplays(); rebuildBoard(); return; }
   if (key === 'arrowup')    { e.preventDefault(); flashHint('hint-ud'); state.octave = Math.min(8, state.octave + 1); updateControlDisplays(); rebuildBoard(); return; }
+  // Disable pad shortcuts when the Chord Pad section is hidden — no
+  // visible pads to trigger.
+  if (document.body.classList.contains('hide-chord-pad')) return;
   if (state.currentTemplate === 'scale-chords') {
     const sc = scaleKeymap[key];
     if (sc) { e.preventDefault(); playChord(sc.padId, sc.interval, sc.q); }
@@ -2970,6 +3033,14 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('keyup', (e) => {
   const key = getBaseKey(e);
   heldKeys.delete(key);
+  if (key === ' ' && SEQ._prSpaceHeld) {
+    SEQ._prSpaceHeld = false;
+    document.getElementById('seq-pianoroll-body')?.classList.remove('pr-pan-mode');
+  }
+  if (key === ' ' && SEQ._arrSpaceHeld) {
+    SEQ._arrSpaceHeld = false;
+    document.getElementById('seq-lane-wrap')?.classList.remove('arr-pan-mode');
+  }
   if (state.currentTemplate === 'scale-chords') {
     const sc = scaleKeymap[key];
     if (sc) releaseChord(sc.padId);
@@ -3635,7 +3706,10 @@ function seqAnimatePlayhead() {
       const { clip } = focusedClipObjects();
       if (clip && SEQ.animBeat >= clip.start && SEQ.animBeat < clip.start + clip.beats) {
         prPh.style.display = 'block';
-        prPh.style.left    = ((SEQ.animBeat - clip.start) * BEAT_PX) + 'px';
+        prPh.style.left    = ((SEQ.animBeat - clip.start) * BEAT_PX + prKbW()) + 'px';
+        prPh.style.top     = prBody.scrollTop + 'px';
+        prPh.style.height  = prBody.clientHeight + 'px';
+        prPh.style.bottom  = 'auto';
       } else {
         prPh.style.display = 'none';
       }
@@ -3757,31 +3831,51 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
   refreshTicks(item.beats);
   block.appendChild(ticks);
 
-  const del = document.createElement('span');
-  del.className = 'seq-delete';
-  del.innerHTML = '<i data-lucide="x"></i>';
-  del.addEventListener('mousedown', (e) => { e.stopPropagation(); e.preventDefault(); });
-  del.addEventListener('click', (e) => {
-    e.stopPropagation();
+  // LEFT resize handle for chord/note blocks — moves item.start while
+  // keeping the right edge anchored (so the absolute end position stays
+  // the same). Cannot shrink below `snap` beats or push start negative.
+  const resizeL = document.createElement('div');
+  resizeL.className = 'seq-resize seq-resize-left';
+  resizeL.addEventListener('pointerdown', (e) => {
+    e.stopPropagation(); e.preventDefault();
     seqCheckpoint();
-    // Find the owning track via the parent lane's data-track-id, with
-    // legacy-kind fallback for the default lanes.
-    const laneEl = block.parentElement;
-    const owner =
-      (laneEl && laneEl.dataset && laneEl.dataset.trackId && trackById(laneEl.dataset.trackId)) ||
+    resizeL.setPointerCapture(e.pointerId);
+    const startX = e.clientX, startStart = item.start, startBts = item.beats;
+    const snap = SEQ.arrSnap ? SEQ.arrSnapVal : 0.5;
+    const laneL = block.parentElement;
+    const ownerL =
+      (laneL && laneL.dataset && laneL.dataset.trackId && trackById(laneL.dataset.trackId)) ||
       (isMidi ? firstTrackOfKind('free') : isNote ? null : firstTrackOfKind('chord'));
-    if (owner) {
-      owner.items.splice(idx, 1);
-      if (owner.pendingIdx >= owner.items.length) owner.pendingIdx = 0;
-      if (owner.activeIdx  >= owner.items.length) owner.activeIdx  = owner.items.length - 1;
-      seqRenderTrack(owner);
-    }
+    const itemsL = ownerL ? ownerL.items : (isMidi ? SEQ.midiItems : isNote ? SEQ.noteItems : SEQ.items);
+    const onMove = (ev) => {
+      const dxBeats = (ev.clientX - startX) / BEAT_PX;
+      const maxDelta = startBts - snap;
+      const delta = Math.max(-startStart, Math.min(maxDelta, dxBeats));
+      item.start = startStart + delta;
+      item.beats = startBts - delta;
+      block.style.left  = (item.start * BEAT_PX) + 'px';
+      block.style.width = (item.beats * BEAT_PX) + 'px';
+      refreshTicks(Math.round(item.beats));
+      if (laneL) laneL.style.minWidth = seqLaneWidth(itemsL) + 'px';
+    };
+    const onUp = () => {
+      resizeL.removeEventListener('pointermove', onMove);
+      resizeL.removeEventListener('pointerup', onUp);
+      const snapped = Math.max(0, Math.round(item.start / snap) * snap);
+      const delta = snapped - item.start;
+      item.start = snapped;
+      item.beats = Math.max(snap, item.beats - delta);
+      seqAutoExtendLoop(item.start + item.beats);
+      if (ownerL) seqRenderTrack(ownerL);
+      else if (isMidi) seqRenderMidi(); else if (isNote) seqRenderNotes(); else seqRender();
+    };
+    resizeL.addEventListener('pointermove', onMove);
+    resizeL.addEventListener('pointerup', onUp);
   });
-  block.appendChild(del);
+  block.appendChild(resizeL);
 
   const resize = document.createElement('div');
   resize.className = 'seq-resize';
-  resize.innerHTML = '<i data-lucide="grip-vertical"></i>';
   resize.addEventListener('pointerdown', (e) => {
     e.stopPropagation(); e.preventDefault();
     seqCheckpoint();
@@ -3817,6 +3911,21 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
   // Move by drag
   block.addEventListener('pointerdown', (e) => {
     if (e.target.closest('.seq-resize') || e.target.closest('.seq-delete')) return;
+    if (SEQ.arrTool === 'pan' || SEQ._arrSpaceHeld) return;
+    if (SEQ.arrTool === 'erase') {
+      e.preventDefault();
+      seqCheckpoint();
+      const lane2 = block.parentElement;
+      const ot2 = (lane2 && lane2.dataset && lane2.dataset.trackId && trackById(lane2.dataset.trackId)) ||
+                  (isMidi ? firstTrackOfKind('free') : isNote ? null : firstTrackOfKind('chord'));
+      const items2 = ot2 ? ot2.items : (isMidi ? SEQ.midiItems : isNote ? SEQ.noteItems : SEQ.items);
+      const i = items2.indexOf(item);
+      if (i >= 0) items2.splice(i, 1);
+      if (ot2) { seqRenderTrack(ot2); seqResyncTrack(ot2); }
+      else if (isMidi) seqRenderMidi(); else if (isNote) seqRenderNotes(); else seqRender();
+      seqSave();
+      return;
+    }
     e.preventDefault();
     seqCheckpoint();
     block.setPointerCapture(e.pointerId);
@@ -3834,16 +3943,18 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
       block.addEventListener('pointercancel', stopPreview, { once: true });
     }
     const startX = e.clientX, startBeat = item.start;
-    const snap = 0.5;
-    const lane  = block.parentElement;
+    const snap = SEQ.arrSnap ? SEQ.arrSnapVal : 0.25;
+    const sourceLane  = block.parentElement;
     // Derive the owning track from the parent lane's data-track-id, falling
     // back to the legacy kind mapping for the hardcoded default lanes.
     const ownerTrack =
-      (lane && lane.dataset && lane.dataset.trackId && trackById(lane.dataset.trackId)) ||
+      (sourceLane && sourceLane.dataset && sourceLane.dataset.trackId && trackById(sourceLane.dataset.trackId)) ||
       (isMidi ? firstTrackOfKind('free') : isNote ? null : firstTrackOfKind('chord'));
     const items = ownerTrack ? ownerTrack.items : (isMidi ? SEQ.midiItems : isNote ? SEQ.noteItems : SEQ.items);
     let moved = false;
     let ghost = null;
+    let targetLane = sourceLane;
+    let targetTrack = ownerTrack;
     const onMove = (ev) => {
       const dx = ev.clientX - startX;
       if (!moved && Math.abs(dx) < 4) return;
@@ -3851,14 +3962,27 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
       block.classList.add('moving');
       item.start = Math.max(0, startBeat + dx / BEAT_PX);
       block.style.left = (item.start * BEAT_PX) + 'px';
-      if (lane) lane.style.minWidth = seqLaneWidth(items) + 'px';
-      // Snap-target ghost — shows where the block will land on drop.
+      if (sourceLane) sourceLane.style.minWidth = seqLaneWidth(items) + 'px';
       const snapped = Math.max(0, Math.round(item.start / snap) * snap);
+      // Cross-track drop targets — chord-blocks can go to other chord lanes
+      // or to free lanes (converted to a clip on drop). Note-blocks and
+      // free-clip blocks aren't routed through this seqMakeBlock path.
+      const els = document.elementsFromPoint(ev.clientX, ev.clientY);
+      const overLane = els.find(el => el.classList?.contains('seq-lane'));
+      if (overLane) {
+        const t = trackById(overLane.dataset.trackId);
+        if (!isMidi && !isNote) {
+          if (t && (t.kind === 'chord' || t.kind === 'free')) { targetLane = overLane; targetTrack = t; }
+        } else {
+          if (t && t.kind === (isMidi ? 'free' : 'chord')) { targetLane = overLane; targetTrack = t; }
+        }
+      }
+      if (ghost && ghost.parentElement !== targetLane) { ghost.remove(); ghost = null; }
       if (!ghost) {
         ghost = document.createElement('div');
         ghost.className = 'seq-ghost';
         ghost.style.width = (item.beats * BEAT_PX) + 'px';
-        lane.appendChild(ghost);
+        targetLane?.appendChild(ghost);
       }
       ghost.style.left = (snapped * BEAT_PX) + 'px';
     };
@@ -3869,10 +3993,34 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
       if (ghost) { ghost.remove(); ghost = null; }
       if (moved) {
         item.start = Math.max(0, Math.round(item.start / snap) * snap);
-        items.sort((a, b) => a.start - b.start);
+        if (targetTrack && targetTrack !== ownerTrack) {
+          const idx = items.indexOf(item);
+          if (idx >= 0) items.splice(idx, 1);
+          if (targetTrack.kind === 'free' && !isMidi && !isNote) {
+            // Convert chord item → free clip with the chord's notes baked in.
+            const kr = item.keyRoot !== undefined ? item.keyRoot : state.keys[state.currentTemplate];
+            const oct = item.octave !== undefined ? item.octave : state.octave;
+            const midis = chordToMidiNotes(kr, oct, item.interval, item.q);
+            const clip = makeClip({
+              start: item.start, beats: item.beats,
+              label: item.label || '',
+              notes: midis.map(m => ({ midi: m, label: midiNoteLabel(m), start: 0, beats: item.beats })),
+            });
+            targetTrack.items.push(clip);
+          } else {
+            targetTrack.items.push(item);
+          }
+          targetTrack.items.sort((a, b) => a.start - b.start);
+          if (ownerTrack) seqRenderTrack(ownerTrack);
+          seqRenderTrack(targetTrack);
+          if (ownerTrack) seqResyncTrack(ownerTrack);
+          seqResyncTrack(targetTrack);
+        } else {
+          items.sort((a, b) => a.start - b.start);
+          if (ownerTrack) seqRenderTrack(ownerTrack);
+          else if (isMidi) seqRenderMidi(); else if (isNote) seqRenderNotes(); else seqRender();
+        }
         seqAutoExtendLoop(item.start + item.beats);
-        if (ownerTrack) seqRenderTrack(ownerTrack);
-        else if (isMidi) seqRenderMidi(); else if (isNote) seqRenderNotes(); else seqRender();
       } else if (ownerTrack) {
         seqSelectionToggle(ownerTrack, item, ev.ctrlKey || ev.metaKey || ev.shiftKey);
       }
@@ -3970,6 +4118,12 @@ function seqInitTrackSynths() {
     if (tr === firstChord) continue;
     if (!tr.synth) tr.synth = { ...state.synth };
   }
+  // Sync the id counter past any tr-N loaded from localStorage so freshly
+  // added tracks never collide with existing ones.
+  for (const tr of SEQ.tracksList) {
+    const m = /^tr-(\d+)$/.exec(tr.id || '');
+    if (m) _trackIdCounter = Math.max(_trackIdCounter, parseInt(m[1], 10));
+  }
 }
 
 function seqUpdateHints() {
@@ -3985,11 +4139,19 @@ function refreshLucide() {
 
 
 function syncTrackLabelHeights() {
-  // Match each label's height to its lane (looked up by data-track-id).
+  // Match each lane's height to its label's natural content height — the
+  // label has more rows (name, instrument, mixer) than fits in 54px and
+  // setting the lane to match keeps the sidebar / arrangement aligned.
   document.querySelectorAll('.seq-track-label[data-track-id]').forEach(label => {
     const id   = label.dataset.trackId;
     const lane = document.querySelector(`.seq-lane[data-track-id="${id}"]`);
-    if (lane) label.style.height = lane.getBoundingClientRect().height + 'px';
+    if (!lane) return;
+    label.style.height = '';
+    const labelH = label.getBoundingClientRect().height;
+    const laneH  = lane.getBoundingClientRect().height;
+    const h = Math.max(labelH, laneH);
+    label.style.height = h + 'px';
+    lane.style.minHeight = h + 'px';
   });
 }
 
@@ -4739,20 +4901,26 @@ function seqResyncMidi() { seqResyncTrack(firstTrackOfKind('free')); }
 function seqInitPlay(t0) {
   const bd  = seqBeatDur();
   const ls  = seqLoopOffset();
+  // Honour a user-set playhead position from clicking on the ruler. Clamped
+  // to the loop range so we never start outside it.
+  const wantStart = (typeof SEQ.startBeat === 'number')
+    ? Math.max(SEQ.loopStart, Math.min(SEQ.loopEnd - 0.001, SEQ.startBeat))
+    : SEQ.loopStart;
   SEQ.playing        = true;
   SEQ.playStartTime  = t0 - 0.05;
-  SEQ.animBeat      = SEQ.loopStart;
+  SEQ.animBeat      = wantStart;
   SEQ.animLastTime  = t0;
   SEQ.animLoopLen   = SEQ.loopEnd - SEQ.loopStart;
   SEQ.animLoopStart = SEQ.loopStart;
+  const offsetFromStart = wantStart - SEQ.loopStart;
   // Initialize each track's playback cursor independently.
   for (const tr of SEQ.tracksList) {
     invalidateFreeTrackFlat(tr);
     const list = tr.kind === 'free' ? freeTrackFlatNotes(tr) : tr.items;
-    const fi = seqFindNextInRange(list, 0);
-    tr.cycleStart  = t0;
+    const fi = seqFindNextInRange(list, offsetFromStart);
+    tr.cycleStart  = t0 - offsetFromStart * bd;
     tr.pendingIdx  = fi >= 0 ? fi : 0;
-    tr.pendingTime = fi >= 0 ? t0 + (list[fi].start - ls) * bd : Infinity;
+    tr.pendingTime = fi >= 0 ? t0 + (list[fi].start - ls - offsetFromStart) * bd : Infinity;
     tr.activeIdx   = -1;
   }
   if (!SEQ.timer) SEQ.timer = setInterval(seqTick, SEQ.TICK_MS);
@@ -4828,7 +4996,14 @@ function seqStop() {
   SEQ.activeNodes.clear();
   panic();
   if (SEQ.rafId) { cancelAnimationFrame(SEQ.rafId); SEQ.rafId = null; }
-  document.querySelectorAll('.seq-playhead').forEach(ph => ph.style.display = 'none');
+  if (typeof SEQ.startBeat === 'number') {
+    document.querySelectorAll('.seq-playhead').forEach(ph => {
+      ph.style.display = 'block';
+      ph.style.left = (SEQ.startBeat * BEAT_PX) + 'px';
+    });
+  } else {
+    document.querySelectorAll('.seq-playhead').forEach(ph => ph.style.display = 'none');
+  }
   document.querySelectorAll('.roll-row-active').forEach(r => r.classList.remove('roll-row-active'));
   const _cL = document.getElementById('seq-lane');
   const _nL = document.getElementById('seq-note-lane');
@@ -5974,10 +6149,6 @@ function addKbHandlers(key, midi) {
   seqAddTouchDrag(key, 'seq-note-lane', () => ({ midi, label: midiNoteName(midi) }), () => kbNoteOff(midi));
 }
 
-document.getElementById('keyboard-header').addEventListener('click', () => {
-  document.getElementById('keyboard-panel').classList.toggle('collapsed');
-  buildKeyboard();
-});
 
 // Trem Rate tempo sync
 document.getElementById('trem-sync').addEventListener('click', () => {
@@ -6020,19 +6191,6 @@ document.getElementById('dly-time-sync').addEventListener('click', () => {
 });
 
 // Sequencer controls
-document.getElementById('seq-header').addEventListener('click', () => {
-  document.getElementById('seq-panel').classList.toggle('collapsed');
-  const open = seqIsOpen();
-  document.querySelectorAll('.pad, .pad-ext').forEach(el => { el.draggable = open; });
-  if (open) requestAnimationFrame(() => {
-    seqUpdateHints();
-    const mLane = document.getElementById('seq-midi-lane');
-    if (mLane && mLane.scrollTop === 0) {
-      const ctr = SEQ.midiItems.length > 0 ? Math.round(SEQ.midiItems.reduce((s, i) => s + i.midi, 0) / SEQ.midiItems.length) : 66;
-      mLane.scrollTop = rollScrollForMidi(ctr);
-    }
-  });
-});
 
 document.getElementById('seq-play-btn').addEventListener('click', () => {
   if (SEQ.playing) seqStop(); else seqPlay();
@@ -6083,6 +6241,31 @@ function seqRenderRuler() {
     }
   }
   ruler.innerHTML = html;
+  _appendRulerLoopHandles();
+  if (!ruler.dataset.clickInit) {
+    ruler.dataset.clickInit = '1';
+    let downX = null, downY = null, downTarget = null;
+    ruler.addEventListener('pointerdown', (e) => {
+      downX = e.clientX; downY = e.clientY; downTarget = e.target;
+    });
+    ruler.addEventListener('pointerup', (e) => {
+      if (downX == null) return;
+      const dx = Math.abs(e.clientX - downX);
+      const dy = Math.abs(e.clientY - downY);
+      const target = downTarget; downX = downY = null; downTarget = null;
+      if (dx > 3 || dy > 3) return; // it was a drag — ignore
+      if (target?.classList?.contains('seq-loop-bar-left') ||
+          target?.classList?.contains('seq-loop-bar-right')) return;
+      const rect = ruler.getBoundingClientRect();
+      const beat = Math.max(0, Math.round((e.clientX - rect.left) / BEAT_PX * 2) / 2);
+      SEQ.startBeat = beat;
+      SEQ.animBeat  = beat;
+      document.querySelectorAll('.seq-playhead').forEach(ph => {
+        ph.style.display = 'block';
+        ph.style.left = (beat * BEAT_PX) + 'px';
+      });
+    });
+  }
 }
 
 document.getElementById('seq-timesig').addEventListener('change', (e) => {
@@ -6190,13 +6373,74 @@ refreshLucide();
 requestAnimationFrame(seqUpdateHints);
 
 // Find or create the lane DOM element for a track.
+// Per-track instrument-settings modal. Sliders bind directly to track.synth
+// so each track keeps its own ADSR / filter / FX values, even if multiple
+// tracks share the same instrument preset.
+const TRACK_FX_FIELDS = [
+  // [key, label, min, max, step, format]
+  ['attack',     'Attack',      0, 4,    0.01, v => v.toFixed(2) + 's'],
+  ['decay',      'Decay',       0, 8,    0.01, v => v.toFixed(2) + 's'],
+  ['sustain',    'Sustain',     0, 1,    0.01, v => Math.round(v * 100) + '%'],
+  ['release',    'Release',     0, 6,    0.01, v => v.toFixed(2) + 's'],
+  ['filterFreq', 'Tone',     200, 12000, 50,   v => Math.round(v) + 'Hz'],
+  ['filterQ',    'Resonance',  0, 20,    0.1,  v => v.toFixed(1)],
+  ['reverb',     'Reverb',     0, 1,     0.01, v => Math.round(v * 100) + '%'],
+  ['delayMix',   'Delay',      0, 1,     0.01, v => Math.round(v * 100) + '%'],
+  ['tremoloDepth','Tremolo',   0, 1,     0.01, v => Math.round(v * 100) + '%'],
+];
+function openTrackFxModal(track) {
+  const modal = document.getElementById('track-fx-modal');
+  const body  = document.getElementById('track-fx-body');
+  const title = document.getElementById('track-fx-title');
+  if (!modal || !body || !title) return;
+  // Ensure the track has its own synth dict (pad-linked first-chord may be null)
+  if (!track.synth) track.synth = { ...state.synth };
+  title.textContent = track.name + ' · settings';
+  body.innerHTML = '';
+  for (const [key, label, min, max, step, fmt] of TRACK_FX_FIELDS) {
+    const cur = (track.synth[key] !== undefined) ? track.synth[key] : (state.synth[key] ?? 0);
+    const row = document.createElement('div');
+    row.className = 'track-fx-row';
+    row.innerHTML = `
+      <label class="track-fx-label">${label}</label>
+      <input class="track-fx-range" type="range" min="${min}" max="${max}" step="${step}" value="${cur}">
+      <span class="track-fx-val">${fmt(cur)}</span>
+    `;
+    const range = row.querySelector('input');
+    const valEl = row.querySelector('.track-fx-val');
+    range.addEventListener('input', () => {
+      const v = parseFloat(range.value);
+      track.synth[key] = v;
+      valEl.textContent = fmt(v);
+    });
+    body.appendChild(row);
+  }
+  modal.hidden = false;
+}
+function closeTrackFxModal() {
+  const modal = document.getElementById('track-fx-modal');
+  if (modal) modal.hidden = true;
+  seqSave();
+}
+document.getElementById('track-fx-close')?.addEventListener('click', closeTrackFxModal);
+document.querySelector('.track-fx-backdrop')?.addEventListener('click', closeTrackFxModal);
+
 function ensureTrackLane(track) {
   let lane = document.querySelector(`.seq-lane[data-track-id="${track.id}"]`);
-  if (lane) return lane;
+  if (lane) {
+    lane.classList.add('lane-' + track.kind);
+    return lane;
+  }
   lane = document.createElement('div');
-  lane.className = 'seq-lane';
+  lane.className = 'seq-lane lane-' + track.kind;
   lane.dataset.trackId = track.id;
-  document.getElementById('seq-tracks-inner').appendChild(lane);
+  lane.style.minHeight = '54px';
+  // Insert before the resize handle / add-track-button so new lanes
+  // appear above any trailing controls inside the inner container.
+  const inner  = document.getElementById('seq-tracks-inner');
+  const handle = inner.querySelector('.midi-lane-resize-handle');
+  if (handle) inner.insertBefore(lane, handle);
+  else        inner.appendChild(lane);
   // Wire drag-drop behaviour appropriate for the track's kind
   if (track.kind === 'chord') initChordLane(lane);
   else                         initFreeLane(lane);
@@ -6226,6 +6470,7 @@ function populateTrackHeader(label, track) {
     <div class="seq-th-row seq-th-top">
       <span class="seq-th-name" title="Click to focus · double-click to rename">${escapeHtml(track.name)}</span>
       ${convertBtn}
+      <button class="seq-th-fx" title="Track instrument settings"><i data-lucide="sliders-horizontal"></i></button>
       <button class="seq-th-collapse" title="Collapse / expand"><i data-lucide="chevrons-down-up"></i></button>
       <button class="seq-th-del" title="Remove track">✕</button>
     </div>`;
@@ -6259,6 +6504,10 @@ function populateTrackHeader(label, track) {
     el.addEventListener('click', stop);
   });
 
+  label.querySelector('.seq-th-fx')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openTrackFxModal(track);
+  });
   label.querySelector('.seq-th-collapse').addEventListener('click', (e) => {
     e.stopPropagation();
     toggleTrackCollapse(label, track);
@@ -6348,7 +6597,7 @@ function startInlineRename(nameEl, track) {
 // free track is focused — full-width note editor)
 // ============================================================
 SEQ.focusedClip = null; // { trackId, clipId } or null
-SEQ.pianoRollOpen = false;
+SEQ.pianoRollOpen = true;
 
 function focusedClipObjects() {
   if (!SEQ.focusedClip) return { track: null, clip: null };
@@ -6382,6 +6631,10 @@ function togglePianoRoll() {
 function openPianoRoll(track, clip) {
   if (!track || track.kind !== 'free' || !clip) return;
   SEQ.focusedClip = { trackId: track.id, clipId: clip.id };
+  // Re-center C4 on every open — clear the init flag so renderPianoRoll
+  // re-applies the scrollTop.
+  const body = document.getElementById('seq-pianoroll-body');
+  if (body) delete body.dataset.initialized;
   showPianoRoll();
   refreshPianoRollTitle();
   document.querySelectorAll('.seq-clip-block.focused').forEach(el => el.classList.remove('focused'));
@@ -6394,65 +6647,124 @@ function refreshPianoRollTitle() {
   const titleEl = document.getElementById('seq-pianoroll-title');
   if (!titleEl) return;
   const { track, clip } = focusedClipObjects();
-  if (!track || !clip) { titleEl.textContent = 'No clip selected'; return; }
+  if (!track || !clip) { titleEl.textContent = ''; return; }
   titleEl.textContent = track.name;
 }
 
 const PR_ROW_H = 12;
-function _prPitchRange(notes) {
-  if (!notes || notes.length === 0) return { lo: 48, hi: 72 };
-  const midis = notes.map(n => n.midi);
-  return { lo: Math.max(0, Math.min(...midis) - 2), hi: Math.min(127, Math.max(...midis) + 2) };
+const PR_KB_W = 30;
+const prKbW = () => (SEQ.prShowKeyboard ? PR_KB_W : 0);
+SEQ.prTool = SEQ.prTool || 'select'; // 'select' | 'draw' | 'erase' | 'pan'
+SEQ.prSelection = SEQ.prSelection || new Set();
+function _prSyncSelection(body) {
+  if (!body) return;
+  body.querySelectorAll('.pr-note').forEach((el) => el.classList.remove('selected'));
+  const { clip } = focusedClipObjects();
+  if (!clip) return;
+  const noteEls = body.querySelectorAll('.pr-note');
+  clip.notes.forEach((n, i) => {
+    if (SEQ.prSelection.has(n) && noteEls[i]) noteEls[i].classList.add('selected');
+  });
+}
+function prSetTool(tool) {
+  SEQ.prTool = tool;
+  ['select', 'pen', 'erase', 'pan'].forEach((t) => {
+    const id = t === 'pen' ? 'seq-tool-pen' : (t === 'select' ? 'seq-tool-select' : (t === 'erase' ? 'seq-tool-erase' : 'seq-tool-pan'));
+    document.getElementById(id)?.classList.toggle('active', SEQ.prTool === (t === 'pen' ? 'draw' : t));
+  });
+  const body = document.getElementById('seq-pianoroll-body');
+  if (body) {
+    body.classList.remove('pr-tool-select','pr-tool-draw','pr-tool-erase','pr-tool-pan');
+    body.classList.add('pr-tool-' + tool);
+  }
+}
+function prPreviewMidi(track, midi) {
+  if (!track) return;
+  const inst = track.instrument || state.instrument;
+  const play = () => {
+    const node = startAudioNote(midi, state.velocity, null, null, inst);
+    if (node) {
+      SEQ.activeNodes.add(node);
+      setTimeout(() => { try { stopAudioNote(node); } catch (_) {} SEQ.activeNodes.delete(node); }, 700);
+    }
+  };
+  if (track.synth) withSynth(track.synth, play); else play();
+}
+function _prPitchRange(_notes) {
+  // Full piano range A0..C8, matching the main keyboard.
+  return { lo: 21, hi: 108 };
 }
 
 function renderPianoRoll() {
   const body  = document.getElementById('seq-pianoroll-body');
   if (!body) return;
+  const wasInitialized = body.dataset.initialized === '1';
   body.innerHTML = '';
   const { track, clip } = focusedClipObjects();
-  if (!track || !clip) {
-    body.style.minHeight = '120px';
-    body.style.minWidth  = '';
-    const tip = document.createElement('div');
-    tip.className = 'pr-empty';
-    tip.textContent = 'Click a clip in a free track to edit its notes';
-    body.appendChild(tip);
-    _prAppendOverlays(body);
-    return;
-  }
-  body.dataset.trackId = track.id;
-  body.dataset.clipId  = clip.id;
-  const { lo, hi } = _prPitchRange(clip.notes);
+  body.dataset.trackId = track ? track.id : '';
+  body.dataset.clipId  = clip ? clip.id : '';
+  const { lo, hi } = _prPitchRange(clip ? clip.notes : []);
   const rows = hi - lo + 1;
-  body.style.minHeight = (rows * PR_ROW_H + 8) + 'px';
-  body.style.minWidth  = Math.max(clip.beats, 4) * BEAT_PX + 'px';
+  const clipBeats = clip ? clip.beats : 4;
+  const contentW = Math.max(clipBeats, 4) * BEAT_PX + prKbW();
+  const contentH = rows * PR_ROW_H;
+  body.style.minWidth  = '';
+  body.style.minHeight = '';
+  body.style.setProperty('--pr-octave-offset', ((((hi % 12) + 12) % 12) * PR_ROW_H + PR_ROW_H) + 'px');
+  body.style.setProperty('--pr-content-left', prKbW() + 'px');
+  const sizer = document.createElement('div');
+  sizer.className = 'pr-sizer';
+  sizer.style.cssText = `position:absolute;top:0;left:0;width:${contentW}px;height:${contentH}px;pointer-events:none;`;
+  body.appendChild(sizer);
   body._prHi = hi;
   body._prLo = lo;
 
-  // Piano keyboard sidebar — per-semitone rows so notes line up exactly
-  // with the body grid. Black-key rows are visually narrower for a
-  // piano-like look.
+  // Piano keyboard sidebar — proper piano layout: 7 tall white keys per
+  // octave with 5 shorter/narrower black keys overlaid between them.
+  // Doesn't line up 1:1 with the per-semitone note grid, that's fine.
   if (SEQ.prShowKeyboard) {
     const kb = document.createElement('div');
     kb.className = 'pr-keyboard';
-    kb.style.height = (rows * PR_ROW_H + 8) + 'px';
+    const totalH = rows * PR_ROW_H;
+    kb.style.height = totalH + 'px';
+    const isBlack = (m) => { const s = ((m % 12) + 12) % 12; return s===1||s===3||s===6||s===8||s===10; };
+    const half = PR_ROW_H / 2;
+    const attachKeyClick = (row, midi) => {
+      row.dataset.midi = midi;
+      row.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        prPreviewMidi(track, midi);
+      });
+    };
     for (let m = hi; m >= lo; m--) {
+      if (isBlack(m)) continue;
+      const rowTop = (hi - m) * PR_ROW_H;
+      const hasBlackAbove = isBlack(m + 1) && (m + 1 <= hi);
+      const hasBlackBelow = isBlack(m - 1) && (m - 1 >= lo);
+      const top    = rowTop - (hasBlackAbove ? half : 0);
+      const bottom = rowTop + PR_ROW_H + (hasBlackBelow ? half : 0);
       const row = document.createElement('div');
-      row.className = 'pr-keyboard-row' + (midiIsBlack(m) ? ' black' : '');
-      row.style.top    = ((hi - m) * PR_ROW_H + 4) + 'px';
-      row.style.height = (PR_ROW_H - 1) + 'px';
-      row.textContent = (m % 12 === 0) ? midiNoteLabel(m) : '';
+      row.className = 'pr-keyboard-row';
+      row.style.top    = top + 'px';
+      row.style.height = (bottom - top - 1) + 'px';
+      row.textContent  = (m % 12 === 0) ? midiNoteLabel(m) : '';
+      attachKeyClick(row, m);
+      kb.appendChild(row);
+    }
+    for (let m = hi; m >= lo; m--) {
+      if (!isBlack(m)) continue;
+      const row = document.createElement('div');
+      row.className = 'pr-keyboard-row black';
+      row.style.top    = ((hi - m) * PR_ROW_H) + 'px';
+      row.style.height = PR_ROW_H + 'px';
+      attachKeyClick(row, m);
       kb.appendChild(row);
     }
     body.appendChild(kb);
   }
 
-  if (clip.notes.length === 0) {
-    const tip = document.createElement('div');
-    tip.className = 'pr-empty';
-    tip.textContent = 'Click and drag to draw a note · drop a chord-pad to add chord notes';
-    body.appendChild(tip);
-  } else {
+  if (clip && clip.notes.length > 0) {
     for (let i = 0; i < clip.notes.length; i++) {
       const note = clip.notes[i];
       body.appendChild(_prMakeNote(track, clip, note, i, hi));
@@ -6460,6 +6772,12 @@ function renderPianoRoll() {
   }
 
   _prAppendOverlays(body);
+  if (!wasInitialized) {
+    // Center C4 (MIDI 60) in the viewport on first render.
+    const c4Top = (hi - 60) * PR_ROW_H;
+    body.scrollTop = Math.max(0, c4Top - body.clientHeight / 2 + PR_ROW_H / 2);
+    body.dataset.initialized = '1';
+  }
 }
 
 // White-key height in the piano-roll sidebar (px). Black keys derive from
@@ -6532,9 +6850,9 @@ function _prMakeNote(track, clip, note, idx, hi) {
   const el = document.createElement('div');
   el.className = 'pr-note';
   el.textContent = note.label || midiNoteLabel(note.midi);
-  el.style.left   = (note.start * BEAT_PX) + 'px';
+  el.style.left   = (note.start * BEAT_PX + prKbW()) + 'px';
   el.style.width  = (note.beats * BEAT_PX) + 'px';
-  el.style.top    = ((hi - note.midi) * PR_ROW_H + 4) + 'px';
+  el.style.top    = ((hi - note.midi) * PR_ROW_H) + 'px';
   el.style.height = (PR_ROW_H - 2) + 'px';
   const del = document.createElement('button');
   del.className = 'pr-note-del';
@@ -6550,10 +6868,32 @@ function _prMakeNote(track, clip, note, idx, hi) {
     seqSave();
   });
   el.appendChild(del);
+  if (SEQ.prSelection.has(note)) el.classList.add('selected');
   el.addEventListener('pointerdown', (e) => {
     if (e.target === del) return;
+    if (SEQ._prSpaceHeld || SEQ.prTool === 'pan') return; // let body handle pan
     e.preventDefault();
     e.stopPropagation();
+    if (SEQ.prTool === 'erase') {
+      seqCheckpoint();
+      const i = clip.notes.indexOf(note);
+      if (i >= 0) clip.notes.splice(i, 1);
+      renderPianoRoll();
+      seqRenderTrack(track);
+      seqResyncTrack(track);
+      seqSave();
+      return;
+    }
+    if (SEQ.prTool === 'select') {
+      if (e.shiftKey) {
+        if (SEQ.prSelection.has(note)) SEQ.prSelection.delete(note); else SEQ.prSelection.add(note);
+      } else if (!SEQ.prSelection.has(note)) {
+        SEQ.prSelection.clear();
+        SEQ.prSelection.add(note);
+      }
+      _prSyncSelection(el.parentElement);
+      // fall through to allow drag on the (newly) selected note
+    }
     el.setPointerCapture(e.pointerId);
     seqCheckpoint();
     const body = el.parentElement;
@@ -6567,8 +6907,8 @@ function _prMakeNote(track, clip, note, idx, hi) {
       moved = true;
       note.start = Math.max(0, origStart + dx / BEAT_PX);
       note.midi  = Math.max(0, Math.min(127, origMidi - Math.round(dy / PR_ROW_H)));
-      el.style.left = (note.start * BEAT_PX) + 'px';
-      el.style.top  = ((body._prHi - note.midi) * PR_ROW_H + 4) + 'px';
+      el.style.left = (note.start * BEAT_PX + prKbW()) + 'px';
+      el.style.top  = ((body._prHi - note.midi) * PR_ROW_H) + 'px';
     };
     const onUp = () => {
       el.removeEventListener('pointermove', onMove);
@@ -6595,29 +6935,93 @@ function _prMakeNote(track, clip, note, idx, hi) {
   const body = document.getElementById('seq-pianoroll-body');
   if (!body) return;
   body.addEventListener('pointerdown', (e) => {
+    // Pan: spacebar held OR hand-tool active
+    if (SEQ._prSpaceHeld || SEQ.prTool === 'pan') {
+      e.preventDefault();
+      body.setPointerCapture(e.pointerId);
+      const startX = e.clientX, startY = e.clientY;
+      const startSL = body.scrollLeft, startST = body.scrollTop;
+      body.classList.add('pr-panning');
+      const onMove = (ev) => {
+        body.scrollLeft = startSL - (ev.clientX - startX);
+        body.scrollTop  = startST - (ev.clientY - startY);
+      };
+      const onUp = () => {
+        body.removeEventListener('pointermove', onMove);
+        body.removeEventListener('pointerup', onUp);
+        body.classList.remove('pr-panning');
+      };
+      body.addEventListener('pointermove', onMove);
+      body.addEventListener('pointerup', onUp);
+      return;
+    }
     if (e.target !== body) return;
+    const rect = body.getBoundingClientRect();
+    if (e.clientX - rect.left < prKbW()) return; // click in keyboard area — ignore
     const { track, clip } = focusedClipObjects();
     if (!track || !clip) return;
+    // Select tool: rectangle marquee
+    if (SEQ.prTool === 'select') {
+      e.preventDefault();
+      body.setPointerCapture(e.pointerId);
+      if (!e.shiftKey) SEQ.prSelection.clear();
+      const startX = e.clientX, startY = e.clientY;
+      const startSL = body.scrollLeft, startST = body.scrollTop;
+      const marquee = document.createElement('div');
+      marquee.className = 'pr-marquee';
+      body.appendChild(marquee);
+      const updateMarquee = (ev) => {
+        const x0 = startX - rect.left + startSL;
+        const y0 = startY - rect.top + startST;
+        const x1 = ev.clientX - rect.left + body.scrollLeft;
+        const y1 = ev.clientY - rect.top + body.scrollTop;
+        const left = Math.min(x0, x1), top = Math.min(y0, y1);
+        const right = Math.max(x0, x1), bottom = Math.max(y0, y1);
+        marquee.style.left = left + 'px';
+        marquee.style.top  = top + 'px';
+        marquee.style.width  = (right - left) + 'px';
+        marquee.style.height = (bottom - top) + 'px';
+        clip.notes.forEach((n) => {
+          const nLeft = n.start * BEAT_PX + prKbW();
+          const nRight = nLeft + n.beats * BEAT_PX;
+          const nTop  = (body._prHi - n.midi) * PR_ROW_H;
+          const nBot  = nTop + PR_ROW_H;
+          if (nRight >= left && nLeft <= right && nBot >= top && nTop <= bottom) {
+            SEQ.prSelection.add(n);
+          }
+        });
+        _prSyncSelection(body);
+      };
+      const onUp = () => {
+        body.removeEventListener('pointermove', updateMarquee);
+        body.removeEventListener('pointerup', onUp);
+        marquee.remove();
+      };
+      body.addEventListener('pointermove', updateMarquee);
+      body.addEventListener('pointerup', onUp);
+      return;
+    }
+    // Draw tool only past this point
+    if (SEQ.prTool !== 'draw') return;
     e.preventDefault();
     body.setPointerCapture(e.pointerId);
-    const rect = body.getBoundingClientRect();
-    const beat0 = Math.max(0, ((e.clientX - rect.left + body.scrollLeft) / BEAT_PX));
+    const beat0 = Math.max(0, ((e.clientX - rect.left + body.scrollLeft - prKbW()) / BEAT_PX));
     const startBeat = Math.floor(beat0 * 2) / 2;
-    const midi = Math.max(0, Math.min(127, body._prHi - Math.floor((e.clientY - rect.top + body.scrollTop - 4) / PR_ROW_H)));
+    const midi = Math.max(0, Math.min(127, body._prHi - Math.floor((e.clientY - rect.top + body.scrollTop) / PR_ROW_H)));
     seqCheckpoint();
     const newNote = { midi, label: midiNoteLabel(midi), beats: 1, start: startBeat };
     clip.notes.push(newNote);
     clip.notes.sort((a, b) => a.start - b.start);
     const ghost = document.createElement('div');
     ghost.className = 'pr-note';
-    ghost.style.left   = (startBeat * BEAT_PX) + 'px';
+    ghost.style.left   = (startBeat * BEAT_PX + prKbW()) + 'px';
     ghost.style.width  = BEAT_PX + 'px';
-    ghost.style.top    = ((body._prHi - midi) * PR_ROW_H + 4) + 'px';
+    ghost.style.top    = ((body._prHi - midi) * PR_ROW_H) + 'px';
     ghost.style.height = (PR_ROW_H - 2) + 'px';
     ghost.textContent  = midiNoteLabel(midi);
     body.appendChild(ghost);
     const onMove = (ev) => {
-      const beat = Math.max(startBeat + 0.25, (ev.clientX - rect.left + body.scrollLeft) / BEAT_PX);
+      const beat = Math.max(startBeat + 0.25, (ev.clientX - rect.left + body.scrollLeft - prKbW()) / BEAT_PX);
       newNote.beats = Math.max(0.25, beat - startBeat);
       ghost.style.width = (newNote.beats * BEAT_PX) + 'px';
     };
@@ -6638,23 +7042,59 @@ function _prMakeNote(track, clip, note, idx, hi) {
   });
 
   // Chord-pad drop inside the piano-roll → adds the chord's notes to the
-  // focused clip at the drop position. Show a snap-ghost during dragover.
-  let _prGhost = null;
+  // focused clip at the drop position. Show note-ghosts during dragover
+  // that reflect both the time slot AND the octave under the cursor.
+  let _prGhostNotes = [];
+  const _clearPrGhost = () => {
+    _prGhostNotes.forEach(g => g.remove());
+    _prGhostNotes = [];
+  };
+  const _prDragNotes = (e) => {
+    const raw = e.dataTransfer.types.includes('application/x-chord');
+    if (!raw) return null;
+    const data = JSON.parse(_prDragData || 'null');
+    if (!data) return null;
+    const rect = body.getBoundingClientRect();
+    const beat = Math.max(0, Math.floor(((e.clientX - rect.left + body.scrollLeft - prKbW()) / BEAT_PX) * 2) / 2);
+    const cursorMidi = Math.max(0, Math.min(127, body._prHi - Math.floor((e.clientY - rect.top + body.scrollTop) / PR_ROW_H)));
+    const baseNotes = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
+    if (baseNotes.length === 0) return null;
+    const root = baseNotes[0];
+    const shift = Math.round((cursorMidi - root) / 12) * 12;
+    return { beat, notes: baseNotes.map(m => m + shift) };
+  };
+  let _prDragData = null;
+  body.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer.types.includes('application/x-chord')) return;
+    // dataTransfer.getData only works on drop, so cache from chord-pad ondragstart
+    // via a separate mechanism: store payload in SEQ._prDragPayload set elsewhere.
+    _prDragData = SEQ._prDragPayload || null;
+  });
   body.addEventListener('dragover', (e) => {
     if (!e.dataTransfer.types.includes('application/x-chord')) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-    const rect = body.getBoundingClientRect();
-    const beat = Math.max(0, Math.floor(((e.clientX - rect.left + body.scrollLeft) / BEAT_PX) * 2) / 2);
-    if (!_prGhost) {
-      _prGhost = document.createElement('div');
-      _prGhost.className = 'seq-ghost pr-ghost';
-      body.appendChild(_prGhost);
+    const info = _prDragNotes(e);
+    if (!info) return;
+    // Resize / create ghost-notes to match
+    if (_prGhostNotes.length !== info.notes.length) {
+      _clearPrGhost();
+      info.notes.forEach(() => {
+        const g = document.createElement('div');
+        g.className = 'pr-note pr-ghost-note';
+        body.appendChild(g);
+        _prGhostNotes.push(g);
+      });
     }
-    _prGhost.style.left  = (beat * BEAT_PX) + 'px';
-    _prGhost.style.width = (state.beatsPerBar * BEAT_PX) + 'px';
+    info.notes.forEach((midi, i) => {
+      const g = _prGhostNotes[i];
+      g.style.left   = (info.beat * BEAT_PX + prKbW()) + 'px';
+      g.style.width  = (state.beatsPerBar * BEAT_PX) + 'px';
+      g.style.top    = ((body._prHi - midi) * PR_ROW_H) + 'px';
+      g.style.height = (PR_ROW_H - 2) + 'px';
+      g.textContent  = midiNoteLabel(midi);
+    });
   });
-  const _clearPrGhost = () => { if (_prGhost) { _prGhost.remove(); _prGhost = null; } };
   body.addEventListener('dragleave', (e) => {
     if (!body.contains(e.relatedTarget)) _clearPrGhost();
   });
@@ -6666,16 +7106,16 @@ function _prMakeNote(track, clip, note, idx, hi) {
     const { track, clip } = focusedClipObjects();
     if (!track || !clip) return;
     const data = JSON.parse(raw);
-    const rect = body.getBoundingClientRect();
-    const beat = Math.max(0, Math.floor(((e.clientX - rect.left + body.scrollLeft) / BEAT_PX) * 2) / 2);
-    const notes = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
+    _prDragData = raw;
+    const info = _prDragNotes(e);
+    if (!info) return;
     seqCheckpoint();
-    notes.forEach(midi => clip.notes.push({
+    info.notes.forEach(midi => clip.notes.push({
       midi, label: midiNoteLabel(midi),
-      start: beat, beats: state.beatsPerBar,
+      start: info.beat, beats: state.beatsPerBar,
     }));
     clip.notes.sort((a, b) => a.start - b.start);
-    if (beat + state.beatsPerBar > clip.beats) clip.beats = beat + state.beatsPerBar;
+    if (info.beat + state.beatsPerBar > clip.beats) clip.beats = info.beat + state.beatsPerBar;
     seqAutoExtendLoop(clip.start + clip.beats);
     renderPianoRoll();
     seqRenderTrack(track);
@@ -6687,17 +7127,9 @@ function _prMakeNote(track, clip, note, idx, hi) {
     e.stopPropagation();
     togglePianoRoll();
   });
-  // Piano-keyboard sidebar toggle inside the piano-roll
-  const kbBtn = document.getElementById('seq-tool-keyboard');
-  if (kbBtn) {
-    SEQ.prShowKeyboard = false;
-    kbBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      SEQ.prShowKeyboard = !SEQ.prShowKeyboard;
-      kbBtn.classList.toggle('active', SEQ.prShowKeyboard);
-      renderPianoRoll();
-    });
-  }
+  SEQ.prShowKeyboard = true;
+  prSetTool(SEQ.prTool || 'select');
+  renderPianoRoll();
 })();
 
 // One-way conversion: bake all chord blocks into free-track note items.
@@ -6777,6 +7209,33 @@ function rebuildTracksUI() {
   document.querySelectorAll('.seq-lane[data-track-id]').forEach(lane => {
     if (!trackById(lane.dataset.trackId)) lane.remove();
   });
+  // Remove orphan HTML rows that never had a track-id (legacy "melody"
+  // label + #seq-note-lane). Without this they sit in the sidebar/lane
+  // stack and push every dynamically-added track out of vertical alignment.
+  document.querySelectorAll('.seq-track-label:not([data-track-id])').forEach(el => el.remove());
+  document.getElementById('seq-note-lane')?.remove();
+  // Re-order DOM to match tracksList order. The default hardcoded HTML
+  // lanes can sit in arbitrary positions when localStorage tracks reuse
+  // their ids, and inserting new lanes before the resize handle no longer
+  // guarantees correct order when default lanes are involved.
+  const sidebar = document.getElementById('seq-track-sidebar');
+  const addBtn  = document.getElementById('seq-add-track-btn');
+  const inner   = document.getElementById('seq-tracks-inner');
+  const handle  = inner?.querySelector('.midi-lane-resize-handle');
+  if (sidebar && addBtn) {
+    for (const t of SEQ.tracksList) {
+      const lbl = document.querySelector(`.seq-track-label[data-track-id="${t.id}"]`);
+      if (lbl) sidebar.insertBefore(lbl, addBtn);
+    }
+  }
+  if (inner) {
+    for (const t of SEQ.tracksList) {
+      const lane = document.querySelector(`.seq-lane[data-track-id="${t.id}"]`);
+      if (!lane) continue;
+      if (handle) inner.insertBefore(lane, handle);
+      else        inner.appendChild(lane);
+    }
+  }
   refreshLucide();
   syncTrackLabelHeights();
 }
@@ -6930,7 +7389,8 @@ function initFreeLane(lane) {
 
 // ----- Per-track render -----
 function _appendLaneOverlays(lane) {
-  // Loop start/end lines + handles + playhead, identical to seqRender's tail.
+  // Vertical loop guide-lines + per-lane playhead. The drag-tabs `[` `]`
+  // live only on the ruler (see _appendRulerLoopHandles).
   const sl = document.createElement('div');
   sl.className = 'seq-loop-start-line';
   sl.style.left = (SEQ.loopStart * BEAT_PX) + 'px';
@@ -6939,23 +7399,69 @@ function _appendLaneOverlays(lane) {
   ll.className = 'seq-loop-line';
   ll.style.left = (SEQ.loopEnd * BEAT_PX) + 'px';
   lane.appendChild(ll);
-  // Loop drag-tabs on every lane so the user can move them from any track.
-  const sh = document.createElement('div');
-  sh.className = 'seq-loop-start';
-  sh.textContent = '[';
-  sh.style.left = Math.max(0, SEQ.loopStart * BEAT_PX - 11) + 'px';
-  lane.appendChild(sh);
-  _bindLaneLoopHandle(sh, lane, 'start');
-  const eh = document.createElement('div');
-  eh.className = 'seq-loop-end';
-  eh.textContent = ']';
-  eh.style.left = (SEQ.loopEnd * BEAT_PX) + 'px';
-  lane.appendChild(eh);
-  _bindLaneLoopHandle(eh, lane, 'end');
   const ph = document.createElement('div');
   ph.className = 'seq-playhead';
   ph.style.display = SEQ.playing ? 'block' : 'none';
   lane.appendChild(ph);
+}
+
+function _appendRulerLoopHandles() {
+  const ruler = document.getElementById('seq-ruler');
+  if (!ruler) return;
+  ruler.querySelectorAll('.seq-loop-bar').forEach(h => h.remove());
+  const bar = document.createElement('div');
+  bar.className = 'seq-loop-bar';
+  bar.innerHTML = '<div class="seq-loop-bar-left"></div><div class="seq-loop-bar-right"></div>';
+  _positionLoopBar(bar);
+  ruler.appendChild(bar);
+  _bindLoopBar(bar);
+}
+
+function _positionLoopBar(bar) {
+  bar.style.left  = (SEQ.loopStart * BEAT_PX) + 'px';
+  bar.style.width = Math.max(2, (SEQ.loopEnd - SEQ.loopStart) * BEAT_PX) + 'px';
+}
+
+function _bindLoopBar(bar) {
+  const lefth  = bar.querySelector('.seq-loop-bar-left');
+  const righth = bar.querySelector('.seq-loop-bar-right');
+  const startDrag = (mode) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    bar.setPointerCapture(e.pointerId);
+    const ruler = bar.parentElement;
+    const startX = e.clientX;
+    const initStart = SEQ.loopStart, initEnd = SEQ.loopEnd;
+    const onMove = (ev) => {
+      const rect = ruler.getBoundingClientRect();
+      if (mode === 'left') {
+        const beat = Math.max(0, Math.round((ev.clientX - rect.left) / BEAT_PX));
+        SEQ.loopStart = Math.min(beat, SEQ.loopEnd - 1);
+      } else if (mode === 'right') {
+        const beat = Math.max(0, Math.round((ev.clientX - rect.left) / BEAT_PX));
+        SEQ.loopEnd = Math.max(beat, SEQ.loopStart + 1);
+      } else {
+        const dxBeats = Math.round((ev.clientX - startX) / BEAT_PX);
+        const len = initEnd - initStart;
+        const newStart = Math.max(0, initStart + dxBeats);
+        SEQ.loopStart = newStart;
+        SEQ.loopEnd   = newStart + len;
+      }
+      _positionLoopBar(bar);
+      seqUpdateLoopStart();
+      seqUpdateLoopEnd();
+    };
+    const onUp = () => {
+      bar.removeEventListener('pointermove', onMove);
+      bar.removeEventListener('pointerup', onUp);
+      if (SEQ.playing && SEQ.loop) seqResyncAll();
+      seqSave();
+    };
+    bar.addEventListener('pointermove', onMove);
+    bar.addEventListener('pointerup', onUp);
+  };
+  lefth.addEventListener('pointerdown', startDrag('left'));
+  righth.addEventListener('pointerdown', startDrag('right'));
 }
 
 function _bindLaneLoopHandle(handle, lane, which) {
@@ -7009,7 +7515,9 @@ function seqRenderTrack(track) {
     }
   } else {
     lane.style.minWidth = '';
-    lane.style.minHeight = '';
+    // Don't clear minHeight here — syncTrackLabelHeights below will set it
+    // to match the sidebar label so empty tracks stay aligned with their
+    // taller-than-CSS-default neighbours.
   }
   _appendLaneOverlays(lane);
   syncTrackLabelHeights();
@@ -7063,36 +7571,72 @@ function seqMakeClipBlock(track, clip, idx) {
     block.appendChild(mini);
   }
 
-  // ✕ delete
-  const del = document.createElement('span');
-  del.className = 'seq-delete';
-  del.innerHTML = '<i data-lucide="x"></i>';
-  del.addEventListener('mousedown', (e) => { e.stopPropagation(); e.preventDefault(); });
-  del.addEventListener('click', (e) => {
-    e.stopPropagation();
+  // Resize handle on LEFT edge — pulls the clip start earlier or later
+  // while keeping note absolute positions; notes shift relative to the
+  // new start so what was at song-beat X stays at song-beat X.
+  const resizeL = document.createElement('div');
+  resizeL.className = 'seq-resize seq-resize-left';
+  resizeL.addEventListener('pointerdown', (e) => {
+    e.stopPropagation(); e.preventDefault();
     seqCheckpoint();
-    const i = track.items.indexOf(clip);
-    if (i >= 0) track.items.splice(i, 1);
-    if (SEQ.focusedClip?.clipId === clip.id) closePianoRoll();
-    seqRenderTrack(track);
-    seqResyncTrack(track);
-    seqSave();
+    resizeL.setPointerCapture(e.pointerId);
+    const startX = e.clientX, startStart = clip.start, startBts = clip.beats;
+    const startNoteStarts = clip.notes.map(n => n.start);
+    const snap = SEQ.arrSnap ? SEQ.arrSnapVal : 0.5;
+    const miniNotes = block.querySelectorAll('.seq-clip-mini-note');
+    const onMove = (ev) => {
+      const dxBeats = (ev.clientX - startX) / BEAT_PX;
+      // Can't move past origin or shrink past zero length
+      const maxDelta = startBts - snap;
+      const delta = Math.max(-startStart, Math.min(maxDelta, dxBeats));
+      clip.start = startStart + delta;
+      clip.beats = startBts - delta;
+      block.style.left  = (clip.start * BEAT_PX) + 'px';
+      block.style.width = (clip.beats * BEAT_PX) + 'px';
+      clip.notes.forEach((n, i) => {
+        n.start = startNoteStarts[i] - delta;
+        const el = miniNotes[i];
+        if (!el) return;
+        el.style.left  = (n.start / clip.beats * 100) + '%';
+        el.style.width = Math.max(2, (n.beats / clip.beats * 100)) + '%';
+      });
+    };
+    const onUp = () => {
+      resizeL.removeEventListener('pointermove', onMove);
+      resizeL.removeEventListener('pointerup', onUp);
+      const snapped = Math.max(0, Math.round(clip.start / snap) * snap);
+      const delta = snapped - clip.start;
+      clip.start = snapped;
+      clip.beats = Math.max(snap, clip.beats - delta);
+      clip.notes.forEach(n => { n.start -= delta; });
+      seqRenderTrack(track);
+      seqSave();
+    };
+    resizeL.addEventListener('pointermove', onMove);
+    resizeL.addEventListener('pointerup', onUp);
   });
-  block.appendChild(del);
+  block.appendChild(resizeL);
 
   // Resize handle on right edge
   const resize = document.createElement('div');
   resize.className = 'seq-resize';
-  resize.innerHTML = '<i data-lucide="grip-vertical"></i>';
   resize.addEventListener('pointerdown', (e) => {
     e.stopPropagation(); e.preventDefault();
     seqCheckpoint();
     resize.setPointerCapture(e.pointerId);
     const startX = e.clientX, startBts = clip.beats;
-    const snap = 0.5;
+    const snap = SEQ.arrSnap ? SEQ.arrSnapVal : 0.5;
+    const miniNotes = block.querySelectorAll('.seq-clip-mini-note');
     const onMove = (ev) => {
       clip.beats = Math.max(snap, startBts + (ev.clientX - startX) / BEAT_PX);
       block.style.width = (clip.beats * BEAT_PX) + 'px';
+      // Keep mini-roll notes at their original size — only the clip grows.
+      clip.notes.forEach((n, i) => {
+        const el = miniNotes[i];
+        if (!el) return;
+        el.style.left  = (n.start / clip.beats * 100) + '%';
+        el.style.width = Math.max(2, (n.beats / clip.beats * 100)) + '%';
+      });
     };
     const onUp = () => {
       resize.removeEventListener('pointermove', onMove);
@@ -7110,14 +7654,28 @@ function seqMakeClipBlock(track, clip, idx) {
   // Move by drag · single click opens the piano-roll for this clip
   block.addEventListener('pointerdown', (e) => {
     if (e.target.closest('.seq-resize') || e.target.closest('.seq-delete')) return;
+    if (SEQ.arrTool === 'pan' || SEQ._arrSpaceHeld) return; // pan handled on wrap
+    if (SEQ.arrTool === 'erase') {
+      e.preventDefault();
+      seqCheckpoint();
+      const i = track.items.indexOf(clip);
+      if (i >= 0) track.items.splice(i, 1);
+      if (SEQ.focusedClip?.clipId === clip.id) closePianoRoll();
+      seqRenderTrack(track);
+      seqResyncTrack(track);
+      seqSave();
+      return;
+    }
     e.preventDefault();
     seqCheckpoint();
     block.setPointerCapture(e.pointerId);
     const startX = e.clientX, startBeat = clip.start;
-    const snap = 0.5;
-    const lane = block.parentElement;
+    const snap = SEQ.arrSnap ? SEQ.arrSnapVal : 0.25;
+    const sourceLane = block.parentElement;
     let moved = false;
     let ghost = null;
+    let targetLane = sourceLane;
+    let targetTrack = track;
     const onMove = (ev) => {
       const dx = ev.clientX - startX;
       if (!moved && Math.abs(dx) < 4) return;
@@ -7126,11 +7684,23 @@ function seqMakeClipBlock(track, clip, idx) {
       clip.start = Math.max(0, startBeat + dx / BEAT_PX);
       block.style.left = (clip.start * BEAT_PX) + 'px';
       const snapped = Math.max(0, Math.round(clip.start / snap) * snap);
+      // Detect lane under cursor for cross-track drop. Free-clip drops are
+      // allowed on free-lanes only (no free→chord).
+      const els = document.elementsFromPoint(ev.clientX, ev.clientY);
+      const overLane = els.find(el => el.classList?.contains('seq-lane'));
+      if (overLane && overLane !== sourceLane) {
+        const t = trackById(overLane.dataset.trackId);
+        if (t && t.kind === 'free') { targetLane = overLane; targetTrack = t; }
+        else { targetLane = sourceLane; targetTrack = track; }
+      } else if (overLane === sourceLane) {
+        targetLane = sourceLane; targetTrack = track;
+      }
+      if (ghost && ghost.parentElement !== targetLane) { ghost.remove(); ghost = null; }
       if (!ghost) {
         ghost = document.createElement('div');
         ghost.className = 'seq-ghost';
         ghost.style.width = (clip.beats * BEAT_PX) + 'px';
-        lane?.appendChild(ghost);
+        targetLane?.appendChild(ghost);
       }
       ghost.style.left = (snapped * BEAT_PX) + 'px';
     };
@@ -7141,17 +7711,41 @@ function seqMakeClipBlock(track, clip, idx) {
       if (ghost) { ghost.remove(); ghost = null; }
       if (moved) {
         clip.start = Math.max(0, Math.round(clip.start / snap) * snap);
-        track.items.sort((a, b) => a.start - b.start);
+        if (targetTrack && targetTrack !== track) {
+          const i = track.items.indexOf(clip);
+          if (i >= 0) track.items.splice(i, 1);
+          targetTrack.items.push(clip);
+          targetTrack.items.sort((a, b) => a.start - b.start);
+          seqRenderTrack(track);
+          seqRenderTrack(targetTrack);
+          seqResyncTrack(track);
+          seqResyncTrack(targetTrack);
+        } else {
+          track.items.sort((a, b) => a.start - b.start);
+          seqRenderTrack(track);
+          seqResyncTrack(track);
+        }
         seqAutoExtendLoop(clip.start + clip.beats);
-        seqRenderTrack(track);
-        seqResyncTrack(track);
-      } else {
-        // Single click = focus + open piano-roll for this clip
-        openPianoRoll(track, clip);
       }
     };
     block.addEventListener('pointermove', onMove);
     block.addEventListener('pointerup', onUp);
+  });
+  block.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    // Un-hide the piano-roll section if the user had toggled it off.
+    if (document.body.classList.contains('hide-pianoroll')) {
+      document.body.classList.remove('hide-pianoroll');
+      const btn = document.querySelector('.header-section-toggle[data-section="pianoroll"]');
+      btn?.classList.add('active');
+      try {
+        const KEY = 'chordpad.hiddenSections';
+        const hidden = JSON.parse(localStorage.getItem(KEY) || '{}') || {};
+        hidden.pianoroll = false;
+        localStorage.setItem(KEY, JSON.stringify(hidden));
+      } catch (_) {}
+    }
+    openPianoRoll(track, clip);
   });
 
   return block;
@@ -7200,18 +7794,13 @@ function setRollTool(tool) {
   document.body.classList.toggle('roll-tool-pen',   tool === 'pen');
   document.body.classList.toggle('roll-tool-erase', tool === 'erase');
 }
-document.getElementById('seq-tool-pen').addEventListener('click', () => {
-  setRollTool(SEQ.rollTool === 'pen' ? 'none' : 'pen');
+['seq-tool-select','seq-tool-pen','seq-tool-erase','seq-tool-pan'].forEach((id) => {
+  document.getElementById(id)?.addEventListener('mousedown', (e) => e.preventDefault());
 });
-document.getElementById('seq-tool-erase').addEventListener('click', () => {
-  setRollTool(SEQ.rollTool === 'erase' ? 'none' : 'erase');
-});
-document.getElementById('seq-tool-keyboard').addEventListener('click', () => {
-  SEQ.rollKeyboard = !SEQ.rollKeyboard;
-  document.getElementById('seq-tool-keyboard').classList.toggle('active', SEQ.rollKeyboard);
-  document.body.classList.toggle('roll-keyboard-on', SEQ.rollKeyboard);
-  seqRenderMidi();
-});
+document.getElementById('seq-tool-select')?.addEventListener('click', () => prSetTool('select'));
+document.getElementById('seq-tool-pen')?.addEventListener('click', () => prSetTool('draw'));
+document.getElementById('seq-tool-erase')?.addEventListener('click', () => prSetTool('erase'));
+document.getElementById('seq-tool-pan')?.addEventListener('click', () => prSetTool('pan'));
 document.getElementById('seq-tool-snap').addEventListener('click', () => {
   SEQ.rollSnap = !SEQ.rollSnap;
   document.getElementById('seq-tool-snap').classList.toggle('active', SEQ.rollSnap);
@@ -7226,11 +7815,78 @@ const SNAP_VALUES = [
   { val: 4,          label: '4'   },
 ];
 let _snapIdx = 3;
-document.getElementById('seq-snap-val').addEventListener('click', () => {
-  _snapIdx = (_snapIdx + 1) % SNAP_VALUES.length;
+document.getElementById('seq-snap-val').addEventListener('input', (e) => {
+  _snapIdx = Math.max(0, Math.min(SNAP_VALUES.length - 1, parseInt(e.target.value, 10)));
   SEQ.rollSnapVal = SNAP_VALUES[_snapIdx].val;
-  document.getElementById('seq-snap-val').textContent = SNAP_VALUES[_snapIdx].label;
+  document.getElementById('seq-snap-val-label').textContent = SNAP_VALUES[_snapIdx].label;
 });
+
+// Arrangement-view toolbar (above the tracks)
+SEQ.arrTool    = SEQ.arrTool    || 'select';
+SEQ.arrSnap    = SEQ.arrSnap    ?? true;
+SEQ.arrSnapVal = SEQ.arrSnapVal || 1;
+let _arrSnapIdx = SNAP_VALUES.findIndex(s => s.val === SEQ.arrSnapVal);
+if (_arrSnapIdx < 0) _arrSnapIdx = 2;
+function arrSetTool(tool) {
+  SEQ.arrTool = tool;
+  ['select','erase','pan'].forEach(t => {
+    document.getElementById('seq-arr-tool-' + t)?.classList.toggle('active', tool === t);
+  });
+  const wrap = document.getElementById('seq-lane-wrap');
+  if (wrap) {
+    wrap.classList.remove('arr-tool-select','arr-tool-erase','arr-tool-pan');
+    wrap.classList.add('arr-tool-' + tool);
+  }
+}
+function arrSnap(beat) {
+  if (!SEQ.arrSnap) return beat;
+  return Math.round(beat / SEQ.arrSnapVal) * SEQ.arrSnapVal;
+}
+['select','erase','pan'].forEach(t => {
+  const btn = document.getElementById('seq-arr-tool-' + t);
+  btn?.addEventListener('mousedown', e => e.preventDefault());
+  btn?.addEventListener('click', () => arrSetTool(t));
+});
+document.getElementById('seq-arr-tool-snap')?.addEventListener('click', () => {
+  SEQ.arrSnap = !SEQ.arrSnap;
+  document.getElementById('seq-arr-tool-snap').classList.toggle('active', SEQ.arrSnap);
+});
+document.getElementById('seq-arr-tool-snap').classList.toggle('active', SEQ.arrSnap);
+const _arrSlider = document.getElementById('seq-arr-snap-val');
+if (_arrSlider) _arrSlider.value = String(_arrSnapIdx);
+_arrSlider?.addEventListener('input', (e) => {
+  _arrSnapIdx = Math.max(0, Math.min(SNAP_VALUES.length - 1, parseInt(e.target.value, 10)));
+  SEQ.arrSnapVal = SNAP_VALUES[_arrSnapIdx].val;
+  document.getElementById('seq-arr-snap-val-label').textContent = SNAP_VALUES[_arrSnapIdx].label;
+});
+document.getElementById('seq-arr-snap-val-label').textContent = SNAP_VALUES[_arrSnapIdx].label;
+arrSetTool(SEQ.arrTool);
+// Pan-mode: capture pointerdown on the lane-wrap before lanes handle it.
+(function _initArrPan() {
+  const wrap = document.getElementById('seq-lane-wrap');
+  if (!wrap) return;
+  wrap.addEventListener('pointerdown', (e) => {
+    if (SEQ.arrTool !== 'pan' && !SEQ._arrSpaceHeld) return;
+    if (e.target.closest('.seq-track-sidebar')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    wrap.setPointerCapture(e.pointerId);
+    const startX = e.clientX, startY = e.clientY;
+    const startSL = wrap.scrollLeft, startST = wrap.scrollTop;
+    wrap.classList.add('arr-panning');
+    const onMove = (ev) => {
+      wrap.scrollLeft = startSL - (ev.clientX - startX);
+      wrap.scrollTop  = startST - (ev.clientY - startY);
+    };
+    const onUp = () => {
+      wrap.removeEventListener('pointermove', onMove);
+      wrap.removeEventListener('pointerup', onUp);
+      wrap.classList.remove('arr-panning');
+    };
+    wrap.addEventListener('pointermove', onMove);
+    wrap.addEventListener('pointerup', onUp);
+  }, true); // capture phase so we get it before clip handlers
+})();
 setRollTool('none');
 
 if ('serviceWorker' in navigator) {
