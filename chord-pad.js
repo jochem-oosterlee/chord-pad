@@ -909,8 +909,17 @@ function startAudioNote(midiNote, velocity, at = null, autoRelease = null, instr
 // the SF2's embedded sample loops, with proper per-preset filter, pan,
 // envelope and tuning settings — i.e. how the soundfont author intended.
 
+// FluidR3 is too big (148MB) for GitHub Pages to serve directly (it returns
+// the Git-LFS pointer file instead of the binary), so the canonical copy
+// lives as a GitHub Release asset on this repo. Local file:// / dev-server
+// installs still have the LFS-pulled binary at sf2/FluidR3_GM.sf2, so we
+// fall back to that if the CDN fetch fails or stalls.
 const SF2_FILES = {
-  fluid: { url: 'sf2/FluidR3_GM.sf2', sf2: null, loading: null, total: 0, loaded: 0 },
+  fluid: {
+    url: 'https://github.com/jochem-oosterlee/chord-pad/releases/download/assets-v1/FluidR3_GM.sf2',
+    fallbackUrl: 'sf2/FluidR3_GM.sf2',
+    sf2: null, loading: null, total: 0, loaded: 0,
+  },
 };
 const SF2_BUFFER_CACHE = new Map(); // sample object → AudioBuffer
 
@@ -1106,8 +1115,23 @@ function loadSf2(fileKey) {
   if (typeof Ctor !== 'function') return Promise.resolve(null);
   sf2UpdateProgress('Loading instruments…');
   entry.loading = (async () => {
+    const tryUrl = async (url) => {
+      const resp = await fetch(url);
+      if (!resp.ok || !resp.body) throw new Error('http ' + resp.status);
+      // Tiny responses are almost certainly Git-LFS pointer files served by
+      // GitHub Pages — reject so we fall through to the next URL.
+      const cl = parseInt(resp.headers.get('Content-Length') || '0', 10);
+      if (cl > 0 && cl < 4096) throw new Error('lfs-pointer (' + cl + ' bytes)');
+      return resp;
+    };
     try {
-      const resp = await fetch(entry.url);
+      let resp;
+      try { resp = await tryUrl(entry.url); }
+      catch (e1) {
+        if (!entry.fallbackUrl) throw e1;
+        console.warn('SF2 primary url failed', entry.url, e1, '→ falling back to', entry.fallbackUrl);
+        resp = await tryUrl(entry.fallbackUrl);
+      }
       if (!resp.ok || !resp.body) throw new Error('http ' + resp.status);
       const total = parseInt(resp.headers.get('Content-Length') || '0', 10);
       entry.total = total;
