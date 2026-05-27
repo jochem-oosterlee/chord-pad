@@ -1994,17 +1994,23 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   background-color: rgba(0,0,0,0.30);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 4px;
+  overflow: auto;
+  cursor: crosshair;
+}
+/* Grid pattern lives on the sizer (which has the full content width/height)
+   so tiling covers the whole scrollable area, not just the body's viewport. */
+.pr-sizer {
   background-image:
     linear-gradient(to right,
-      transparent calc(var(--pr-bar-px, var(--bar-px)) - 1px),
-      rgba(255,255,255,0.12) calc(var(--pr-bar-px, var(--bar-px)) - 1px),
-      rgba(255,255,255,0.12) var(--pr-bar-px, var(--bar-px)),
+      rgba(255,255,255,0.12) 0,
+      rgba(255,255,255,0.12) 1px,
+      transparent 1px,
       transparent var(--pr-bar-px, var(--bar-px))
     ),
     linear-gradient(to right,
-      transparent calc(var(--pr-beat-px, var(--beat-px)) - 1px),
-      rgba(255,255,255,0.04) calc(var(--pr-beat-px, var(--beat-px)) - 1px),
-      rgba(255,255,255,0.04) var(--pr-beat-px, var(--beat-px)),
+      rgba(255,255,255,0.04) 0,
+      rgba(255,255,255,0.04) 1px,
+      transparent 1px,
       transparent var(--pr-beat-px, var(--beat-px))
     ),
     linear-gradient(to bottom,
@@ -2020,14 +2026,11 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
     );
   background-size: var(--pr-bar-px, var(--bar-px)) 100%, var(--pr-beat-px, var(--beat-px)) 100%, 100% 144px, 100% 12px;
   background-repeat: repeat-x, repeat-x, repeat-y, repeat-y;
-  background-attachment: local, local, local, local;
   background-position:
     var(--pr-content-left, 0) 0,
     var(--pr-content-left, 0) 0,
     var(--pr-content-left, 0) var(--pr-octave-offset, 0),
     var(--pr-content-left, 0) 0;
-  overflow: auto;
-  cursor: crosshair;
 }
 .seq-pianoroll-body {
   scrollbar-width: thin;

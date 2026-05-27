@@ -1504,6 +1504,9 @@ function onTrackMidiMessage(msg, tracks) {
   const ch     = msg.data[0] & 0x0F;
   const note   = msg.data[1];
   const vel    = msg.data[2];
+  // Visual activity indicator — flash on any matching note event regardless
+  // of which track receives it.
+  if (status === 0x90 || status === 0x80) blinkLed();
   for (const t of tracks) {
     if (t.channel !== ch) continue;
     if (status === 0x90 && vel > 0) {
@@ -4332,6 +4335,8 @@ function seqTrackVel(ref, base) {
   if (!t) return base;
   return Math.max(1, Math.min(127, Math.round(base * t.volume)));
 }
+// Stub — kept so the (now no-op) call sites don't throw if invoked.
+function sendTrackChannelVolume() {}
 
 function seqBeatDur() { return 60 / state.tempo; }
 
@@ -7111,7 +7116,7 @@ function seqRenderRuler() {
   for (const tr of SEQ.tracksList) trackMax = Math.max(trackMax, seqLaneWidth(tr.items));
   const bpb = state.beatsPerBar;
   const extraBars = 32; // empty pannable territory after the last clip
-  const widthPx = Math.max(
+  const rawWidth = Math.max(
     trackMax + extraBars * bpb * BEAT_PX,
     seqLaneWidth(SEQ.items),
     seqLaneWidth(SEQ.noteItems),
@@ -7119,14 +7124,16 @@ function seqRenderRuler() {
     visibleW + extraBars * bpb * BEAT_PX,
     4 * BEAT_PX + 64
   );
+  // Round up to a full bar so the grid pattern's rightmost bar-line lands
+  // exactly at the lane edge (instead of being clipped off mid-tile).
+  const totalBars = Math.ceil(rawWidth / (bpb * BEAT_PX));
+  const widthPx   = totalBars * bpb * BEAT_PX;
   ruler.style.width = widthPx + 'px';
   // Stretch the tracks-inner container so every lane fills the full ruler
   // width, otherwise panning past the last clip shows empty/half-rendered
   // territory beyond the lane's bottom border.
   const innerEl = document.getElementById('seq-tracks-inner');
   if (innerEl) innerEl.style.minWidth = widthPx + 'px';
-  const totalBeats = Math.ceil(widthPx / BEAT_PX);
-  const totalBars  = Math.ceil(totalBeats / bpb) + 1;
   let html = '';
   for (let bar = 0; bar < totalBars; bar++) {
     const left = bar * bpb * BEAT_PX;
@@ -7287,6 +7294,13 @@ initSeqPinchZoom();
 seqLoad();
 // Tracks may have midiInPortId configured; re-attach now that they exist.
 if (state.midiAccess) attachMidiInput();
+// Push initial CC#7 to every MIDI-routed track so receivers start at the
+// stored volume rather than the synth default.
+function _initialCcSyncWhenReady() {
+  if (!state.midiAccess) { setTimeout(_initialCcSyncWhenReady, 200); return; }
+  for (const t of SEQ.tracksList) if (t.output === 'midi') sendTrackChannelVolume(t);
+}
+_initialCcSyncWhenReady();
 seqInitTrackSynths();
 rebuildTracksUI();
 seqUpdateBarLine();
@@ -7502,6 +7516,7 @@ function openTrackFxModal(track) {
       if (next === track.output) return;
       seqCheckpoint();
       track.output = next;
+      if (next === 'midi') sendTrackChannelVolume(track);
       seqSave();
       openTrackFxModal(track);   // rebuild with new conditional layout
       seqRenderTrack(track);     // header doesn't show output anymore, but keep things fresh
@@ -7899,7 +7914,7 @@ function populateTrackHeader(label, track) {
     <div class="seq-th-row seq-th-bot">
       <button class="seq-th-m${track.muted ? ' on' : ''}" title="Mute">M</button>
       <button class="seq-th-s${track.soloed ? ' on' : ''}" title="Solo">S</button>
-      <span class="seq-th-knob" data-value="${track.volume}" title="Volume — drag up/down (double-click to reset)"><span class="seq-th-knob-ind"></span></span>
+      <span class="seq-th-knob" data-value="${track.volume}" title="${track.output === 'midi' ? 'Velocity scale — drag up/down (double-click to reset)' : 'Volume — drag up/down (double-click to reset)'}"><span class="seq-th-knob-ind"></span></span>
     </div>
   `);
   if (track.kind === 'chord') {
@@ -7941,13 +7956,24 @@ function populateTrackHeader(label, track) {
     deleteTrack(track.id);
   });
 
-  label.querySelector('.seq-th-m').addEventListener('click', (e) => {
+  // Mute and Solo are mutually exclusive: turning one on clears the other.
+  const muteBtn = label.querySelector('.seq-th-m');
+  const soloBtn = label.querySelector('.seq-th-s');
+  muteBtn.addEventListener('click', () => {
     seqCheckpoint();
-    track.muted = !track.muted; e.currentTarget.classList.toggle('on', track.muted); seqSave();
+    track.muted = !track.muted;
+    if (track.muted) track.soloed = false;
+    muteBtn.classList.toggle('on', track.muted);
+    soloBtn.classList.toggle('on', track.soloed);
+    seqSave();
   });
-  label.querySelector('.seq-th-s').addEventListener('click', (e) => {
+  soloBtn.addEventListener('click', () => {
     seqCheckpoint();
-    track.soloed = !track.soloed; e.currentTarget.classList.toggle('on', track.soloed); seqSave();
+    track.soloed = !track.soloed;
+    if (track.soloed) track.muted = false;
+    muteBtn.classList.toggle('on', track.muted);
+    soloBtn.classList.toggle('on', track.soloed);
+    seqSave();
   });
   // Volume knob: drag up = louder, drag down = softer. Sweep is 270°, from
   // ~7-o'clock (min=0) clockwise through top to ~5-o'clock (max=1.5).
@@ -7971,16 +7997,27 @@ function populateTrackHeader(label, track) {
     // 200px of drag covers the full 0..1.5 range. Up AND right both
     // increase volume; down AND left both decrease. Hold Shift for fine
     // control (4× slower).
+    // Throttle CC#7 sends so we don't flood the MIDI bus during fast drags.
+    let lastCcT = 0;
+    const sendCcThrottled = () => {
+      if (track.output !== 'midi') return;
+      const now = performance.now();
+      if (now - lastCcT < 25) return;
+      lastCcT = now;
+      sendTrackChannelVolume(track);
+    };
     const onMove = (ev) => {
       const speed = ev.shiftKey ? 4 : 1;
       const delta = ((startY - ev.clientY) + (ev.clientX - startX)) / speed;
       const next  = Math.max(VOL_MIN, Math.min(VOL_MAX, startV + delta / 200 * (VOL_MAX - VOL_MIN)));
       track.volume = next;
       knobUpdate();
+      sendCcThrottled();
     };
     const onUp = () => {
       knob.removeEventListener('pointermove', onMove);
       knob.removeEventListener('pointerup', onUp);
+      sendTrackChannelVolume(track); // final value
       seqSave();
     };
     knob.addEventListener('pointermove', onMove);
@@ -7991,6 +8028,7 @@ function populateTrackHeader(label, track) {
     seqCheckpoint();
     track.volume = 1.0;
     knobUpdate();
+    sendTrackChannelVolume(track);
     seqSave();
   });
   knob.addEventListener('wheel', (e) => {
@@ -7998,6 +8036,7 @@ function populateTrackHeader(label, track) {
     const step = e.shiftKey ? 0.01 : 0.05;
     track.volume = Math.max(VOL_MIN, Math.min(VOL_MAX, track.volume - Math.sign(e.deltaY) * step));
     knobUpdate();
+    sendTrackChannelVolume(track);
     seqSave();
   }, { passive: false });
 }
@@ -8178,7 +8217,11 @@ function renderPianoRoll() {
   // Extend scrollable width well past the clip so you can pan into empty
   // territory — at least 32 bars beyond the clip's last beat.
   const bpb       = state.beatsPerBar;
-  const minBeats  = Math.max(clipBeats, 4) + 32 * bpb;
+  // Round up to a whole-bar boundary so the bar-line gradient's rightmost
+  // edge actually renders (otherwise the last partial tile clips it off and
+  // you get a blank strip at the very end of the sizer).
+  const rawBeats  = Math.max(clipBeats, 4) + 32 * bpb;
+  const minBeats  = Math.ceil(rawBeats / bpb) * bpb;
   const contentW  = minBeats * PR_BEAT_PX + prKbW();
   const contentH  = rows * PR_ROW_H;
   body.style.minWidth  = '';
@@ -8187,6 +8230,9 @@ function renderPianoRoll() {
   body.style.setProperty('--pr-content-left', prKbW() + 'px');
   const sizer = document.createElement('div');
   sizer.className = 'pr-sizer';
+  // Sizer carries the grid background so tiles cover the full scrollable
+  // area (the body itself only paints across clientWidth even with
+  // background-attachment:local in some browsers).
   sizer.style.cssText = `position:absolute;top:0;left:0;width:${contentW}px;height:${contentH}px;pointer-events:none;`;
   body.appendChild(sizer);
 
@@ -8194,13 +8240,20 @@ function renderPianoRoll() {
   // sync with it (but never vertically with the keyboard). Extends to at
   // least the visible width so bar numbers cover the whole roll.
   const prRuler = document.getElementById('seq-pianoroll-ruler');
+  // Match the rulerwrap's inner width to the body's clientWidth so that 1:1
+  // scrollLeft sync stays accurate end-to-end. (Body has a vertical scrollbar
+  // that shaves a few px off its clientWidth, plus 1px borders both sides;
+  // the wrap has neither — without this fix the bar markers drift ~5-20px
+  // over the full scroll range.)
+  const rulerWrap = document.getElementById('seq-pianoroll-rulerwrap');
+  if (rulerWrap) rulerWrap.style.width = (body.clientWidth || 0) + 'px';
   if (prRuler) {
     const visibleW = body.clientWidth || 0;
     const rulerW   = Math.max(contentW, visibleW);
     prRuler.style.width = rulerW + 'px';
     const bpb = state.beatsPerBar;
     const totalBeats = Math.ceil((rulerW - prKbW()) / PR_BEAT_PX);
-    const totalBars  = Math.ceil(totalBeats / bpb) + 1;
+    const totalBars  = Math.ceil(totalBeats / bpb);
     let prRulerHTML = '';
     for (let bar = 0; bar < totalBars; bar++) {
       const left = bar * bpb * PR_BEAT_PX + prKbW();
@@ -8217,7 +8270,11 @@ function renderPianoRoll() {
     body.dataset.rulerSyncBound = '1';
     body.addEventListener('scroll', () => {
       const wrap = document.getElementById('seq-pianoroll-rulerwrap');
-      if (wrap) wrap.scrollLeft = body.scrollLeft;
+      if (!wrap) return;
+      // wrap width is synced to body.clientWidth in renderPianoRoll, so a
+      // straight 1:1 scrollLeft match keeps the bar markers aligned with
+      // the grid over the entire scroll range.
+      wrap.scrollLeft = body.scrollLeft;
     });
   }
   // Click-to-set play cursor on the piano-roll ruler. Drag-detection so
@@ -8391,7 +8448,12 @@ function _prAppendOverlays(body) {
   if (clip) {
     const endLine = document.createElement('div');
     endLine.className = 'pr-clip-end-line';
-    endLine.style.left = (clip.beats * PR_BEAT_PX + prKbW()) + 'px';
+    endLine.style.left   = (clip.beats * PR_BEAT_PX + prKbW()) + 'px';
+    // Span the full sizer height so the line reaches A0 (not just the
+    // visible body viewport). PR_ROW_H × rows = pixel height of the grid.
+    endLine.style.top    = '0';
+    endLine.style.bottom = 'auto';
+    endLine.style.height = ((body._prHi - body._prLo + 1) * PR_ROW_H) + 'px';
     body.appendChild(endLine);
   }
 }
