@@ -21,16 +21,14 @@
 <body>
 <div class="app">
   <header class="header">
-    <span class="brand">chord pad</span>
+    <span class="brand" id="brand-logo" title="Triple-click to reset">chord pad</span>
     <div class="header-right">
       <button class="header-section-toggle active" data-section="chord-pad"  title="Chord Pad"><i data-lucide="layout-grid"></i></button>
-      <button class="header-section-toggle active" data-section="settings"   title="Settings"><i data-lucide="settings"></i></button>
-      <button class="header-section-toggle active" data-section="instrument" title="Instrument"><i data-lucide="cassette-tape"></i></button>
       <button class="header-section-toggle active" data-section="keyboard"   title="Keyboard"><i data-lucide="keyboard-music"></i></button>
-      <button class="header-section-toggle active" data-section="sequencer"  title="Sequencer"><i data-lucide="panel-top-bottom-dashed"></i></button>
+      <button class="header-section-toggle active" data-section="sequencer"  title="Tracks"><i data-lucide="panel-top-bottom-dashed"></i></button>
       <button class="header-section-toggle active" data-section="pianoroll"  title="Piano Roll"><i data-lucide="square-chart-gantt"></i></button>
+      <button class="header-section-toggle active" data-section="settings"   title="Settings"><i data-lucide="settings"></i></button>
       <div class="led" id="midi-led" title="MIDI activity" style="display:none"></div>
-      <button class="header-refresh" id="header-refresh" title="Force refresh"><i data-lucide="refresh-cw"></i></button>
     </div>
   </header>
 
@@ -42,6 +40,7 @@
     <button class="tab" data-tab="minor-harmony">Minor Harmony</button>
     <button class="tab" data-tab="scale-chords">Scale Chords</button>
     <button class="tab" data-tab="chord-library">Chord Library</button>
+    <button class="tab tab-settings" id="chord-pad-settings-btn" title="Chord Pad settings"><i data-lucide="sliders-horizontal"></i></button>
   </nav>
 
   <!-- Major Harmony card -->
@@ -116,56 +115,27 @@
           <button class="btn active" id="audio-toggle">ON</button>
         </div>
       </div>
-      <div class="control wide">
+      <div class="control" title="Master volume — drag knob up/right to raise, down/left to lower">
         <span class="control-label">Volume</span>
-        <div class="control-row">
-          <input type="range" id="audio-volume" min="0" max="200" value="70">
+        <div class="control-row" style="gap:6px; align-items:center;">
+          <span class="master-vol-knob" id="master-vol-knob"><span class="master-vol-knob-ind"></span></span>
           <span class="control-value" id="audio-volume-val">70%</span>
+          <input type="hidden" id="audio-volume" value="70">
         </div>
       </div>
-      <div class="control">
-        <span class="control-label">Voicing</span>
-        <div class="control-row">
-          <button class="btn active" id="voicing-toggle">Auto</button>
-        </div>
-      </div>
-      <div class="control">
-        <span class="control-label">Octave</span>
+      <div class="control" title="Visual play-cursor offset · positive = cursor moves later, compensating for audio output latency that the browser under-reports">
+        <span class="control-label">Cursor offset</span>
         <div class="control-row">
           <div class="arrow-group">
-            <button class="ctrl-arrow" id="oct-down"><i data-lucide="chevron-left"></i></button>
-            <span class="control-value" id="ctrl-oct">4</span>
-            <button class="ctrl-arrow" id="oct-up"><i data-lucide="chevron-right"></i></button>
+            <input class="control-value tempo-input" id="seq-visual-latency" type="number" min="-50" max="200" step="5" value="75">
+            <span class="control-value" style="margin-left:4px">ms</span>
           </div>
         </div>
       </div>
-      <div class="control">
-        <span class="control-label">Sustain</span>
+      <div class="control" title="Volume balancing · compensates loudness across GM categories">
+        <span class="control-label">Vol balance</span>
         <div class="control-row">
-          <button class="btn" id="sustain-toggle">OFF</button>
-        </div>
-      </div>
-      <div class="control">
-        <span class="control-label">Bass</span>
-        <div class="control-row">
-          <button class="btn active" id="bass-toggle">ON</button>
-          <div class="arrow-group">
-            <button class="ctrl-arrow" id="bass-oct-down"><i data-lucide="chevron-left"></i></button>
-            <span class="control-value" id="ctrl-bass-oct">2</span>
-            <button class="ctrl-arrow" id="bass-oct-up"><i data-lucide="chevron-right"></i></button>
-          </div>
-        </div>
-      </div>
-      <div class="control">
-        <span class="control-label">Tooltip</span>
-        <div class="control-row">
-          <button class="btn" id="piano-hover-toggle">OFF</button>
-        </div>
-      </div>
-      <div class="control" id="scale-tones-control" style="display:none">
-        <span class="control-label">Scale tones</span>
-        <div class="control-row">
-          <button class="btn" id="scale-tones-toggle">OFF</button>
+          <button class="btn" id="vol-balance-toggle">OFF</button>
         </div>
       </div>
       <div class="control" id="tempo-control" style="display:none">
@@ -180,36 +150,6 @@
       </div>
       <select id="play-style-select" style="display:none"></select>
     </div>
-    <div class="controls-body">
-      <div class="control">
-        <span class="control-label">MIDI</span>
-        <div class="control-row">
-          <button class="btn" id="midi-toggle">OFF</button>
-        </div>
-      </div>
-      <div class="control" id="channel-control" style="display:none">
-        <span class="control-label">Channel</span>
-        <div class="control-row">
-          <div class="arrow-group">
-            <button class="ctrl-arrow" id="ch-down"><i data-lucide="chevron-left"></i></button>
-            <span class="control-value" id="ctrl-ch">1</span>
-            <button class="ctrl-arrow" id="ch-up"><i data-lucide="chevron-right"></i></button>
-          </div>
-        </div>
-      </div>
-      <div class="control wide" id="port-control" style="display:none">
-        <span class="control-label">Out port</span>
-        <div class="control-row">
-          <select id="output-select"><option value="">— none —</option></select>
-        </div>
-      </div>
-      <div class="control wide" id="in-port-control" style="display:none">
-        <span class="control-label">In port</span>
-        <div class="control-row">
-          <select id="input-select"><option value="">— none —</option></select>
-        </div>
-      </div>
-    </div>
   </div>
 
   <div class="synth-controls" id="instrument-panel">
@@ -219,6 +159,17 @@
         <span class="synth-target-label">Editing</span>
         <button class="synth-target-btn active" data-target="pad">Chord Pad · Chords</button>
         <button class="synth-target-btn" data-target="free">Free</button>
+      </div>
+      <div class="synth-output-row" id="synth-output-row">
+        <span class="synth-target-label">Output</span>
+        <div class="track-fx-output-toggle synth-output-toggle">
+          <button class="track-fx-out-btn active" data-out="instrument">Instrument</button>
+          <button class="track-fx-out-btn" data-out="midi">MIDI</button>
+        </div>
+        <label class="synth-ch-inline hidden">
+          <span>Ch</span>
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="track-fx-ch-input" id="pad-channel" maxlength="2" value="1">
+        </label>
       </div>
       <div class="synth-instrument-row">
         <select id="synth-instrument">
@@ -346,7 +297,7 @@
 
   <!-- Chord Sequencer -->
   <div class="seq-panel" id="seq-panel">
-    <div class="seq-header" id="seq-header">Sequencer</div>
+    <div class="seq-header" id="seq-header">Tracks</div>
     <div class="seq-controls">
       <button class="seq-play-btn" id="seq-play-btn"><i data-lucide="play"></i> Play</button>
       <button class="seq-rec-btn" id="seq-rec-btn"><i data-lucide="circle"></i> Rec</button>
@@ -373,12 +324,18 @@
       <button class="btn seq-tool-btn active" id="seq-arr-tool-select" title="Select"><i data-lucide="mouse-pointer-2"></i></button>
       <button class="btn seq-tool-btn" id="seq-arr-tool-erase" title="Delete clip"><i data-lucide="eraser"></i></button>
       <button class="btn seq-tool-btn" id="seq-arr-tool-pan" title="Pan (hold space)"><i data-lucide="hand"></i></button>
+      <button class="btn seq-tool-btn" id="seq-arr-tool-merge" title="Merge two clips (click clip A then clip B)"><i data-lucide="merge"></i></button>
+      <button class="btn seq-tool-btn" id="seq-arr-tool-split" title="Split clip at click position"><i data-lucide="split"></i></button>
+      <button class="btn seq-tool-btn" id="seq-arr-tool-create" title="Create empty clip (click on a free lane)"><i data-lucide="square-plus"></i></button>
       <div class="seq-tool-sep"></div>
-      <button class="btn seq-tool-btn" id="seq-arr-tool-snap" title="Snap"><i data-lucide="magnet"></i></button>
-      <div class="seq-snap-slider">
-        <input type="range" id="seq-arr-snap-val" min="0" max="6" step="1" value="3" title="Snap unit">
-        <span class="seq-snap-slider-label" id="seq-arr-snap-val-label">1</span>
-      </div>
+      <span class="seq-snap-knob" id="seq-arr-snap-knob" title="Snap · click to toggle, drag to change unit">
+        <span class="seq-snap-knob-ind"></span>
+        <i class="seq-snap-knob-icon" data-lucide="magnet"></i>
+        <span class="seq-snap-knob-tip" id="seq-arr-snap-knob-tip">1</span>
+      </span>
+      <div class="seq-tool-sep"></div>
+      <button class="btn seq-tool-btn" id="seq-arr-zoom-out" title="Zoom out (more bars in view)"><i data-lucide="zoom-out"></i></button>
+      <button class="btn seq-tool-btn" id="seq-arr-zoom-in"  title="Zoom in (fewer bars in view)"><i data-lucide="zoom-in"></i></button>
     </div>
     <div class="seq-track-area">
       <div class="seq-track-sidebar" id="seq-track-sidebar">
@@ -396,13 +353,6 @@
         </div>
       </div>
     </div>
-    <div class="seq-zoom-btns">
-      <button class="btn" id="seq-zoom-out"><i data-lucide="minus"></i></button>
-      <button class="btn" id="seq-zoom-reset" title="Reset zoom"><i data-lucide="scan-search"></i></button>
-      <button class="btn" id="seq-zoom-in"><i data-lucide="plus"></i></button>
-      <div class="seq-tool-sep"></div>
-      <button class="seq-clear-btn" id="seq-clear-btn">Clear</button>
-    </div>
   </div>
   <div class="seq-pianoroll" id="seq-pianoroll">
     <div class="seq-pianoroll-header">
@@ -413,15 +363,22 @@
         <button class="btn seq-tool-btn" id="seq-tool-erase" title="Erase note"><i data-lucide="eraser"></i></button>
         <button class="btn seq-tool-btn" id="seq-tool-pan" title="Pan (hold space)"><i data-lucide="hand"></i></button>
         <div class="seq-tool-sep"></div>
-        <button class="btn seq-tool-btn" id="seq-tool-snap" title="Snap"><i data-lucide="magnet"></i></button>
-        <div class="seq-snap-slider">
-          <input type="range" id="seq-snap-val" min="0" max="6" step="1" value="3" title="Snap unit">
-          <span class="seq-snap-slider-label" id="seq-snap-val-label">1</span>
-        </div>
+        <span class="seq-snap-knob" id="seq-pr-snap-knob" title="Snap · click to toggle, drag to change unit">
+          <span class="seq-snap-knob-ind"></span>
+          <i class="seq-snap-knob-icon" data-lucide="magnet"></i>
+          <span class="seq-snap-knob-tip" id="seq-pr-snap-knob-tip">1</span>
+        </span>
+        <div class="seq-tool-sep"></div>
+        <button class="btn seq-tool-btn" id="pr-zoom-out" title="Zoom out (more bars in view)"><i data-lucide="zoom-out"></i></button>
+        <button class="btn seq-tool-btn" id="pr-zoom-in"  title="Zoom in (fewer bars in view)"><i data-lucide="zoom-in"></i></button>
       </div>
       <span class="seq-pianoroll-title" id="seq-pianoroll-title"></span>
     </div>
+    <div class="seq-pianoroll-rulerwrap" id="seq-pianoroll-rulerwrap">
+      <div class="pr-ruler" id="seq-pianoroll-ruler"></div>
+    </div>
     <div class="seq-pianoroll-body" id="seq-pianoroll-body"></div>
+    <div class="seq-pianoroll-resize" id="seq-pianoroll-resize" title="Drag to resize piano roll"></div>
   </div>
 
   <footer class="footer">
@@ -434,12 +391,108 @@
 
 <div id="piano-tooltip" class="piano-tooltip"></div>
 
+<div class="track-fx-modal" id="chord-pad-modal" hidden>
+  <div class="track-fx-backdrop" data-close-cp-modal></div>
+  <div class="track-fx-panel chord-pad-panel">
+    <button class="track-fx-close" id="chord-pad-modal-close" title="Close">✕</button>
+    <div class="track-fx-header">
+      <span class="track-fx-title">Chord Pad · settings</span>
+    </div>
+    <div class="track-fx-body chord-pad-modal-body">
+      <!-- 1. Chord-pad functions — flex-wrap so they fit nicely. -->
+      <div class="cp-modal-funcs">
+        <div class="cp-modal-func">
+          <span class="cp-modal-func-label">Voicing</span>
+          <button class="btn active" id="voicing-toggle">Auto</button>
+        </div>
+        <div class="cp-modal-func">
+          <span class="cp-modal-func-label">Octave</span>
+          <div class="arrow-group">
+            <button class="ctrl-arrow" id="oct-down"><i data-lucide="chevron-left"></i></button>
+            <span class="control-value" id="ctrl-oct">4</span>
+            <button class="ctrl-arrow" id="oct-up"><i data-lucide="chevron-right"></i></button>
+          </div>
+        </div>
+        <div class="cp-modal-func">
+          <span class="cp-modal-func-label">Sustain</span>
+          <button class="btn" id="sustain-toggle">OFF</button>
+        </div>
+        <div class="cp-modal-func">
+          <span class="cp-modal-func-label">Bass</span>
+          <div style="display:flex; gap:4px; align-items:center;">
+            <button class="btn active" id="bass-toggle">ON</button>
+            <div class="arrow-group">
+              <button class="ctrl-arrow" id="bass-oct-down"><i data-lucide="chevron-left"></i></button>
+              <span class="control-value" id="ctrl-bass-oct">2</span>
+              <button class="ctrl-arrow" id="bass-oct-up"><i data-lucide="chevron-right"></i></button>
+            </div>
+          </div>
+        </div>
+        <div class="cp-modal-func">
+          <span class="cp-modal-func-label">Tooltip</span>
+          <button class="btn" id="piano-hover-toggle">OFF</button>
+        </div>
+        <div class="cp-modal-func" id="scale-tones-control" style="display:none">
+          <span class="cp-modal-func-label">Scale tones</span>
+          <button class="btn" id="scale-tones-toggle">OFF</button>
+        </div>
+      </div>
+
+      <!-- 2. Output toggle (+ Channel when MIDI) — same shape as track modal. -->
+      <div class="track-fx-row track-fx-row-select">
+        <label class="track-fx-label">Output</label>
+        <div class="track-fx-output-toggle cp-modal-output-toggle">
+          <button class="track-fx-out-btn active" data-out="instrument">Instrument</button>
+          <button class="track-fx-out-btn" data-out="midi">MIDI</button>
+        </div>
+        <label class="track-fx-ch-inline cp-modal-ch-inline hidden">
+          <span>Ch</span>
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="track-fx-ch-input" id="cp-modal-channel" maxlength="2" value="1">
+        </label>
+      </div>
+      <div class="track-fx-row track-fx-row-select cp-modal-port-row hidden">
+        <label class="track-fx-label">MIDI port</label>
+        <select class="track-fx-select" id="cp-modal-port" style="flex:1; width:100%"></select>
+        <span class="track-fx-val"></span>
+      </div>
+
+      <!-- 3. Instrument picker. -->
+      <div class="track-fx-row track-fx-row-select cp-modal-inst-row">
+        <label class="track-fx-label">Instrument</label>
+        <select class="track-fx-select" id="cp-modal-instrument">
+          <option value="synth">Synth</option>
+          <option value="piano">Piano</option>
+          <option value="epiano" selected>E-Piano</option>
+          <option value="epiano2">E-Piano 2</option>
+          <option value="organ">Organ</option>
+          <option value="strings">Strings</option>
+          <option value="choir">Choir</option>
+          <option value="vibes">Vibraphone</option>
+          <option value="pad">Warm Pad</option>
+        </select>
+        <span class="track-fx-val"></span>
+      </div>
+
+      <!-- 4. Sound knob grid — identical to the track-fx modal. -->
+      <div class="cp-modal-sound-row">
+        <div class="track-fx-knobs" id="cp-modal-knobs"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="track-fx-modal" id="track-fx-modal" hidden>
   <div class="track-fx-backdrop"></div>
   <div class="track-fx-panel">
+    <button class="track-fx-close" id="track-fx-close" title="Close">✕</button>
     <div class="track-fx-header">
       <span class="track-fx-title" id="track-fx-title">Track settings</span>
-      <button class="track-fx-close" id="track-fx-close" title="Close">✕</button>
+      <svg class="track-fx-adsr" id="track-fx-adsr" viewBox="0 0 60 40" preserveAspectRatio="none">
+        <g id="track-fx-adsr-dividers"></g>
+        <g id="track-fx-adsr-labels"></g>
+        <path id="track-fx-adsr-fill"   d="" fill="rgba(255,170,51,0.18)" stroke="none"/>
+        <path id="track-fx-adsr-path"   d="" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
     </div>
     <div class="track-fx-body" id="track-fx-body"></div>
   </div>

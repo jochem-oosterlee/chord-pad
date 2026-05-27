@@ -112,6 +112,8 @@ body::before {
   font-family: 'Major Mono Display', monospace;
   font-size: 16px; letter-spacing: 0.18em;
   color: var(--text); text-transform: lowercase;
+  cursor: pointer;
+  user-select: none;
 }
 
 .header-right {
@@ -135,27 +137,49 @@ body.hide-chord-pad .tabs-header,
 body.hide-chord-pad .tabs,
 body.hide-chord-pad .page          { display: none !important; }
 body.hide-settings   #settings-panel  { display: none !important; }
+/* Settings popover — anchored under the header gear icon. Position is set
+   inline by JS each time it opens, sourced from the gear's getBoundingRect. */
+#settings-panel {
+  position: fixed;
+  z-index: 1000;
+  width: auto; max-width: calc(100vw - 24px);
+  background: var(--bg, #1a1b1e);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  padding: 12px 14px 14px;
+}
 body.hide-instrument #instrument-panel { display: none !important; }
+/* The synth-controls panel is fully replaced by the chord-pad settings modal
+   and the per-track FX modal. Keep its DOM (the modal's instrument <select>
+   dispatches change events to #synth-instrument so the existing handler
+   still loads samples / updates state) but hide it from view. */
+#instrument-panel { display: none !important; }
+
+/* Master volume knob in the Settings row — same shape as the track-header
+   volume knob, slightly larger so it reads as a primary control. */
+.master-vol-knob {
+  position: relative; display: inline-block;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.25);
+  cursor: default; touch-action: none; vertical-align: middle;
+  transition: border-color 0.12s;
+}
+.master-vol-knob:hover { border-color: var(--accent); }
+.master-vol-knob-ind {
+  position: absolute; left: 50%; bottom: 50%;
+  width: 2px; height: 10px;
+  background: var(--accent);
+  border-radius: 1px;
+  transform-origin: 50% 100%;
+  transform: translate(-50%, 0) rotate(var(--ang, 0deg));
+  pointer-events: none;
+}
 body.hide-keyboard   #keyboard-panel  { display: none !important; }
 body.hide-sequencer  #seq-panel       { display: none !important; }
 body.hide-pianoroll  #seq-pianoroll   { display: none !important; }
-.header-refresh {
-  background: transparent;
-  border: 1px solid transparent;
-  color: rgba(255,255,255,0.30);
-  border-radius: 4px;
-  padding: 4px 6px;
-  cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: color 0.12s, background 0.12s, border-color 0.12s;
-}
-.header-refresh [data-lucide] { width: 18px; height: 18px; }
-.header-refresh:hover {
-  color: rgba(255,255,255,0.65);
-  border-color: rgba(255,255,255,0.10);
-  background: transparent;
-}
-.header-refresh .lucide { width: 13px; height: 13px; }
 
 
 select {
@@ -224,6 +248,14 @@ option { background: var(--bg); color: var(--text); }
 }
 .tab:hover { color: var(--text); background: rgba(255,255,255,0.02); }
 .tab.active { color: var(--text); background: rgba(255,255,255,0.04); }
+.tab.tab-settings {
+  padding: 12px 14px;
+  margin-left: auto;
+  border-right: 0;
+  border-left: 1px solid var(--panel-edge);
+}
+.tab.tab-settings .lucide { width: 14px; height: 14px; }
+.tab.tab-settings::after { display: none; }
 .tab.active::after {
   content: ''; position: absolute;
   bottom: -1px; left: 0; right: 0;
@@ -741,6 +773,19 @@ option { background: var(--bg); color: var(--text); }
   border-color: rgba(255,170,51,0.5);
   background: rgba(255,170,51,0.10);
 }
+.synth-output-row {
+  display: flex; align-items: center; gap: 8px;
+  grid-column: 1 / -1;
+  padding: 0 0 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.synth-output-row .track-fx-output-toggle { flex: 0 1 auto; }
+.synth-ch-inline {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; color: rgba(255,255,255,0.55);
+  letter-spacing: 0.05em;
+}
+.synth-ch-inline.hidden { display: none; }
 .synth-instrument-row select {
   background: var(--bg);
   border: 1px solid rgba(255,255,255,0.25);
@@ -1564,32 +1609,172 @@ input[type="range"]::-moz-range-thumb {
   display: flex; align-items: center; gap: 4px;
   margin-bottom: 4px;
 }
-.seq-snap-slider {
-  display: inline-flex; align-items: center; gap: 6px;
+/* Snap-unit dropdown (track + roll toolbars). Matches .seq-timesig style. */
+.seq-snap-select {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 10px;
   padding: 0 4px;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  appearance: none; -webkit-appearance: none;
+  width: 34px; min-width: 34px; max-width: 34px;
+  flex-shrink: 0;
+  height: 22px; box-sizing: border-box;
+  text-align: center;
+  margin: 0 4px;
 }
-.seq-snap-slider input[type="range"] {
-  width: 80px;
-  margin: 0;
-  accent-color: var(--accent);
+.seq-snap-select:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
+.seq-snap-select:focus { outline: none; border-color: var(--accent); }
+.seq-snap-select option { background: #1a1b1e; color: var(--text); }
+
+/* Experimental: snap knob next to the dropdown.
+   - Rotates to show the current snap unit (-135° = 1/4, +135° = 4).
+   - The unit label sits in the center.
+   - Click toggles SEQ.arrSnap (off-state dims the knob).
+   - Drag/wheel cycles through SNAP_VALUES. */
+.seq-snap-knob {
+  position: relative;
+  display: inline-block;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  /* ON state — matches the magnet button's .active style. */
+  background: rgba(255,170,51,0.12);
+  border: 1.5px solid var(--accent);
+  cursor: pointer;
+  margin: 0 4px;
+  vertical-align: middle;
+  touch-action: none;
+  transition: border-color 0.12s, background 0.12s;
 }
-.seq-snap-slider-label {
+.seq-snap-knob:hover { background: rgba(255,170,51,0.20); }
+.seq-snap-knob.off {
+  background: transparent;
+  border-color: rgba(255,255,255,0.2);
+}
+.seq-snap-knob.off:hover { border-color: rgba(255,255,255,0.5); }
+.seq-snap-knob-ind {
+  position: absolute;
+  left: 50%; bottom: calc(50% + 8px);
+  width: 1.5px; height: 5px;
+  background: var(--accent);
+  border-radius: 1px;
+  transform-origin: 50% calc(100% + 8px);
+  transform: translate(-50%, 0) rotate(var(--ang, 0deg));
+  pointer-events: none;
+}
+.seq-snap-knob.off .seq-snap-knob-ind { background: rgba(255,255,255,0.4); }
+.seq-snap-knob-icon {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--accent);
+  pointer-events: none;
+  display: inline-flex;
+}
+.seq-snap-knob-icon .lucide,
+.seq-snap-knob-icon svg { width: 10px; height: 10px; }
+.seq-snap-knob.off .seq-snap-knob-icon { color: rgba(255,255,255,0.5); }
+.seq-snap-knob-tip {
+  position: absolute;
+  left: 50%; bottom: calc(100% + 6px);
+  transform: translateX(-50%) translateY(4px);
+  padding: 2px 6px;
+  background: var(--bg, #1a1b1e);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
-  color: rgba(255,255,255,0.7);
-  min-width: 22px;
-  text-align: left;
+  color: var(--accent);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s, transform 0.1s;
+  z-index: 100;
+}
+.seq-snap-knob-tip::after {
+  content: '';
+  position: absolute;
+  left: 50%; top: 100%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: var(--accent);
+}
+.seq-snap-knob.tip-show .seq-snap-knob-tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 .seq-lane-wrap.arr-tool-pan,
-.seq-lane-wrap.arr-pan-mode  { cursor: grab; }
-.seq-lane-wrap.arr-panning   { cursor: grabbing; }
+.seq-lane-wrap.arr-tool-pan .seq-lane,
+.seq-lane-wrap.arr-tool-pan .seq-block,
+.seq-lane-wrap.arr-pan-mode,
+.seq-lane-wrap.arr-pan-mode .seq-lane,
+.seq-lane-wrap.arr-pan-mode .seq-block  { cursor: grab !important; }
+.seq-lane-wrap.arr-panning,
+.seq-lane-wrap.arr-panning .seq-lane,
+.seq-lane-wrap.arr-panning .seq-block   { cursor: grabbing !important; }
 .seq-lane-wrap.arr-tool-erase .seq-lane { cursor: not-allowed; }
+.seq-marquee {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: rgba(255,170,51,0.10);
+  pointer-events: none;
+  z-index: 50;
+}
+.seq-lane-wrap.arr-tool-merge .seq-block { cursor: cell; }
+.seq-lane-wrap.arr-tool-split .seq-block { cursor: col-resize; }
+.seq-lane-wrap.arr-tool-create .seq-lane { cursor: cell; }
+.seq-create-ghost { opacity: 0.7; }
+.split-guide {
+  position: absolute; top: 0; bottom: 0;
+  width: 1px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 6;
+}
+.split-ghost-right {
+  position: absolute; top: 0; bottom: 0;
+  border: 1px dashed var(--accent);
+  background: rgba(255,170,51,0.08);
+  pointer-events: none;
+  z-index: 5;
+  box-sizing: border-box;
+}
+.seq-block.merge-pending {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
 .seq-tool-sep {
   width: 1px;
   background: rgba(255,255,255,0.1);
   margin: 2px 4px;
   align-self: stretch;
 }
+.seq-latency-ctrl {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  color: rgba(255,255,255,0.6);
+  letter-spacing: 0.05em;
+}
+.seq-latency-ctrl input {
+  width: 38px; padding: 2px 4px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 3px;
+  color: rgba(255,255,255,0.85);
+  font: inherit;
+  text-align: center;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.seq-latency-ctrl input::-webkit-outer-spin-button,
+.seq-latency-ctrl input::-webkit-inner-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
+.seq-latency-ctrl input:focus { border-color: var(--accent); outline: none; }
 .seq-tool-btn {
   font-size: 13px !important;
 }
@@ -1680,7 +1865,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   flex: 1;
   min-width: 0;
   overflow-x: auto;
-  padding-top: 22px;
+  padding-top: 2px;
   padding-bottom: 4px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255,255,255,0.15) transparent;
@@ -1700,7 +1885,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   flex-direction: column;
   gap: 0;
   flex-shrink: 0;
-  padding-top: 60px; /* lane-wrap padding (22) + ruler (34) + ruler margin (4) */
+  padding-top: 36px; /* lane-wrap padding (2) + ruler (34) */
   padding-bottom: 4px;
 }
 .seq-track-label {
@@ -1747,6 +1932,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 /* Piano-roll detail-view, opens at the bottom of the sequencer when a
    free track is focused */
 .seq-pianoroll {
+  position: relative;
   border-top: 1px solid var(--panel-edge);
   background: rgba(255,255,255,0.01);
   padding: 12px 20px 14px;
@@ -1754,19 +1940,44 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   flex-direction: column;
   gap: 8px;
 }
+.seq-pianoroll-resize {
+  position: relative;
+  height: 6px;
+  margin: -2px 0;
+  cursor: ns-resize;
+  border-radius: 2px;
+}
+.seq-pianoroll-resize::before {
+  content: '';
+  position: absolute;
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 32px; height: 2px;
+  background: rgba(255,255,255,0.18);
+  border-radius: 1px;
+}
+.seq-pianoroll-resize:hover::before,
+.seq-pianoroll-resize.dragging::before {
+  background: var(--accent);
+  width: 44px;
+}
 .seq-pianoroll-header {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
   margin-bottom: 6px;
 }
+.seq-pianoroll-header > .synth-header { display: block; }
 .seq-pianoroll-tools {
   display: flex; align-items: center; gap: 4px;
 }
-.seq-pianoroll-title { flex: 1; margin-left: 12px; }
+.seq-pianoroll-title { flex: 1; margin-top: 12px; }
 .seq-pianoroll-title {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
   color: rgba(255,255,255,0.78);
   font-weight: 600;
+}
+.seq-pianoroll-title.muted {
+  color: rgba(255,255,255,0.28);
+  font-weight: 400;
 }
 .seq-pianoroll-close {
   font-family: inherit; font-size: 12px; line-height: 1;
@@ -1785,16 +1996,16 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   border-radius: 4px;
   background-image:
     linear-gradient(to right,
-      transparent calc(var(--bar-px) - 1px),
-      rgba(255,255,255,0.12) calc(var(--bar-px) - 1px),
-      rgba(255,255,255,0.12) var(--bar-px),
-      transparent var(--bar-px)
+      transparent calc(var(--pr-bar-px, var(--bar-px)) - 1px),
+      rgba(255,255,255,0.12) calc(var(--pr-bar-px, var(--bar-px)) - 1px),
+      rgba(255,255,255,0.12) var(--pr-bar-px, var(--bar-px)),
+      transparent var(--pr-bar-px, var(--bar-px))
     ),
     linear-gradient(to right,
-      transparent calc(var(--beat-px) - 1px),
-      rgba(255,255,255,0.04) calc(var(--beat-px) - 1px),
-      rgba(255,255,255,0.04) var(--beat-px),
-      transparent var(--beat-px)
+      transparent calc(var(--pr-beat-px, var(--beat-px)) - 1px),
+      rgba(255,255,255,0.04) calc(var(--pr-beat-px, var(--beat-px)) - 1px),
+      rgba(255,255,255,0.04) var(--pr-beat-px, var(--beat-px)),
+      transparent var(--pr-beat-px, var(--beat-px))
     ),
     linear-gradient(to bottom,
       rgba(255,255,255,0.22) 0,
@@ -1807,7 +2018,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
       rgba(255,255,255,0.05) 12px,
       transparent 12px
     );
-  background-size: var(--bar-px) 100%, var(--beat-px) 100%, 100% 144px, 100% 12px;
+  background-size: var(--pr-bar-px, var(--bar-px)) 100%, var(--pr-beat-px, var(--beat-px)) 100%, 100% 144px, 100% 12px;
   background-repeat: repeat-x, repeat-x, repeat-y, repeat-y;
   background-attachment: local, local, local, local;
   background-position:
@@ -1826,12 +2037,31 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 .seq-pianoroll-body::-webkit-scrollbar-track { background: transparent; }
 .seq-pianoroll-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
 .seq-pianoroll-body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.35); }
-.seq-pianoroll-body.pr-pan-mode,
-.seq-pianoroll-body.pr-tool-pan    { cursor: grab; }
-.seq-pianoroll-body.pr-panning      { cursor: grabbing; }
+.seq-pianoroll-rulerwrap {
+  overflow: hidden;
+  height: 22px;
+  background: transparent;
+  margin-bottom: -8px; /* cancels the flex-gap to the body below */
+}
+.pr-ruler {
+  position: relative;
+  height: 22px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 0.08em;
+  user-select: none;
+  cursor: pointer;
+}
+.pr-ruler-bar  { position: absolute; top: 0; width: 1px; height: 100%; background: rgba(255,255,255,0.18); pointer-events: none; }
+.pr-ruler-bar span { position: absolute; left: 3px; top: 2px; line-height: 1; white-space: nowrap; color: rgba(255,255,255,0.62); }
+.pr-ruler-beat { position: absolute; bottom: 0; width: 1px; height: 6px; background: rgba(255,255,255,0.08); pointer-events: none; }
 .seq-pianoroll-body.pr-tool-select { cursor: default; }
 .seq-pianoroll-body.pr-tool-draw   { cursor: crosshair; }
 .seq-pianoroll-body.pr-tool-erase  { cursor: not-allowed; }
+.seq-pianoroll-body.pr-tool-pan,
+.seq-pianoroll-body.pr-pan-mode    { cursor: grab; }
+.seq-pianoroll-body.pr-panning     { cursor: grabbing; }
 .pr-marquee {
   position: absolute;
   border: 1px solid var(--accent);
@@ -1839,15 +2069,12 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   pointer-events: none;
   z-index: 6;
 }
-.pr-note.selected {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-  z-index: 5;
-}
 .pr-ghost-note {
-  opacity: 0.45;
-  background: rgba(95,187,205,0.55) !important;
   pointer-events: none;
+  opacity: 0.55;
+  background: rgba(255,170,51,0.45) !important;
+  border-color: rgba(255,200,80,0.6) !important;
+  z-index: 8;
 }
 .pr-ghost {
   top: 0; bottom: 0;
@@ -1898,22 +2125,83 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 }
 .pr-note {
   position: absolute;
-  background: linear-gradient(180deg, #4a8cff 0%, #2c6dd9 100%);
-  border: 1px solid rgba(0,0,0,0.4);
-  border-radius: 3px;
-  color: rgba(255,255,255,0.92);
+  background: rgba(51,153,255,0.55);
+  border: 1px solid rgba(100,180,255,0.45);
+  border-radius: 2px;
+  color: rgba(255,255,255,0.9);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 8.5px;
-  padding: 0 4px;
-  line-height: 11px;
+  font-size: 6px;
+  padding: 0 2px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  overflow: hidden;
+  z-index: 2;
   cursor: grab;
   white-space: nowrap; overflow: hidden;
   user-select: none;
   min-width: 2px;
 }
+.pr-note:hover { background: rgba(51,153,255,0.75); }
 .pr-note.selected {
-  outline: 1px solid var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 0 8px rgba(255,170,51,0.4);
+  border-color: var(--accent);
+}
+.pr-note-resize {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 4px;
+  cursor: ew-resize;
+  background: transparent;
+  z-index: 3;
+}
+.pr-note-resize-left  { left: 0; }
+.pr-note-resize-right { right: 0; }
+.pr-note-resize:hover { background: rgba(255,255,255,0.25); }
+.pr-resize-ghost {
+  pointer-events: none;
+  background: transparent !important;
+  border: 1px dashed var(--accent) !important;
+  opacity: 0.85;
+  z-index: 6;
+}
+.pr-note.moving { opacity: 0.75; cursor: grabbing; }
+.pr-note.pr-alt-ghost {
+  opacity: 0.55;
+  border-style: dashed;
+  pointer-events: none;
+  filter: saturate(0.7);
+}
+/* Note extends past the clip end → the portion past the clip becomes muted,
+   signalling that part won't play. --note-clip-frac is the fraction still
+   inside the clip (set per-note in JS). */
+.pr-note.pr-note-overflow {
+  background: linear-gradient(to right,
+    rgba(51,153,255,0.55) 0,
+    rgba(51,153,255,0.55) calc(var(--note-clip-frac, 1) * 100%),
+    rgba(255,255,255,0.06)  calc(var(--note-clip-frac, 1) * 100%),
+    rgba(255,255,255,0.06)  100%);
+}
+.pr-note.pr-note-overflow:hover {
+  background: linear-gradient(to right,
+    rgba(51,153,255,0.75) 0,
+    rgba(51,153,255,0.75) calc(var(--note-clip-frac, 1) * 100%),
+    rgba(255,255,255,0.10)  calc(var(--note-clip-frac, 1) * 100%),
+    rgba(255,255,255,0.10)  100%);
+}
+.pr-clip-end-line {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 1px;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255,170,51,0.5) 0,
+    rgba(255,170,51,0.5) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  pointer-events: none;
+  z-index: 3;
 }
 .pr-note .pr-note-del {
   position: absolute; top: 0; right: 0; width: 12px; height: 100%;
@@ -2008,19 +2296,32 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 .track-fx-modal[hidden] { display: none; }
 .track-fx-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.55); }
 .track-fx-panel {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  width: 380px; max-width: calc(100vw - 32px);
+  position: absolute; left: 50%; top: 12vh; transform: translateX(-50%);
+  width: 520px; max-width: calc(100vw - 32px);
   background: var(--bg, #1a1b1e);
   border: 1px solid rgba(255,255,255,0.12);
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.5);
   display: flex; flex-direction: column;
   font-family: 'JetBrains Mono', monospace;
+  padding-top: 18px; /* room for the close button in the panel corner */
 }
 .track-fx-header {
-  display: flex; align-items: center; justify-content: space-between;
+  position: relative;
+  display: flex; align-items: center; gap: 12px;
   padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.08);
 }
+.track-fx-adsr {
+  position: absolute;
+  /* 16 modal padding + 60 value column + 10 grid gap → aligns the graph's
+     right edge with the right edge of the slider track itself. */
+  right: 86px; top: 50%;
+  transform: translateY(calc(-50% - 12px));
+  width: 70px; height: 36px;
+  pointer-events: none;
+}
+.track-fx-adsr.hidden { display: none; }
+.track-fx-close { position: absolute; right: 6px; top: 2px; padding: 2px 5px; font-size: 12px; z-index: 2; }
 .track-fx-title {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em;
   color: var(--text-dim);
@@ -2030,15 +2331,148 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   font-size: 14px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
 }
 .track-fx-close:hover { color: var(--text); background: rgba(255,255,255,0.06); }
-.track-fx-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.track-fx-body {
+  padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;
+  max-height: calc(100vh - 120px); overflow-y: auto;
+}
 .track-fx-row {
   display: grid; grid-template-columns: 80px 1fr 60px;
   align-items: center; gap: 10px;
 }
-.track-fx-label { font-size: 10px; color: rgba(255,255,255,0.65); letter-spacing: 0.08em; }
+.track-fx-label {
+  font-size: 10px; color: rgba(255,255,255,0.65); letter-spacing: 0.08em;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.track-fx-sync {
+  background: transparent; border: 0; padding: 0;
+  color: rgba(255,255,255,0.4); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.track-fx-sync:hover { color: var(--accent); }
+.track-fx-sync .lucide { width: 10px; height: 10px; }
 .track-fx-range { accent-color: var(--accent); }
 .track-fx-val { font-size: 10px; color: rgba(255,255,255,0.55); text-align: right; }
-.seq-th-top { justify-content: space-between; }
+.track-fx-select {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.85);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-family: inherit; font-size: 10px;
+  cursor: pointer;
+}
+/* Per-track instrument categorized picker */
+.track-fx-inst-picker { position: relative; }
+.track-fx-inst-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.85);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-family: inherit; font-size: 10px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; width: 100%;
+}
+.track-fx-inst-btn:hover { border-color: rgba(255,255,255,0.25); }
+.track-fx-inst-chev { color: rgba(255,255,255,0.5); font-size: 9px; }
+.track-fx-inst-menu {
+  position: absolute; top: calc(100% + 2px); left: 0;
+  min-width: 100%;
+  background: var(--bg, #1a1b1e);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+  padding: 4px 0;
+  z-index: 20;
+  max-height: 50vh; overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+.track-fx-inst-menu::-webkit-scrollbar       { width: 3px; }
+.track-fx-inst-menu::-webkit-scrollbar-track { background: transparent; }
+.track-fx-inst-menu::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+.track-fx-inst-menu::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.35); }
+.track-fx-inst-menu[hidden] { display: none; }
+.track-fx-inst-cat { position: relative; }
+.track-fx-inst-cat-btn,
+.track-fx-inst-item {
+  background: transparent; border: 0;
+  color: rgba(255,255,255,0.82);
+  font-family: inherit; font-size: 10px;
+  padding: 5px 12px 5px 12px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; min-width: 140px; gap: 12px;
+  text-align: left;
+}
+.track-fx-inst-cat-btn:hover,
+.track-fx-inst-item:hover,
+.track-fx-inst-cat:hover > .track-fx-inst-cat-btn {
+  background: rgba(255,170,51,0.10); color: var(--accent);
+}
+.track-fx-inst-item.selected {
+  color: var(--accent);
+  background: rgba(255,170,51,0.14);
+}
+
+/* Custom confirm dialog */
+.cp-confirm { position: fixed; inset: 0; z-index: 9999; font-family: 'JetBrains Mono', monospace; }
+.cp-confirm-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.55); }
+.cp-confirm-panel {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  min-width: 280px; max-width: 420px;
+  background: var(--bg, #1a1b1e);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  padding: 16px 18px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.cp-confirm-title {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em;
+  color: var(--text-dim);
+}
+.cp-confirm-message {
+  font-size: 12px; color: rgba(255,255,255,0.85); line-height: 1.45;
+}
+.cp-confirm-actions {
+  display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;
+}
+.cp-confirm-btn {
+  background: transparent; border: 1px solid rgba(255,255,255,0.18);
+  color: rgba(255,255,255,0.82);
+  font-family: inherit; font-size: 11px;
+  padding: 5px 12px; border-radius: 4px; cursor: pointer;
+}
+.cp-confirm-btn:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+.cp-confirm-ok { border-color: var(--accent); color: var(--accent); }
+.cp-confirm-ok:hover { background: rgba(255,170,51,0.12); color: var(--accent); }
+.cp-confirm-ok.danger { border-color: #e0524a; color: #e0524a; }
+.cp-confirm-ok.danger:hover { background: rgba(224,82,74,0.14); color: #ff766d; }
+.track-fx-inst-cat-chev { color: rgba(255,255,255,0.4); font-size: 11px; }
+.track-fx-inst-submenu {
+  position: fixed;
+  background: var(--bg, #1a1b1e);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+  padding: 4px 0;
+  min-width: 160px;
+  z-index: 9999;
+}
+.track-fx-inst-submenu[hidden] { display: none; }
+.track-fx-reset-row { display: flex; justify-content: flex-end; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); margin-top: 4px; }
+.track-fx-reset {
+  background: transparent; border: 1px solid rgba(255,255,255,0.18);
+  color: rgba(255,255,255,0.65); border-radius: 4px;
+  padding: 6px 10px; font-size: 9px; letter-spacing: 0.1em;
+  text-transform: uppercase; cursor: pointer; font-family: inherit;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.track-fx-reset:hover { color: var(--accent); border-color: rgba(255,170,51,0.45); background: rgba(255,170,51,0.05); }
+.seq-th-top { justify-content: flex-start; }
+.seq-th-top .seq-th-name { flex: 1; min-width: 0; }
 .seq-th-name {
   font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
   color: rgba(255,255,255,0.78); font-weight: 600;
@@ -2071,6 +2505,144 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 .seq-th-m:hover, .seq-th-s:hover { color: rgba(255,255,255,0.9); }
 .seq-th-m.on { color: #ff7766; border-color: rgba(255,119,102,0.5); background: rgba(255,119,102,0.16); }
 .seq-th-s.on { color: #ffd866; border-color: rgba(255,216,102,0.5); background: rgba(255,216,102,0.16); }
+/* Output (Instrument|MIDI) toggle and channel input inside the per-track
+   FX modal. The Output toggle replaces the old sidebar Inst/MIDI pill. */
+.track-fx-output-toggle {
+  display: flex; gap: 0;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px; overflow: hidden;
+  width: 100%;
+}
+.track-fx-out-btn {
+  background: transparent; border: 0;
+  color: rgba(255,255,255,0.55);
+  font-family: inherit; font-size: 10px; letter-spacing: 0.05em;
+  padding: 4px 0; cursor: pointer;
+  flex: 1 1 50%;
+  transition: background 0.12s, color 0.12s;
+}
+.track-fx-out-btn:not(:last-child) { border-right: 1px solid rgba(255,255,255,0.12); }
+.track-fx-out-btn:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+.track-fx-out-btn.active {
+  color: var(--accent);
+  background: rgba(255,170,51,0.12);
+}
+.track-fx-ch-inline {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; color: rgba(255,255,255,0.55);
+  letter-spacing: 0.05em;
+}
+.track-fx-ch-inline.hidden { display: none; }
+.track-fx-ch-input {
+  width: 28px; padding: 3px 4px;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 3px;
+  color: var(--text);
+  font: inherit; font-size: 10px;
+  text-align: center;
+  appearance: textfield; -moz-appearance: textfield;
+}
+.track-fx-ch-input::-webkit-outer-spin-button,
+.track-fx-ch-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.track-fx-ch-input:focus { border-color: var(--accent); outline: none; }
+.track-fx-port-row.hidden,
+.cp-modal-port-row.hidden { display: none; }
+.track-fx-port-select { font-size: 11px; padding: 4px 8px; }
+
+/* Chord-pad modal — wider than the track FX modal so the same knob grid
+   fits without label overlap. Inherits .track-fx-* row/knob styles for the
+   Output/Instrument/Sound sections so they look identical to track modal. */
+.chord-pad-panel { width: 520px; }
+.chord-pad-modal-body {
+  padding: 12px 16px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+/* Top section: chord-pad functions, wrap freely. */
+.cp-modal-funcs {
+  display: flex; flex-wrap: wrap;
+  gap: 10px 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.cp-modal-func {
+  display: flex; align-items: center; gap: 6px;
+}
+.cp-modal-func-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.5);
+}
+
+/* Sound knob grid — same sizing as the per-track FX modal. */
+.cp-modal-sound-row { padding-top: 4px; }
+.cp-modal-sound-row .track-fx-knobs {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px 4px;
+}
+
+/* Flat grid of rotary knobs — same layout in track FX modal and chord-pad
+   modal. 6 columns at the 520px panel width gives each knob comfortable
+   breathing room. */
+.track-fx-knobs {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px 6px;
+  padding-top: 4px;
+}
+.track-fx-knob-cell {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 1px;
+  min-width: 0;
+}
+.track-fx-knob-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  line-height: 1.1;
+}
+.track-fx-knob {
+  position: relative;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.1);
+  cursor: default;
+  touch-action: none;
+  transition: border-color 0.12s, background 0.12s;
+}
+.track-fx-knob:hover { border-color: rgba(255,255,255,0.22); background: rgba(0,0,0,0.5); }
+.track-fx-knob-ind {
+  position: absolute;
+  left: 50%; bottom: 50%;
+  width: 2px; height: 11px;
+  background: var(--accent);
+  border-radius: 1px;
+  transform-origin: 50% 100%;
+  transform: translate(-50%, 0) rotate(var(--ang, 0deg));
+}
+.track-fx-knob-label {
+  font-size: 9px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.03em;
+  display: block;
+  text-align: center; line-height: 1.1;
+  white-space: normal;
+}
+.track-fx-knob-label .track-fx-sync {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.track-fx-knob-label .track-fx-sync {
+  background: transparent; border: 0; padding: 0;
+  color: rgba(255,255,255,0.3); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.track-fx-knob-label .track-fx-sync:hover { color: var(--accent); }
+.track-fx-knob-label .track-fx-sync .lucide { width: 9px; height: 9px; }
 .seq-th-ch-wrap {
   display: inline-flex; align-items: center; gap: 2px;
   background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);
@@ -2085,24 +2657,31 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 .seq-th-ch::-webkit-inner-spin-button, .seq-th-ch::-webkit-outer-spin-button {
   -webkit-appearance: none; margin: 0;
 }
-.seq-th-vol {
-  flex: 1; height: 14px; margin: 0;
-  -webkit-appearance: none; appearance: none;
-  background: transparent; cursor: pointer; min-width: 30px;
+/* Track-header volume knob. --ang is set by JS (degrees, 0 = up). The
+   indicator line sits inside, rotating to point from center outward. */
+.seq-th-knob {
+  position: relative;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.1);
+  cursor: default;
+  flex: 0 0 18px;
+  margin-left: auto;
+  touch-action: none;
+  transition: border-color 0.12s;
 }
-.seq-th-vol::-webkit-slider-runnable-track {
-  height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px;
-}
-.seq-th-vol::-moz-range-track {
-  height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px;
-}
-.seq-th-vol::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 10px; height: 10px; background: var(--accent);
-  border-radius: 50%; margin-top: -3.5px;
-}
-.seq-th-vol::-moz-range-thumb {
-  width: 10px; height: 10px; background: var(--accent);
-  border-radius: 50%; border: 0;
+.seq-th-knob:hover { border-color: rgba(255,255,255,0.25); }
+.seq-th-knob-ind {
+  position: absolute;
+  left: 50%; bottom: 50%;
+  width: 2px; height: 8px;
+  background: var(--accent);
+  border-radius: 1px;
+  transform-origin: 50% 100%;
+  /* Baseline points up (0°). +deg swings the tip clockwise; -deg counter.
+     JS sets --ang from -135° (= 7 o'clock = min) to +135° (= 5 o'clock = max). */
+  transform: translate(-50%, 0) rotate(var(--ang, 0deg));
 }
 .seq-lane.track-collapsed {
   min-height: 0 !important;
@@ -2130,6 +2709,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 .seq-lane.track-collapsed .seq-resize,
 .seq-lane.track-collapsed .seq-block-ticks { display: none !important; }
 .seq-tracks-inner {
+  position: relative;
   display: inline-flex;
   flex-direction: column;
   gap: 0;
@@ -2154,25 +2734,25 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   min-height: 54px;
   padding: 4px;
   border-radius: 0;
-  cursor: grab;
+  cursor: default;
   border: 0;
   border-bottom: 1px solid rgba(255,255,255,0.08);
   background-color: rgba(0,0,0,0.2);
   background-image:
     linear-gradient(to right,
-      transparent calc(var(--bar-px) - 1px),
-      rgba(255,255,255,0.15) calc(var(--bar-px) - 1px),
-      rgba(255,255,255,0.15) var(--bar-px),
+      rgba(255,255,255,0.18) 0,
+      rgba(255,255,255,0.18) 1px,
+      transparent 1px,
       transparent var(--bar-px)
     ),
     linear-gradient(to right,
-      transparent calc(var(--beat-px) - 1px),
-      rgba(255,255,255,0.05) calc(var(--beat-px) - 1px),
-      rgba(255,255,255,0.05) var(--beat-px),
+      rgba(255,255,255,0.06) 0,
+      rgba(255,255,255,0.06) 1px,
+      transparent 1px,
       transparent var(--beat-px)
     );
-  background-size: var(--bar-px) 33%, var(--beat-px) 33%;
-  background-position: 0 50%;
+  background-size: var(--bar-px) 100%, var(--beat-px) 100%;
+  background-position: 0 0;
   background-repeat: repeat-x;
   background-clip: padding-box;
   flex: none;
@@ -2185,7 +2765,6 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   position: relative;
   height: 34px;
   min-width: 120px;
-  margin-bottom: 4px;
   font-family: 'JetBrains Mono', monospace;
   color: rgba(255,255,255,0.5);
   font-size: 9px;
@@ -2232,7 +2811,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   position: absolute;
   top: 4px;
   touch-action: none;
-  cursor: default;
+  cursor: grab;
   bottom: 4px;
   display: flex;
   flex-direction: column;
@@ -2272,15 +2851,38 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   min-width: 2px;
 }
 .seq-block.selected, .roll-note.selected {
-  outline: 1px solid var(--accent);
-  outline-offset: 1px;
-  box-shadow: 0 0 0 1px var(--accent), 0 0 10px rgba(255,170,51,0.35);
+  border-color: var(--accent);
 }
 .seq-block.active {
   background: rgba(255,170,51,0.2);
   border-color: var(--accent);
 }
 .seq-block.moving { opacity: 0.75; cursor: grabbing; }
+.seq-block.overlapping { opacity: 0.6; }
+.overlap-region {
+  position: absolute;
+  top: 4px; bottom: 4px;
+  pointer-events: none;
+  border-radius: 4px;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(74,140,255,0.1) 0,
+    rgba(74,140,255,0.1) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  z-index: 3;
+}
+.seq-block.copy-drag { cursor: copy; }
+.seq-ghost.copy-drag::after {
+  content: '+';
+  position: absolute;
+  top: 1px; right: 4px;
+  font-size: 9px; line-height: 1;
+  color: var(--accent);
+  font-weight: 300;
+  pointer-events: none;
+}
 
 .seq-block-name {
   font-size: 8px;
@@ -2445,22 +3047,27 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   left: 0;
   top: 0;
   bottom: 0;
-  width: 8px;
+  width: 5px;
   cursor: ew-resize;
   border-radius: 5px 0 0 5px;
-  background: rgba(255,255,255,0.04);
+  background: transparent;
   z-index: 2;
+  opacity: 0;
+  transition: opacity 0.1s;
 }
-.seq-resize-left:hover { background: rgba(255,255,255,0.10); }
+.seq-block:hover .seq-resize-left,
+.seq-block:hover .seq-resize { opacity: 1; background: rgba(255,255,255,0.10); }
 .seq-resize {
   position: absolute;
   right: 0;
   top: 0;
   bottom: 0;
-  width: 8px;
+  width: 5px;
   cursor: ew-resize;
   border-radius: 0 5px 5px 0;
-  background: rgba(255,255,255,0.04);
+  background: transparent;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2492,6 +3099,10 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   z-index: 10;
   display: none;
 }
+.seq-playhead-global {
+  top: 0;
+  bottom: 0;
+}
 
 .seq-ruler .seq-loop-start,
 .seq-ruler .seq-loop-end {
@@ -2513,6 +3124,16 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   box-sizing: border-box;
 }
 .seq-loop-bar:hover { background: rgba(255,170,51,0.28); }
+/* When the global loop is disabled, dim the loop markers/lines/bar so the
+   loop region is still visible but visually de-emphasized. */
+body.loop-disabled .seq-loop-bar,
+body.loop-disabled .seq-loop-line,
+body.loop-disabled .seq-loop-start-line,
+body.loop-disabled .seq-loop-start,
+body.loop-disabled .seq-loop-end { opacity: 0.28; }
+body.loop-disabled .seq-loop-start:hover,
+body.loop-disabled .seq-loop-end:hover,
+body.loop-disabled .seq-loop-bar:hover { opacity: 0.6; }
 .seq-loop-bar-left,
 .seq-loop-bar-right {
   position: absolute;
@@ -2616,9 +3237,10 @@ body.seq-dragging-note  #seq-midi-lane { border-color: rgba(255,170,51,0.5); bac
   position: absolute;
   top: 4px; bottom: 4px;
   border-radius: 5px;
-  background: rgba(255,170,51,0.07);
-  border: 1px dashed rgba(255,170,51,0.4);
+  background: rgba(255,170,51,0.15);
+  border: 1px dashed var(--accent);
   pointer-events: none;
+  z-index: 4;
   display: flex;
   align-items: center;
   justify-content: center;
