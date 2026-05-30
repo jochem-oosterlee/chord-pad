@@ -1420,6 +1420,39 @@ input[type="range"]::-moz-range-thumb {
 }
 .seq-timesig:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
 .seq-timesig option { background: #1a1b1e; color: var(--text); }
+.seq-clock-sync {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 8px;
+}
+.seq-clock-toggle {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-family: inherit; font-size: 10px;
+  padding: 0 6px;
+  cursor: pointer;
+  height: 22px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.seq-clock-toggle:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
+.seq-clock-toggle.active {
+  color: var(--accent);
+  border-color: rgba(255,170,51,0.5);
+  background: rgba(255,170,51,0.10);
+}
+.seq-clock-port {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-family: inherit; font-size: 10px;
+  padding: 0 4px;
+  height: 22px; max-width: 130px;
+  appearance: none; -webkit-appearance: none;
+}
+.seq-clock-port option { background: #1a1b1e; color: var(--text); }
 
 .seq-rec-beat {
   font-size: 10px;
@@ -1640,6 +1673,9 @@ input[type="range"]::-moz-range-thumb {
   position: relative;
   display: inline-block;
   width: 22px; height: 22px;
+  flex: 0 0 22px;
+  min-width: 22px; min-height: 22px;
+  box-sizing: border-box;
   border-radius: 50%;
   /* ON state — matches the magnet button's .active style. */
   background: rgba(255,170,51,0.12);
@@ -1647,6 +1683,7 @@ input[type="range"]::-moz-range-thumb {
   cursor: pointer;
   margin: 0 4px;
   vertical-align: middle;
+  align-self: center;
   touch-action: none;
   transition: border-color 0.12s, background 0.12s;
 }
@@ -2230,16 +2267,16 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 
 /* "→ Free" convert button on chord-track headers */
 .seq-th-convert {
-  font-family: inherit; font-size: 8.5px; line-height: 1;
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.12);
   border-radius: 3px;
-  padding: 2px 4px;
+  width: 18px; height: 18px;
+  padding: 0;
   color: rgba(255,255,255,0.55);
   cursor: pointer;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  display: inline-flex; align-items: center; justify-content: center;
 }
+.seq-th-convert .lucide { width: 11px; height: 11px; }
 .seq-th-convert:hover {
   color: var(--accent);
   border-color: rgba(255,170,51,0.45);
@@ -2550,6 +2587,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 .track-fx-ch-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .track-fx-ch-input:focus { border-color: var(--accent); outline: none; }
 .track-fx-port-row.hidden,
+.track-fx-in-port-row.hidden,
 .cp-modal-port-row.hidden { display: none; }
 .track-fx-port-select { font-size: 11px; padding: 4px 8px; }
 

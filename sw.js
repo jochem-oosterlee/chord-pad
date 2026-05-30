@@ -1,4 +1,4 @@
-const CACHE = 'chord-pad-v4';
+const CACHE = 'chord-pad-v5';
 const OFFLINE_ASSETS = [
   './chord-pad.html',
   './chord-pad.css',
@@ -20,14 +20,30 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 
-// Network-first: always try the network, fall back to cache only when offline
+// Big binary assets (SF2 sample bank) are immutable and ~148MB — never
+// re-fetch if we already have them in cache. Everything else is network-
+// first so updates land on the next refresh.
+const CACHE_FIRST_PATTERNS = [/\.sf2$/i];
+
 self.addEventListener('fetch', e => {
-  // Only HTTP(S) requests are cacheable. Chrome-extension://, data:, blob:,
-  // chrome://, etc. throw when passed to Cache.put — skip them entirely.
   const url = new URL(e.request.url);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
-  // Only cache GETs; PUT/POST/etc. aren't valid cache keys.
   if (e.request.method !== 'GET') return;
+  const cacheFirst = CACHE_FIRST_PATTERNS.some(re => re.test(url.pathname));
+  if (cacheFirst) {
+    e.respondWith(
+      caches.open(CACHE).then(c => c.match(e.request).then(cached => {
+        if (cached) return cached;
+        return fetch(e.request).then(resp => {
+          if (resp.ok) c.put(e.request, resp.clone()).catch(() => {});
+          return resp;
+        });
+      }))
+    );
+    return;
+  }
+  // Network-first for everything else: fresh content on refresh, cache as
+  // offline fallback.
   e.respondWith(
     fetch(e.request)
       .then(response => {

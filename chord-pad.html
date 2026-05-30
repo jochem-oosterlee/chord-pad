@@ -298,28 +298,6 @@
   <!-- Chord Sequencer -->
   <div class="seq-panel" id="seq-panel">
     <div class="seq-header" id="seq-header">Tracks</div>
-    <div class="seq-controls">
-      <button class="seq-play-btn" id="seq-play-btn"><i data-lucide="play"></i> Play</button>
-      <button class="seq-rec-btn" id="seq-rec-btn"><i data-lucide="circle"></i> Rec</button>
-      <button class="seq-metro-btn" id="seq-metro-btn"><i data-lucide="metronome"></i> Metro</button>
-      <button class="seq-loop-btn" id="seq-loop-btn"><i data-lucide="repeat"></i> Loop</button>
-      <div class="seq-timesig-tempo">
-        <select class="seq-timesig" id="seq-timesig">
-          <option value="2">2/4</option>
-          <option value="3">3/4</option>
-          <option value="4">4/4</option>
-          <option value="6">6/8</option>
-        </select>
-        <span class="seq-rec-beat" id="seq-rec-beat"></span>
-        <div class="seq-tempo-wrap">
-          <div class="arrow-group">
-            <button class="seq-tempo-arrow" id="seq-tempo-down"><i data-lucide="chevron-left"></i></button>
-            <input class="seq-tempo-val" id="seq-tempo-val" type="number" min="40" max="240" value="120">
-            <button class="seq-tempo-arrow" id="seq-tempo-up"><i data-lucide="chevron-right"></i></button>
-          </div>
-        </div>
-      </div>
-    </div>
     <div class="seq-arrangement-tools">
       <button class="btn seq-tool-btn active" id="seq-arr-tool-select" title="Select"><i data-lucide="mouse-pointer-2"></i></button>
       <button class="btn seq-tool-btn" id="seq-arr-tool-erase" title="Delete clip"><i data-lucide="eraser"></i></button>
@@ -328,11 +306,16 @@
       <button class="btn seq-tool-btn" id="seq-arr-tool-split" title="Split clip at click position"><i data-lucide="split"></i></button>
       <button class="btn seq-tool-btn" id="seq-arr-tool-create" title="Create empty clip (click on a free lane)"><i data-lucide="square-plus"></i></button>
       <div class="seq-tool-sep"></div>
-      <span class="seq-snap-knob" id="seq-arr-snap-knob" title="Snap · click to toggle, drag to change unit">
-        <span class="seq-snap-knob-ind"></span>
-        <i class="seq-snap-knob-icon" data-lucide="magnet"></i>
-        <span class="seq-snap-knob-tip" id="seq-arr-snap-knob-tip">1</span>
-      </span>
+      <button class="btn seq-tool-btn" id="seq-arr-tool-snap" title="Snap"><i data-lucide="magnet"></i></button>
+      <select class="seq-snap-select" id="seq-arr-snap-val" title="Snap unit">
+        <option value="0">1/4</option>
+        <option value="1">1/3</option>
+        <option value="2">1/2</option>
+        <option value="3" selected>1</option>
+        <option value="4">2</option>
+        <option value="5">3</option>
+        <option value="6">4</option>
+      </select>
       <div class="seq-tool-sep"></div>
       <button class="btn seq-tool-btn" id="seq-arr-zoom-out" title="Zoom out (more bars in view)"><i data-lucide="zoom-out"></i></button>
       <button class="btn seq-tool-btn" id="seq-arr-zoom-in"  title="Zoom in (fewer bars in view)"><i data-lucide="zoom-in"></i></button>
@@ -353,6 +336,34 @@
         </div>
       </div>
     </div>
+    <div class="seq-controls">
+      <button class="seq-play-btn" id="seq-play-btn"><i data-lucide="play"></i> Play</button>
+      <button class="seq-rec-btn" id="seq-rec-btn"><i data-lucide="circle"></i> Rec</button>
+      <button class="seq-metro-btn" id="seq-metro-btn"><i data-lucide="metronome"></i> Metro</button>
+      <button class="seq-loop-btn" id="seq-loop-btn"><i data-lucide="repeat"></i> Loop</button>
+      <div class="seq-timesig-tempo">
+        <select class="seq-timesig" id="seq-timesig">
+          <option value="2">2/4</option>
+          <option value="3">3/4</option>
+          <option value="4">4/4</option>
+          <option value="6">6/8</option>
+        </select>
+        <span class="seq-rec-beat" id="seq-rec-beat"></span>
+        <div class="seq-tempo-wrap">
+          <div class="arrow-group">
+            <button class="seq-tempo-arrow" id="seq-tempo-down"><i data-lucide="chevron-left"></i></button>
+            <input class="seq-tempo-val" id="seq-tempo-val" type="number" min="40" max="240" value="120">
+            <button class="seq-tempo-arrow" id="seq-tempo-up"><i data-lucide="chevron-right"></i></button>
+          </div>
+        </div>
+        <div class="seq-clock-sync" title="MIDI Clock sync — slave tempo + start/stop to an external source">
+          <button class="seq-clock-toggle" id="seq-clock-toggle">Sync</button>
+          <select class="seq-clock-port" id="seq-clock-port">
+            <option value="">— none —</option>
+          </select>
+        </div>
+      </div>
+    </div>
   </div>
   <div class="seq-pianoroll" id="seq-pianoroll">
     <div class="seq-pianoroll-header">
@@ -363,11 +374,16 @@
         <button class="btn seq-tool-btn" id="seq-tool-erase" title="Erase note"><i data-lucide="eraser"></i></button>
         <button class="btn seq-tool-btn" id="seq-tool-pan" title="Pan (hold space)"><i data-lucide="hand"></i></button>
         <div class="seq-tool-sep"></div>
-        <span class="seq-snap-knob" id="seq-pr-snap-knob" title="Snap · click to toggle, drag to change unit">
-          <span class="seq-snap-knob-ind"></span>
-          <i class="seq-snap-knob-icon" data-lucide="magnet"></i>
-          <span class="seq-snap-knob-tip" id="seq-pr-snap-knob-tip">1</span>
-        </span>
+        <button class="btn seq-tool-btn" id="seq-tool-snap" title="Snap"><i data-lucide="magnet"></i></button>
+        <select class="seq-snap-select" id="seq-snap-val" title="Snap unit">
+          <option value="0">1/4</option>
+          <option value="1">1/3</option>
+          <option value="2">1/2</option>
+          <option value="3" selected>1</option>
+          <option value="4">2</option>
+          <option value="5">3</option>
+          <option value="6">4</option>
+        </select>
         <div class="seq-tool-sep"></div>
         <button class="btn seq-tool-btn" id="pr-zoom-out" title="Zoom out (more bars in view)"><i data-lucide="zoom-out"></i></button>
         <button class="btn seq-tool-btn" id="pr-zoom-in"  title="Zoom in (fewer bars in view)"><i data-lucide="zoom-in"></i></button>
@@ -385,7 +401,7 @@
     <div class="now-playing">
       <span class="sf2-progress" id="sf2-progress" style="display:none"></span>
     </div>
-    <div class="help"><span class="hint-key" id="hint-space">⇧ SPACE</span> = play · <span id="hint-panic" style="display:none"><span class="hint-key">P</span> = panic · </span><span class="hint-key" id="hint-lr">← →</span> = key · <span class="hint-key" id="hint-ud">↑ ↓</span> = octave</div>
+    <div class="help"><span class="hint-key" id="hint-space">⇧ SPACE</span> = play · <span class="hint-key" id="hint-panic">P</span> = panic ·<span class="hint-key" id="hint-lr">← →</span> = key · <span class="hint-key" id="hint-ud">↑ ↓</span> = octave</div>
   </footer>
 </div>
 
@@ -445,37 +461,43 @@
           <button class="track-fx-out-btn active" data-out="instrument">Instrument</button>
           <button class="track-fx-out-btn" data-out="midi">MIDI</button>
         </div>
-        <label class="track-fx-ch-inline cp-modal-ch-inline hidden">
-          <span>Ch</span>
-          <input type="text" inputmode="numeric" pattern="[0-9]*" class="track-fx-ch-input" id="cp-modal-channel" maxlength="2" value="1">
-        </label>
       </div>
       <div class="track-fx-row track-fx-row-select cp-modal-port-row hidden">
         <label class="track-fx-label">MIDI port</label>
         <select class="track-fx-select" id="cp-modal-port" style="flex:1; width:100%"></select>
+        <label class="track-fx-ch-inline cp-modal-ch-inline">
+          <span>Ch</span>
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="track-fx-ch-input" id="cp-modal-channel" maxlength="2" value="1">
+        </label>
+      </div>
+
+      <!-- 3. Instrument picker — categorized GM dropdown, built dynamically in JS. -->
+      <div class="track-fx-row track-fx-row-select cp-modal-inst-row">
+        <label class="track-fx-label">Instrument</label>
+        <div class="track-fx-inst-picker" id="cp-modal-inst-picker"></div>
         <span class="track-fx-val"></span>
       </div>
 
-      <!-- 3. Instrument picker. -->
-      <div class="track-fx-row track-fx-row-select cp-modal-inst-row">
-        <label class="track-fx-label">Instrument</label>
-        <select class="track-fx-select" id="cp-modal-instrument">
-          <option value="synth">Synth</option>
-          <option value="piano">Piano</option>
-          <option value="epiano" selected>E-Piano</option>
-          <option value="epiano2">E-Piano 2</option>
-          <option value="organ">Organ</option>
-          <option value="strings">Strings</option>
-          <option value="choir">Choir</option>
-          <option value="vibes">Vibraphone</option>
-          <option value="pad">Warm Pad</option>
+      <!-- 4. Waveform picker (synth only). -->
+      <div class="track-fx-row track-fx-row-select cp-modal-waveform-row" id="cp-modal-waveform-row" hidden>
+        <label class="track-fx-label">Waveform</label>
+        <select class="track-fx-select" id="cp-modal-waveform">
+          <option value="sine">Sine</option>
+          <option value="triangle">Triangle</option>
+          <option value="sawtooth">Sawtooth</option>
+          <option value="square">Square</option>
         </select>
         <span class="track-fx-val"></span>
       </div>
 
-      <!-- 4. Sound knob grid — identical to the track-fx modal. -->
+      <!-- 5. Sound knob grid — identical to the track-fx modal. -->
       <div class="cp-modal-sound-row">
         <div class="track-fx-knobs" id="cp-modal-knobs"></div>
+      </div>
+
+      <!-- 6. Reset-to-defaults. -->
+      <div class="track-fx-reset-row cp-modal-reset-row" id="cp-modal-reset-row">
+        <button class="track-fx-reset" type="button" id="cp-modal-reset">Reset to preset defaults</button>
       </div>
     </div>
   </div>

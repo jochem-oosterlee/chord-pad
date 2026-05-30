@@ -394,6 +394,10 @@ const state = {
   // ID of the MIDI output port the chord-pad sends to in MIDI mode. Empty
   // string = use the global default (state.output).
   padMidiPortId: '',
+  // MIDI clock source: if midiClockEnabled, the selected input port drives
+  // the master tempo + transport (start/stop). Empty id = none.
+  midiClockPortId: '',
+  midiClockEnabled: false,
   pitchBendCents: 0,
   instrument: 'epiano',
   bassEnabled: true,
@@ -518,7 +522,14 @@ function _buildAudioCtx() {
     dummy.play().catch(() => {});
     dummy.pause();
   }
-  const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+  // latencyHint: 0 (numeric) is interpreted as "target output latency in
+  // seconds" → asks for the absolute minimum. The string 'interactive' is
+  // looser. sampleRate 48000 matches typical hardware in Chrome and skips
+  // a resampling stage; Firefox doesn't honour custom rates so let it pick.
+  const isFirefox = typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent || '');
+  const ctxOpts = { latencyHint: 0 };
+  if (!isFirefox) ctxOpts.sampleRate = 48000;
+  const ctx = new (window.AudioContext || window.webkitAudioContext)(ctxOpts);
   // Master gain BEFORE the compressor — keeps the summed voice signal
   // below 0 dB so transients on 4+ note chords don't overshoot the
   // compressor input and crackle. Voices connect to ctx._out (this gain).
@@ -910,13 +921,13 @@ function startAudioNote(midiNote, velocity, at = null, autoRelease = null, instr
 // envelope and tuning settings — i.e. how the soundfont author intended.
 
 // FluidR3 is too big (148MB) for GitHub Pages to serve directly (it returns
-// the Git-LFS pointer file instead of the binary), so the canonical copy
-// lives as a GitHub Release asset on this repo. Local file:// / dev-server
-// installs still have the LFS-pulled binary at sf2/FluidR3_GM.sf2, so we
-// fall back to that if the CDN fetch fails or stalls.
+// the Git-LFS pointer instead of the binary), and GitHub Release assets are
+// CORS-blocked for cross-origin fetch. So the canonical copy lives in a
+// public GCS bucket with CORS enabled. Local file:// / dev-server installs
+// still have the LFS-pulled binary at sf2/FluidR3_GM.sf2 as a fallback.
 const SF2_FILES = {
   fluid: {
-    url: 'https://github.com/jochem-oosterlee/chord-pad/releases/download/assets-v1/FluidR3_GM.sf2',
+    url: 'https://storage.googleapis.com/chord-pad-assets-jo/FluidR3_GM.sf2',
     fallbackUrl: 'sf2/FluidR3_GM.sf2',
     sf2: null, loading: null, total: 0, loaded: 0,
   },
@@ -1113,7 +1124,7 @@ function loadSf2(fileKey) {
   const ns = window.SoundFont2;
   const Ctor = typeof ns === 'function' ? ns : (ns && ns.SoundFont2);
   if (typeof Ctor !== 'function') return Promise.resolve(null);
-  sf2UpdateProgress('Loading instruments…');
+  sf2UpdateProgress('Downloading instruments…');
   entry.loading = (async () => {
     const tryUrl = async (url) => {
       const resp = await fetch(url);
@@ -1144,7 +1155,7 @@ function loadSf2(fileKey) {
         entry.loaded += value.length;
         if (total > 0) {
           const pct = Math.round(entry.loaded / total * 100);
-          sf2UpdateProgress(`Loading instruments… ${pct}%`);
+          sf2UpdateProgress(`Downloading instruments… ${pct}%`);
         }
       }
       const buf = await new Blob(chunks).arrayBuffer();
@@ -1156,7 +1167,7 @@ function loadSf2(fileKey) {
       return entry.sf2;
     } catch (err) {
       console.error('SF2 load failed', entry.url, err);
-      sf2UpdateProgress('Instrument load failed');
+      sf2UpdateProgress('Instrument download failed');
       setTimeout(() => sf2UpdateProgress(''), 4000);
       return null;
     }
@@ -1174,6 +1185,33 @@ function sf2BufferFromSample(ctx, sample) {
   for (let i = 0; i < data.length; i++) ch[i] = data[i] / 32768;
   SF2_BUFFER_CACHE.set(sample, buf);
   return buf;
+}
+
+// Eagerly decode every sample referenced by `presetNumber` in `sf2`, in
+// small chunks so the UI doesn't stutter. Without this, the first note of
+// a preset incurs a 5-50 ms decode + cache fill, making playback feel
+// late after an external Start (MIDI Clock) command.
+const _sf2Prewarmed = new Set(); // key: `${sf2-something}:${presetNumber}`
+function prewarmSf2Preset(sf2, presetNumber) {
+  if (!sf2 || presetNumber == null) return;
+  const key = (sf2._cpId || (sf2._cpId = Math.random())) + ':' + presetNumber;
+  if (_sf2Prewarmed.has(key)) return;
+  _sf2Prewarmed.add(key);
+  const ctx = getAudioCtx();
+  let midi = 21;
+  const tick = () => {
+    let count = 0;
+    while (midi <= 108 && count < 6) {
+      try {
+        const kd = sf2.getKeyData(midi, 0, presetNumber);
+        if (kd?.sample) sf2BufferFromSample(ctx, kd.sample);
+      } catch (_) {}
+      midi += 1;
+      count += 1;
+    }
+    if (midi <= 108) setTimeout(tick, 0);
+  };
+  tick();
 }
 
 // Generator-id constants (SF2 spec 2.04)
@@ -1462,7 +1500,13 @@ async function initMIDI() {
     state.midiAccess = await navigator.requestMIDIAccess({ sysex: false });
     refreshOutputs();
     refreshInputs();
-    state.midiAccess.onstatechange = () => { refreshOutputs(); refreshInputs(); };
+    state.midiAccess.onstatechange = () => {
+      refreshOutputs();
+      refreshInputs();
+      // Notify any UI that lists ports (track-fx + chord-pad modals) so they
+      // pick up newly-connected devices (e.g. starting loopMIDI mid-session).
+      document.dispatchEvent(new CustomEvent('chordpad:midi-ports-changed'));
+    };
   } catch (e) {
     showError('Could not get MIDI access: ' + e.message + '. Open this file directly in your browser (not in a sandboxed iframe).');
   }
@@ -1476,6 +1520,9 @@ function refreshOutputs() {
   const previousId = state.output ? state.output.id : null;
   const outputs = Array.from(state.midiAccess.outputs.values());
   state.output = outputs.find(o => o.id === previousId) || outputs[0] || null;
+  // Tell any open modals their port lists may need rebuilding (this fires
+  // on initial MIDI-access init too, not just on hot-plug statechange).
+  document.dispatchEvent(new CustomEvent('chordpad:midi-ports-changed'));
 }
 
 function applyPitchBend(cents) {
@@ -1511,12 +1558,78 @@ function attachMidiInput() {
     if (!t.midiInPortId) continue;
     const inp = state.midiAccess.inputs.get(t.midiInPortId);
     if (!inp) continue;
-    if (!inputsByPort.has(inp.id)) inputsByPort.set(inp.id, { inp, tracks: [] });
+    if (!inputsByPort.has(inp.id)) inputsByPort.set(inp.id, { inp, tracks: [], clock: false });
     inputsByPort.get(inp.id).tracks.push(t);
   }
-  inputsByPort.forEach(({ inp, tracks }) => {
-    inp.onmidimessage = (msg) => onTrackMidiMessage(msg, tracks);
+  // Clock source — possibly on the same port as a track, share the handler.
+  if (state.midiClockEnabled && state.midiClockPortId) {
+    const inp = state.midiAccess.inputs.get(state.midiClockPortId);
+    if (inp) {
+      if (!inputsByPort.has(inp.id)) inputsByPort.set(inp.id, { inp, tracks: [], clock: true });
+      else inputsByPort.get(inp.id).clock = true;
+    }
+  }
+  inputsByPort.forEach(({ inp, tracks, clock }) => {
+    inp.onmidimessage = (msg) => {
+      const status = msg.data[0];
+      if (clock && (status === 0xF8 || status === 0xFA || status === 0xFB || status === 0xFC)) {
+        onMidiClockMessage(status, msg.timeStamp);
+        return;
+      }
+      if (tracks.length) onTrackMidiMessage(msg, tracks);
+    };
   });
+}
+
+// MIDI Clock receiver — 24 PPQ. Uses msg.timeStamp (set when the message
+// was generated upstream, not when we got around to processing it) so
+// rendering jitter doesn't bleed into the BPM estimate. Updates the master
+// tempo lazily (only on significant change) so we're not re-anchoring the
+// scheduler 24 times per quarter note.
+const _midiClock = { intervals: [], lastTickAt: 0, lastAppliedBpm: 0 };
+function onMidiClockMessage(status, ts) {
+  if (status === 0xF8) {
+    if (_midiClock.lastTickAt) {
+      const dt = ts - _midiClock.lastTickAt;
+      if (dt > 0 && dt < 200) {                  // ignore obvious outliers
+        _midiClock.intervals.push(dt);
+        if (_midiClock.intervals.length > 24) _midiClock.intervals.shift();
+        if (_midiClock.intervals.length >= 12) {
+          const avg = _midiClock.intervals.reduce((s, v) => s + v, 0) / _midiClock.intervals.length;
+          const bpm = Math.round(60000 / (avg * 24));
+          if (bpm >= 40 && bpm <= 240 && Math.abs(bpm - _midiClock.lastAppliedBpm) >= 3) {
+            _midiClock.lastAppliedBpm = bpm;
+            state.tempo = bpm;
+            // Light-touch update: refresh the display only. We deliberately
+            // skip applyTempoChange here because it clears pendingTimers /
+            // re-anchors playStartTime — when triggered ~10× during initial
+            // clock detection that cancels the just-scheduled first beat
+            // every time, producing a ~500 ms silence after FA. Letting
+            // seqBeatDur() be read fresh on each scheduling tick lets the
+            // tempo update propagate naturally without yanking timing.
+            const tEl1 = document.getElementById('seq-tempo-val');
+            const tEl2 = document.getElementById('ctrl-tempo');
+            if (tEl1) tEl1.value = bpm;
+            if (tEl2) tEl2.value = bpm;
+          }
+        }
+      }
+    }
+    _midiClock.lastTickAt = ts;
+  } else if (status === 0xFA || status === 0xFB) {
+    // Fresh start: clear sample window so we don't carry stale intervals.
+    _midiClock.intervals.length = 0;
+    _midiClock.lastTickAt = 0;
+    _midiClock.lastAppliedBpm = 0;
+    // Tight start: ~1 ms lead so the scheduler's `t > now` check passes
+    // but we don't sit 50 ms behind the clock master on every beat.
+    if (!SEQ.playing) seqPlay(0.001);
+  } else if (status === 0xFC) {
+    if (SEQ.playing) seqStop();
+    _midiClock.intervals.length = 0;
+    _midiClock.lastTickAt = 0;
+    _midiClock.lastAppliedBpm = 0;
+  }
 }
 
 // Per-track live MIDI input handler. Plays note-on / note-off through the
@@ -1592,15 +1705,45 @@ function sendNoteOff(note, channelOverride = null, portOverride = null) {
   port.send([0x80 | ch, note & 0x7F, 0]);
 }
 function panic() {
-  if (state.output) {
-    for (let ch = 0; ch < 16; ch++) {
-      state.output.send([0xB0 | ch, 123, 0]);
-      state.output.send([0xB0 | ch, 120, 0]);
+  // Send All-Notes-Off + All-Sound-Off on every channel of every known
+  // MIDI output port (global + each per-track port if different).
+  const ports = new Set();
+  if (state.output) ports.add(state.output);
+  if (state.midiAccess) {
+    if (state.padMidiPortId) {
+      const p = state.midiAccess.outputs.get(state.padMidiPortId);
+      if (p) ports.add(p);
+    }
+    for (const t of (SEQ?.tracksList || [])) {
+      if (!t.midiPortId) continue;
+      const p = state.midiAccess.outputs.get(t.midiPortId);
+      if (p) ports.add(p);
     }
   }
+  ports.forEach(port => {
+    for (let ch = 0; ch < 16; ch++) {
+      try { port.send([0xB0 | ch, 123, 0]); port.send([0xB0 | ch, 120, 0]); } catch (_) {}
+    }
+  });
+
+  // Stop chord-pad audio.
   Array.from(state.activeChords.values()).forEach(chord => chord.audioNodes.forEach(stopAudioNote));
   state.activeChords.clear();
   document.querySelectorAll('.pad.active').forEach(p => p.classList.remove('active'));
+
+  // Stop sequencer-scheduled audio nodes + cancel any pending timers.
+  if (typeof SEQ !== 'undefined') {
+    SEQ.activeNodes?.forEach?.(n => { try { stopAudioNote(n); } catch (_) {} });
+    SEQ.activeNodes?.clear?.();
+    SEQ.pendingTimers?.forEach?.(id => clearTimeout(id));
+    SEQ.pendingTimers?.clear?.();
+  }
+  // Stop live MIDI-input audio nodes (per-track input handler).
+  if (typeof _liveTrackNotes !== 'undefined') {
+    _liveTrackNotes.forEach(n => { try { stopAudioNote(n); } catch (_) {} });
+    _liveTrackNotes.clear();
+  }
+
   updateNowPlaying();
   updateSuggestions();
 }
@@ -2930,9 +3073,17 @@ document.getElementById('synth-instrument').addEventListener('change', async (e)
     if (chordHdr) chordHdr.value = next;
   }
   if (next !== 'synth') {
-    applySynthPreset(savedPresets[next] || INSTRUMENT_PRESETS[next]);
+    // Most GM presets (gm<N>) don't have an entry in INSTRUMENT_PRESETS;
+    // fall back to a generic SF2-friendly default so the synth-params
+    // sliders aren't fed `undefined`.
+    const preset = savedPresets[next] || INSTRUMENT_PRESETS[next] || INSTRUMENT_PRESETS.epiano;
+    if (preset) applySynthPreset(preset);
     if (INSTRUMENT_TO_SF2[next] != null) {
-      loadSf2('fluid');
+      await loadSf2('fluid');
+      // Decode samples for this preset upfront so the first note after a
+      // MIDI-clock Start isn't delayed by a lazy SF2 decode.
+      const fluid = SF2_FILES.fluid.sf2;
+      if (fluid) prewarmSf2Preset(fluid, INSTRUMENT_TO_SF2[next]);
     } else {
       await preloadSamples(next);
     }
@@ -2971,10 +3122,159 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
   const outToggle = modal.querySelector('.cp-modal-output-toggle');
   const chWrap    = modal.querySelector('.cp-modal-ch-inline');
   const chInp     = document.getElementById('cp-modal-channel');
-  const instSel   = document.getElementById('cp-modal-instrument');
+  const instPicker = document.getElementById('cp-modal-inst-picker');
   const knobsEl   = document.getElementById('cp-modal-knobs');
   const instRow   = modal.querySelector('.cp-modal-inst-row');
   const soundRow  = modal.querySelector('.cp-modal-sound-row');
+
+  // Build the categorized GM instrument dropdown — same DOM structure as
+  // the track-fx modal so all the existing .track-fx-inst-* styles apply.
+  function buildInstrumentPicker() {
+    if (!instPicker) return;
+    instPicker.innerHTML = `
+      <button type="button" class="track-fx-inst-btn">
+        <span class="track-fx-inst-label">${escapeHtml(instrumentDisplayName(state.instrument))}</span>
+        <span class="track-fx-inst-chev">▾</span>
+      </button>
+      <div class="track-fx-inst-menu" hidden>
+        <button type="button" class="track-fx-inst-item" data-inst="synth">
+          <span class="track-fx-inst-item-name">Synth</span>
+        </button>
+        ${GM_CATEGORIES.map(cat => `
+          <div class="track-fx-inst-cat">
+            <button type="button" class="track-fx-inst-cat-btn">
+              <span>${escapeHtml(cat.name)}</span>
+              <span class="track-fx-inst-cat-chev">›</span>
+            </button>
+            <div class="track-fx-inst-submenu" hidden>
+              ${cat.presets.map(p => {
+                const id = SF2_PRESET_TO_SHORT[p.n] || ('gm' + p.n);
+                return `<button type="button" class="track-fx-inst-item" data-inst="${id}">
+                  <span class="track-fx-inst-item-name">${escapeHtml(p.name)}</span>
+                </button>`;
+              }).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+    const instBtn   = instPicker.querySelector('.track-fx-inst-btn');
+    const instMenu  = instPicker.querySelector('.track-fx-inst-menu');
+    const instLabel = instPicker.querySelector('.track-fx-inst-label');
+    const closeMenu = () => {
+      instMenu.hidden = true;
+      document.querySelectorAll('.track-fx-inst-submenu').forEach(sm => sm.hidden = true);
+    };
+    instBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      instMenu.hidden = !instMenu.hidden;
+      if (instMenu.hidden) { closeMenu(); return; }
+      // Mark current selection.
+      document.querySelectorAll('.track-fx-inst-item.selected').forEach(el => el.classList.remove('selected'));
+      document.querySelectorAll(`.track-fx-inst-item[data-inst="${state.instrument}"]`).forEach(el => el.classList.add('selected'));
+      const curItem = document.querySelector(`.track-fx-inst-item[data-inst="${state.instrument}"]`);
+      if (curItem) {
+        let ownerCat = curItem.closest('.track-fx-inst-cat');
+        if (!ownerCat) {
+          instMenu.querySelectorAll('.track-fx-inst-cat').forEach(c => {
+            if (c._submenu && c._submenu.contains(curItem)) ownerCat = c;
+          });
+        }
+        if (ownerCat) {
+          ownerCat.scrollIntoView({ block: 'nearest' });
+          const subm = ownerCat._submenu;
+          if (subm) {
+            hideOtherSubmenus(subm);
+            positionSubmenu(ownerCat, subm);
+            subm.hidden = false;
+            curItem.scrollIntoView({ block: 'nearest' });
+          }
+        } else {
+          curItem.scrollIntoView({ block: 'nearest' });
+        }
+      }
+    });
+    const positionSubmenu = (catEl, submenu) => {
+      if (submenu.parentElement !== document.body) document.body.appendChild(submenu);
+      const menuRect = instMenu.getBoundingClientRect();
+      const catRect  = catEl.getBoundingClientRect();
+      const subW = 170;
+      let left = menuRect.right + 2;
+      if (left + subW > window.innerWidth - 8) {
+        left = Math.max(8, menuRect.left - subW - 2);
+      }
+      submenu.style.left = left + 'px';
+      submenu.style.top  = catRect.top + 'px';
+    };
+    instMenu.querySelectorAll('.track-fx-inst-cat').forEach(cat => {
+      cat._submenu = cat.querySelector('.track-fx-inst-submenu');
+    });
+    const hideOtherSubmenus = (keep) => {
+      document.querySelectorAll('.track-fx-inst-submenu').forEach(sm => {
+        if (sm !== keep) sm.hidden = true;
+      });
+    };
+    instMenu.querySelectorAll(':scope > .track-fx-inst-item').forEach(item => {
+      item.addEventListener('mouseenter', () => hideOtherSubmenus(null));
+    });
+    instMenu.querySelectorAll('.track-fx-inst-cat-btn').forEach(btn => {
+      const cat = btn.closest('.track-fx-inst-cat');
+      const submenu = cat._submenu;
+      cat.addEventListener('mouseenter', () => {
+        hideOtherSubmenus(submenu);
+        positionSubmenu(cat, submenu);
+        submenu.hidden = false;
+      });
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (submenu.hidden) { hideOtherSubmenus(submenu); positionSubmenu(cat, submenu); submenu.hidden = false; }
+        else submenu.hidden = true;
+      });
+      submenu.addEventListener('mouseenter', () => { hideOtherSubmenus(submenu); submenu.hidden = false; });
+    });
+    instMenu.addEventListener('mouseleave', () => {
+      setTimeout(() => {
+        document.querySelectorAll('.track-fx-inst-submenu').forEach(sm => {
+          if (!sm.matches(':hover')) sm.hidden = true;
+        });
+      }, 100);
+    });
+    setTimeout(() => {
+      document.addEventListener('mousedown', function _outside(ev) {
+        const inSubmenu = ev.target.closest && ev.target.closest('.track-fx-inst-submenu');
+        if (!instPicker.contains(ev.target) && !inSubmenu) {
+          closeMenu();
+          document.removeEventListener('mousedown', _outside);
+        }
+      });
+    }, 0);
+    instMenu.querySelectorAll('.track-fx-inst-item').forEach(item => {
+      item.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        closeMenu();
+        const nextInst = item.dataset.inst;
+        instLabel.textContent = item.querySelector('.track-fx-inst-item-name').textContent;
+        // Hand the change off to the existing #synth-instrument change
+        // handler so sample-loading + state.synth reset run as usual.
+        const sel = document.getElementById('synth-instrument');
+        if (sel) {
+          // The hidden select may not have an option for every GM short-id;
+          // add one on the fly so .value = nextInst sticks.
+          if (!Array.from(sel.options).some(o => o.value === nextInst)) {
+            const opt = document.createElement('option');
+            opt.value = nextInst;
+            opt.textContent = instrumentDisplayName(nextInst);
+            sel.appendChild(opt);
+          }
+          sel.value = nextInst;
+          sel.dispatchEvent(new Event('change'));
+        } else {
+          state.instrument = nextInst;
+        }
+        rebuildSound();
+      });
+    });
+  }
   const portRow   = modal.querySelector('.cp-modal-port-row');
   const portSel   = document.getElementById('cp-modal-port');
   function rebuildPortList() {
@@ -2986,6 +3286,19 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
   portSel?.addEventListener('change', () => {
     state.padMidiPortId = portSel.value;
     seqSave();
+  });
+  // Refresh port list when devices come/go (e.g. starting loopMIDI mid-session).
+  document.addEventListener('chordpad:midi-ports-changed', () => {
+    if (!modal.hidden) rebuildPortList();
+    // Also re-render the per-track FX modal if it's open — its port lists
+    // are built once inside openTrackFxModal so the easiest refresh is a
+    // full rebuild keyed off the visible track.
+    const tfx = document.getElementById('track-fx-modal');
+    if (tfx && !tfx.hidden) {
+      const id = tfx.dataset.trackId;
+      const trk = id ? trackById(id) : null;
+      if (trk) openTrackFxModal(trk);
+    }
   });
 
   // Build one sound-param knob bound to state.synth. Mirrors the per-track
@@ -3055,6 +3368,22 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
     if (!knobsEl) return;
     knobsEl.innerHTML = '';
     const isSynth = state.instrument === 'synth';
+    // Show waveform picker only for the synth voice.
+    const wfRow = document.getElementById('cp-modal-waveform-row');
+    const wfSel = document.getElementById('cp-modal-waveform');
+    if (wfRow) wfRow.hidden = !isSynth;
+    if (wfSel && isSynth) {
+      wfSel.value = state.synth.waveform || 'sine';
+      if (!wfSel.dataset.bound) {
+        wfSel.dataset.bound = '1';
+        wfSel.addEventListener('change', () => {
+          state.synth.waveform = wfSel.value;
+          // Mirror the change to the hidden #synth-waveform if present.
+          const sw = document.getElementById('synth-waveform');
+          if (sw) { sw.value = wfSel.value; sw.dispatchEvent(new Event('change')); }
+        });
+      }
+    }
     for (const [key, , , , , , synthOnly] of TRACK_FX_FIELDS) {
       if (synthOnly && !isSynth) continue;
       knobsEl.appendChild(makeCpKnob(key).cell);
@@ -3075,6 +3404,10 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
     if (portRow) portRow.classList.toggle('hidden', !midi);
     if (instRow)  instRow.style.display  = midi ? 'none' : '';
     if (soundRow) soundRow.style.display = midi ? 'none' : '';
+    const wfRow    = document.getElementById('cp-modal-waveform-row');
+    const resetRow = document.getElementById('cp-modal-reset-row');
+    if (wfRow)    wfRow.style.display    = midi ? 'none' : '';
+    if (resetRow) resetRow.style.display = midi ? 'none' : '';
   }
   outToggle?.querySelectorAll('.track-fx-out-btn').forEach(b => {
     b.addEventListener('click', () => {
@@ -3094,21 +3427,32 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
     state.padChannel = v - 1;
     seqSave();
   });
-  // Instrument select inside the modal — defer to the existing #synth-instrument
-  // change handler by syncing its value and dispatching change.
-  instSel?.addEventListener('change', () => {
-    const sel = document.getElementById('synth-instrument');
-    if (!sel) return;
-    sel.value = instSel.value;
-    sel.dispatchEvent(new Event('change'));
-    rebuildSound();
-  });
+  // Reset-to-preset wiring (one-time).
+  const resetBtn = document.getElementById('cp-modal-reset');
+  if (resetBtn && !resetBtn.dataset.bound) {
+    resetBtn.dataset.bound = '1';
+    resetBtn.addEventListener('click', () => {
+      const preset = INSTRUMENT_PRESETS?.[state.instrument] || INSTRUMENT_PRESETS?.epiano;
+      if (!preset) return;
+      // Reset state.synth params; mirror through the existing
+      // applySynthPreset which also updates the hidden synth-* inputs.
+      applySynthPreset(preset);
+      if (state.instrument === 'synth' && preset.waveform) {
+        state.synth.waveform = preset.waveform;
+        const wfSel = document.getElementById('cp-modal-waveform');
+        if (wfSel) wfSel.value = preset.waveform;
+      }
+      rebuildSound();
+    });
+  }
 
   const open = () => {
-    if (instSel) instSel.value = state.instrument;
+    buildInstrumentPicker();
     rebuildPortList();
     syncOutput();
     rebuildSound();
+    // Update reset-button label to reflect current instrument.
+    if (resetBtn) resetBtn.textContent = `Reset to ${instrumentDisplayName(state.instrument)} defaults`;
     modal.hidden = false;
     refreshLucide();
   };
@@ -3571,7 +3915,7 @@ document.addEventListener('keydown', (e) => {
   if (heldKeys.has(key)) return;
   heldKeys.add(key);
   if (key === ' ' && e.shiftKey) { e.preventDefault(); flashHint('hint-space'); if (SEQ.playing) seqStop(); else seqPlay(); return; }
-  if (key === 'p') { e.preventDefault(); panic(); return; }
+  if (key === 'p') { e.preventDefault(); flashHint('hint-panic'); panic(); return; }
   if (key === 'arrowleft')  { e.preventDefault(); flashHint('hint-lr'); setKey(state.currentTemplate, (state.keys[state.currentTemplate] + 11) % 12); return; }
   if (key === 'arrowright') { e.preventDefault(); flashHint('hint-lr'); setKey(state.currentTemplate, (state.keys[state.currentTemplate] + 1)  % 12); return; }
   if (key === 'arrowdown')  { e.preventDefault(); flashHint('hint-ud'); state.octave = Math.max(0, state.octave - 1); updateControlDisplays(); rebuildBoard(); return; }
@@ -4337,13 +4681,11 @@ function resolveTrack(ref) {
 function seqTrackSynth(ref) {
   const t = resolveTrack(ref);
   if (!t) return state.synth;
-  if (t === firstTrackOfKind('chord')) return state.synth; // pad-linked
   return t.synth || state.synth;
 }
 function seqTrackInstrument(ref) {
   const t = resolveTrack(ref);
   if (!t) return state.instrument;
-  if (t === firstTrackOfKind('chord')) return state.instrument; // pad-linked
   return t.instrument;
 }
 
@@ -4362,7 +4704,14 @@ function seqTrackVel(ref, base) {
 // Stub — kept so the (now no-op) call sites don't throw if invoked.
 function sendTrackChannelVolume() {}
 
-function seqBeatDur() { return 60 / state.tempo; }
+function seqBeatDur() {
+  // tempo = BPM of a *quarter* note. In time signatures with eighth-note
+  // beats (currently just 6/8 in our options list) each beat is half as
+  // long. The dropdown stores only the numerator on state.beatsPerBar; 6
+  // uniquely identifies 6/8 in our supported set.
+  const eighthBeat = state.beatsPerBar === 6;
+  return (eighthBeat ? 30 : 60) / state.tempo;
+}
 
 function seqTimeout(fn, delay) {
   const id = setTimeout(() => { SEQ.pendingTimers.delete(id); fn(); }, delay);
@@ -4649,19 +4998,6 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
     e.preventDefault();
     seqCheckpoint();
     block.setPointerCapture(e.pointerId);
-    if (state.audioEnabled) {
-      let previewNodes;
-      if (isMidi || isNote) {
-        previewNodes = [startAudioNote(item.midi, state.velocity)];
-      } else {
-        const kr = item.keyRoot !== undefined ? item.keyRoot : state.keys[state.currentTemplate];
-        previewNodes = chordToMidiNotes(kr, state.octave, item.interval, item.q)
-          .map(n => startAudioNote(n, state.velocity));
-      }
-      const stopPreview = () => previewNodes.forEach(stopAudioNote);
-      block.addEventListener('pointerup',     stopPreview, { once: true });
-      block.addEventListener('pointercancel', stopPreview, { once: true });
-    }
     const startX = e.clientX, startBeat = item.start;
     const snap = SEQ.arrSnap ? SEQ.arrSnapVal : (1 / BEAT_PX);
     const sourceLane  = block.parentElement;
@@ -4670,6 +5006,38 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
     const ownerTrack =
       (sourceLane && sourceLane.dataset && sourceLane.dataset.trackId && trackById(sourceLane.dataset.trackId)) ||
       (isMidi ? firstTrackOfKind('free') : isNote ? null : firstTrackOfKind('chord'));
+    // Audible preview routed through the owner track's output (MIDI or
+    // in-app instrument) so what you hear matches sequencer playback.
+    {
+      const previewMidi = [];
+      if (isMidi || isNote) {
+        previewMidi.push(item.midi);
+      } else {
+        const kr = item.keyRoot !== undefined ? item.keyRoot : state.keys[state.currentTemplate];
+        chordToMidiNotes(kr, state.octave, item.interval, item.q).forEach(m => previewMidi.push(m));
+      }
+      if (previewMidi.length && ownerTrack && ownerTrack.output === 'midi') {
+        const port = midiPortById(ownerTrack.midiPortId);
+        const vel  = seqTrackVel(ownerTrack, state.velocity);
+        previewMidi.forEach(m => sendNoteOn(m, vel, ownerTrack.channel, port));
+        const stop = () => previewMidi.forEach(m => sendNoteOff(m, ownerTrack.channel, port));
+        block.addEventListener('pointerup',     stop, { once: true });
+        block.addEventListener('pointercancel', stop, { once: true });
+      } else if (previewMidi.length && state.audioEnabled) {
+        const inst  = ownerTrack ? seqTrackInstrument(ownerTrack) : null;
+        const synth = ownerTrack ? ownerTrack.synth : null;
+        const previewNodes = [];
+        previewMidi.forEach(m => {
+          let node;
+          if (synth) withSynth(synth, () => { node = startAudioNote(m, state.velocity, null, null, inst); });
+          else node = startAudioNote(m, state.velocity, null, null, inst);
+          if (node) previewNodes.push(node);
+        });
+        const stop = () => previewNodes.forEach(stopAudioNote);
+        block.addEventListener('pointerup',     stop, { once: true });
+        block.addEventListener('pointercancel', stop, { once: true });
+      }
+    }
     const items = ownerTrack ? ownerTrack.items : (isMidi ? SEQ.midiItems : isNote ? SEQ.noteItems : SEQ.items);
     let cloneCreated = false;
     let moved = false;
@@ -4785,6 +5153,8 @@ function seqSave() {
       padOutput: state.padOutput,
       padChannel: state.padChannel,
       padMidiPortId: state.padMidiPortId,
+      midiClockPortId: state.midiClockPortId,
+      midiClockEnabled: state.midiClockEnabled,
       prBodyHeight: SEQ.prBodyHeight,
       visualLatencyMs: SEQ.visualLatencyMs,
     }));
@@ -4805,6 +5175,8 @@ function seqLoad() {
     if (d.padOutput === 'midi' || d.padOutput === 'instrument') state.padOutput = d.padOutput;
     if (typeof d.padChannel === 'number') state.padChannel = Math.max(0, Math.min(15, d.padChannel));
     if (typeof d.padMidiPortId === 'string') state.padMidiPortId = d.padMidiPortId;
+    if (typeof d.midiClockPortId === 'string') state.midiClockPortId = d.midiClockPortId;
+    if (typeof d.midiClockEnabled === 'boolean') state.midiClockEnabled = d.midiClockEnabled;
     if (typeof d.prBodyHeight  === 'number')  SEQ.prBodyHeight    = d.prBodyHeight;
     if (typeof d.visualLatencyMs === 'number') SEQ.visualLatencyMs = d.visualLatencyMs;
 
@@ -4854,12 +5226,12 @@ function seqLoad() {
 
 // Fill any uninitialised per-track synth with a clone of the chord-pad
 // defaults. Run after seqLoad so persisted track synths survive. The
-// FIRST chord track is pad-linked — its `synth` stays null on purpose.
+// Every track has its own synth dict (chord-pad's state.synth is separate
+// from the chord-track now). Seed missing synths from a sensible default.
 function seqInitTrackSynths() {
-  const firstChord = firstTrackOfKind('chord');
+  const epiano = INSTRUMENT_PRESETS?.epiano || state.synth;
   for (const tr of SEQ.tracksList) {
-    if (tr === firstChord) continue;
-    if (!tr.synth) tr.synth = { ...state.synth };
+    if (!tr.synth) tr.synth = { ...epiano };
   }
   // Sync the id counter past any tr-N loaded from localStorage so freshly
   // added tracks never collide with existing ones.
@@ -5144,8 +5516,15 @@ function seqMakeRollNote(item, idx, topMidi, botMidi, cfg) {
     e.preventDefault();
     block.setPointerCapture(e.pointerId);
     if (state.audioEnabled) {
-      const previewNode = startAudioNote(item.midi, state.velocity);
-      const stopPreview = () => stopAudioNote(previewNode);
+      // Use the owning track's instrument if we can resolve it from the lane.
+      const laneEl = block.parentElement;
+      const ot    = (laneEl && laneEl.dataset && laneEl.dataset.trackId && trackById(laneEl.dataset.trackId)) || null;
+      const inst  = ot ? seqTrackInstrument(ot) : null;
+      const synth = ot ? ot.synth : null;
+      let previewNode;
+      if (synth) withSynth(synth, () => { previewNode = startAudioNote(item.midi, state.velocity, null, null, inst); });
+      else previewNode = startAudioNote(item.midi, state.velocity, null, null, inst);
+      const stopPreview = () => previewNode && stopAudioNote(previewNode);
       block.addEventListener('pointerup',     stopPreview, { once: true });
       block.addEventListener('pointercancel', stopPreview, { once: true });
     }
@@ -5321,7 +5700,6 @@ function seqTickChordTrack(track, now, bd, horizon) {
     const audible   = seqTrackAudible(track);
     const vel       = seqTrackVel(track, state.velocity);
     const inst      = seqTrackInstrument(track);
-    const padLinked = (track === firstTrackOfKind('chord'));
 
     const useInstrument = track.output !== 'midi';
     const useMidi       = track.output === 'midi';
@@ -5336,7 +5714,7 @@ function seqTickChordTrack(track, now, bd, horizon) {
           seqTimeout(() => { stopAudioNote(bassNode); SEQ.activeNodes.delete(bassNode); }, offDelay);
         }
       };
-      if (padLinked) fire(); else withSynth(track.synth, fire);
+      withSynth(track.synth, fire);
     }
     const capturedNotes = [...notes], capturedBass = bassNote;
     const trkPort = useMidi ? midiPortById(track.midiPortId) : null;
@@ -5826,9 +6204,13 @@ function startPrecount(onDone) {
   SEQ.playing = true;
 }
 
-function seqPlay() {
+function seqPlay(leadSec) {
   const ctx = getAudioCtx();
-  const t0  = ctx.currentTime + 0.05;
+  // Default lead-in of 50 ms gives the scheduler safety margin. MIDI-clock
+  // syncing passes a much smaller lead (~5 ms) so we line up with the
+  // external master's beat 1 rather than trailing it by 50 ms.
+  const lead = typeof leadSec === 'number' ? leadSec : 0.05;
+  const t0   = ctx.currentTime + lead;
 
   if (REC.armed && PRECOUNT.enabled) {
     startPrecount((t0actual) => {
@@ -5842,6 +6224,9 @@ function seqPlay() {
   seqInitPlay(t0);
   metroRun(t0, SEQ.animBeat ?? SEQ.loopStart);
   if (REC.armed) recActivate(t0);
+  // Don't wait for the next 25ms tick — schedule anything inside the LOOKAHEAD
+  // window right now so beat 0 actually fires close to t0.
+  seqTick();
 }
 
 function seqStop() {
@@ -7210,6 +7595,46 @@ function seqRenderRuler() {
   }, { passive: false });
 })();
 // Scroll-on-hover for the two tempo inputs (header settings + track toolbar).
+// MIDI Clock sync controls (toggle + port select next to tempo).
+(function _initMidiClockSync() {
+  const toggle = document.getElementById('seq-clock-toggle');
+  const sel    = document.getElementById('seq-clock-port');
+  if (!toggle || !sel) return;
+  const sync = () => {
+    toggle.classList.toggle('active', !!state.midiClockEnabled);
+    toggle.textContent = state.midiClockEnabled ? 'Sync ON' : 'Sync';
+    const tempoInputs = document.querySelectorAll('#ctrl-tempo, #seq-tempo-val');
+    tempoInputs.forEach(el => el.disabled = !!state.midiClockEnabled);
+    sel.value = state.midiClockPortId || '';
+  };
+  const rebuild = () => {
+    const inputs = state.midiAccess ? Array.from(state.midiAccess.inputs.values()) : [];
+    sel.innerHTML = '<option value="">— none —</option>'
+      + inputs.map(p => `<option value="${p.id}"${p.id === (state.midiClockPortId || '') ? ' selected' : ''}>${p.name}</option>`).join('');
+    sync();
+  };
+  rebuild();
+  document.addEventListener('chordpad:midi-ports-changed', rebuild);
+  toggle.addEventListener('click', () => {
+    state.midiClockEnabled = !state.midiClockEnabled;
+    if (state.midiClockEnabled && !state.midiClockPortId) {
+      // Auto-pick the first available input if none chosen yet.
+      const first = state.midiAccess ? state.midiAccess.inputs.values().next().value : null;
+      if (first) state.midiClockPortId = first.id;
+    }
+    _midiClock.intervals.length = 0; _midiClock.lastTickAt = 0;
+    attachMidiInput();
+    sync();
+    seqSave();
+  });
+  sel.addEventListener('change', () => {
+    state.midiClockPortId = sel.value;
+    _midiClock.intervals.length = 0; _midiClock.lastTickAt = 0;
+    attachMidiInput();
+    seqSave();
+  });
+})();
+
 (function _initTempoWheel() {
   const ids = ['ctrl-tempo', 'seq-tempo-val'];
   for (const id of ids) {
@@ -7246,25 +7671,11 @@ document.getElementById('seq-loop-btn').addEventListener('click', () => {
   seqUpdateLoopVisible();
   seqSave();
 
-  if (SEQ.loop && SEQ.playing) {
-    // pendingTime may be Infinity (no-loop exhausted) — restart scheduling from next cycle
-    const ctx   = getAudioCtx();
-    const bd    = seqBeatDur();
-    const total = seqTotalDur();
-    const tRef  = SEQ.playStartTime + 0.05;
-    const now   = ctx.currentTime;
-    const elapsed = Math.max(0, now - tRef);
-    const nextCycle = tRef + (Math.floor(elapsed / total) + 1) * total;
-    SEQ.cycleStart     = nextCycle;
-    SEQ.pendingIdx     = 0;
-    SEQ.pendingTime    = SEQ.items.length     > 0 ? nextCycle + SEQ.items[0].start     * bd : Infinity;
-    SEQ.noteCycleStart = nextCycle;
-    SEQ.notePendingIdx  = 0;
-    SEQ.notePendingTime = SEQ.noteItems.length > 0 ? nextCycle + SEQ.noteItems[0].start * bd : Infinity;
-    SEQ.midiCycleStart  = nextCycle;
-    SEQ.midiPendingIdx  = 0;
-    SEQ.midiPendingTime = SEQ.midiItems.length > 0 ? nextCycle + SEQ.midiItems[0].start * bd : Infinity;
-  }
+  // Refresh per-track scheduling so playback either picks up the loop right
+  // away (turning ON) or stops repeating at the loop end (turning OFF).
+  // Without this, tracks whose pendingTime was Infinity (= "done playing")
+  // stay silent when loop is enabled mid-session.
+  if (SEQ.playing) seqLoopBaseChangedResync();
 });
 
 
@@ -7402,6 +7813,7 @@ function openTrackFxModal(track) {
   const body  = document.getElementById('track-fx-body');
   const title = document.getElementById('track-fx-title');
   if (!modal || !body || !title) return;
+  modal.dataset.trackId = track.id;
   // Show the modal up front. (Used to be at the end of the function, but the
   // MIDI-output branch returns early before that line, which left the modal
   // invisible the first time you opened it on a MIDI-routed track.)
@@ -7492,10 +7904,6 @@ function openTrackFxModal(track) {
       <button class="track-fx-out-btn${track.output !== 'midi' ? ' active' : ''}" data-out="instrument">Instrument</button>
       <button class="track-fx-out-btn${track.output === 'midi' ? ' active' : ''}" data-out="midi">MIDI</button>
     </div>
-    <label class="track-fx-ch-inline${track.output === 'midi' ? '' : ' hidden'}">
-      <span>Ch</span>
-      <input type="text" inputmode="numeric" pattern="[0-9]*" class="track-fx-ch-input" maxlength="2" value="${track.channel + 1}">
-    </label>
   `;
   // MIDI output port selector — second row under Output when MIDI mode.
   const portRow = document.createElement('div');
@@ -7508,8 +7916,19 @@ function openTrackFxModal(track) {
       <option value="">— default —</option>
       ${ports.map(p => `<option value="${escapeHtml(p.id)}"${p.id === (track.midiPortId || '') ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
     </select>
-    <span class="track-fx-val"></span>
+    <label class="track-fx-ch-inline">
+      <span>Ch</span>
+      <input type="text" inputmode="numeric" pattern="[0-9]*" class="track-fx-ch-input" maxlength="2" value="${track.channel + 1}">
+    </label>
   `;
+  // Channel input lives on the port row now; wire it.
+  portRow.querySelector('.track-fx-ch-input')?.addEventListener('change', (e) => {
+    seqCheckpoint();
+    const v = Math.max(1, Math.min(16, parseInt(e.target.value, 10) || 1));
+    e.target.value = v;
+    track.channel = v - 1;
+    seqSave();
+  });
   portRow.querySelector('select').addEventListener('change', (e) => {
     seqCheckpoint();
     track.midiPortId = e.target.value;
@@ -7519,6 +7938,7 @@ function openTrackFxModal(track) {
   // an external keyboard through its own instrument. Empty = no input.
   const inRow = document.createElement('div');
   inRow.className = 'track-fx-row track-fx-row-select track-fx-in-port-row';
+  if (track.output !== 'midi') inRow.classList.add('hidden');
   const inputs = state.midiAccess ? Array.from(state.midiAccess.inputs.values()) : [];
   inRow.innerHTML = `
     <label class="track-fx-label">MIDI in</label>
@@ -7546,14 +7966,6 @@ function openTrackFxModal(track) {
       seqRenderTrack(track);     // header doesn't show output anymore, but keep things fresh
     });
   });
-  const chInp = outRow.querySelector('.track-fx-ch-input');
-  chInp.addEventListener('change', () => {
-    seqCheckpoint();
-    const v = Math.max(1, Math.min(16, parseInt(chInp.value) || 1));
-    chInp.value = v;
-    track.channel = v - 1;
-    seqSave();
-  });
   body.appendChild(outRow);
   body.appendChild(portRow);
   body.appendChild(inRow);
@@ -7569,10 +7981,8 @@ function openTrackFxModal(track) {
 
   // Instrument picker at the top of the modal — same dropdown options as
   // were in the sidebar header. For the pad-linked first chord track this
-  // routes through the global instrument so the chord-pad voice stays in
-  // sync; for any other track it just sets track.instrument and reloads
-  // the relevant sample bank.
-  const padLinked = (track === firstTrackOfKind('chord'));
+  // Each track has its own instrument selection — chord-pad widget voice
+  // and chord-track voice are independent.
   const instRow = document.createElement('div');
   instRow.className = 'track-fx-row track-fx-row-select';
   const curInst = seqTrackInstrument(track);
@@ -7716,21 +8126,19 @@ function openTrackFxModal(track) {
   }, 0);
   const handleInstChange = (nextInst) => {
     seqCheckpoint();
-    if (padLinked) {
-      const prevTarget = state.synthEditTarget;
-      state.synthEditTarget = 'pad';
-      const gDD = document.getElementById('synth-instrument');
-      if (gDD) { gDD.value = nextInst; gDD.dispatchEvent(new Event('change')); }
-      if (prevTarget !== 'pad') setSynthEditTarget(prevTarget);
-    } else {
-      track.instrument = nextInst;
-      // Reset synth params to the new instrument's preset defaults so the
-      // sound matches expectations right after switching.
-      const newPreset = INSTRUMENT_PRESETS?.[nextInst];
-      if (newPreset) track.synth = { ...newPreset };
-      seqSave();
-      if (INSTRUMENT_TO_SF2[nextInst] != null) loadSf2('fluid');
-      else if (nextInst !== 'synth') preloadSamples(nextInst);
+    track.instrument = nextInst;
+    // Reset synth params to the new instrument's preset defaults so the
+    // sound matches expectations right after switching.
+    const newPreset = INSTRUMENT_PRESETS?.[nextInst];
+    if (newPreset) track.synth = { ...newPreset };
+    seqSave();
+    if (INSTRUMENT_TO_SF2[nextInst] != null) {
+      loadSf2('fluid').then(() => {
+        const fluid = SF2_FILES.fluid.sf2;
+        if (fluid) prewarmSf2Preset(fluid, INSTRUMENT_TO_SF2[nextInst]);
+      });
+    } else if (nextInst !== 'synth') {
+      preloadSamples(nextInst);
     }
     // Reopen modal so the synth-only sliders refresh for the new instrument.
     openTrackFxModal(track);
@@ -7922,7 +8330,7 @@ function ensureTrackHeader(track) {
 function populateTrackHeader(label, track) {
   const padLinked = (track === firstTrackOfKind('chord'));
   const convertBtn = track.kind === 'chord'
-    ? `<button class="seq-th-convert" title="Convert to Free (bake chords to notes — one way)">→ Free</button>`
+    ? `<button class="seq-th-convert" title="Convert to Free (bake chords to notes — one way)"><i data-lucide="arrow-right-from-line"></i></button>`
     : '';
   label.innerHTML = `
     <div class="seq-th-row seq-th-top">
@@ -7956,6 +8364,7 @@ function populateTrackHeader(label, track) {
 
   label.querySelector('.seq-th-fx')?.addEventListener('click', (e) => {
     e.stopPropagation();
+    e.currentTarget.blur();  // drop focus so :hover/focus accent doesn't linger after the modal opens
     openTrackFxModal(track);
   });
   label.querySelector('.seq-th-collapse').addEventListener('click', (e) => {
@@ -8597,6 +9006,26 @@ function _prMakeNote(track, clip, note, idx, hi) {
     }
     el.setPointerCapture(e.pointerId);
     seqCheckpoint();
+    // Audible preview while the note is held — routes through the same
+    // path as playback (in-app instrument or external MIDI) so you hear
+    // exactly what this note will sound like at playback time.
+    if (track) {
+      if (track.output === 'midi') {
+        const port = midiPortById(track.midiPortId);
+        const vel  = seqTrackVel(track, state.velocity);
+        sendNoteOn(note.midi, vel, track.channel, port);
+        const stop = () => sendNoteOff(note.midi, track.channel, port);
+        el.addEventListener('pointerup',     stop, { once: true });
+        el.addEventListener('pointercancel', stop, { once: true });
+      } else if (state.audioEnabled) {
+        const inst = seqTrackInstrument(track);
+        let previewNode;
+        withSynth(track.synth, () => { previewNode = startAudioNote(note.midi, state.velocity, null, null, inst); });
+        const stop = () => { if (previewNode) stopAudioNote(previewNode); };
+        el.addEventListener('pointerup',     stop, { once: true });
+        el.addEventListener('pointercancel', stop, { once: true });
+      }
+    }
     const body = el.parentElement;
     const startX = e.clientX, startY = e.clientY;
     // Build the move group: every note in the prSelection that belongs to
@@ -9784,6 +10213,38 @@ function seqMakeClipBlock(track, clip, idx) {
     e.preventDefault();
     seqCheckpoint();
     try { block.setPointerCapture(e.pointerId); } catch (_) {}
+    // Audible preview of the clip's first downbeat — routed through the
+    // same target as playback (track instrument OR external MIDI).
+    if (track) {
+      const previewMidi = [];
+      if (track.kind === 'free' && Array.isArray(clip.notes)) {
+        clip.notes.filter(n => (n.start || 0) < 0.05).forEach(n => previewMidi.push(n.midi));
+      } else if (clip.interval !== undefined) {
+        const kr = clip.keyRoot !== undefined ? clip.keyRoot : state.keys[state.currentTemplate];
+        chordToMidiNotes(kr, state.octave, clip.interval, clip.q).forEach(m => previewMidi.push(m));
+      }
+      if (previewMidi.length) {
+        if (track.output === 'midi') {
+          const port = midiPortById(track.midiPortId);
+          const vel  = seqTrackVel(track, state.velocity);
+          previewMidi.forEach(m => sendNoteOn(m, vel, track.channel, port));
+          const stop = () => previewMidi.forEach(m => sendNoteOff(m, track.channel, port));
+          block.addEventListener('pointerup',     stop, { once: true });
+          block.addEventListener('pointercancel', stop, { once: true });
+        } else if (state.audioEnabled) {
+          const inst = seqTrackInstrument(track);
+          const previewNodes = [];
+          previewMidi.forEach(m => {
+            let node;
+            withSynth(track.synth, () => { node = startAudioNote(m, state.velocity, null, null, inst); });
+            if (node) previewNodes.push(node);
+          });
+          const stop = () => previewNodes.forEach(stopAudioNote);
+          block.addEventListener('pointerup',     stop, { once: true });
+          block.addEventListener('pointercancel', stop, { once: true });
+        }
+      }
+    }
     const startX = e.clientX, startY = e.clientY, startBeat = clip.start;
     const snap = SEQ.arrSnap ? SEQ.arrSnapVal : (1 / BEAT_PX);
     const sourceLane = block.parentElement;
@@ -10049,65 +10510,22 @@ const SNAP_VALUES = [
 let _snapIdx = SNAP_VALUES.findIndex(s => s.val === SEQ.rollSnapVal);
 if (_snapIdx < 0) _snapIdx = 3;
 
-// Piano-roll snap knob (mirrors the arrangement snap knob below).
-const _prSnapKnob = document.getElementById('seq-pr-snap-knob');
-function syncPrSnapKnob() {
-  if (!_prSnapKnob) return;
-  const n = SNAP_VALUES.length;
-  const frac = n > 1 ? _snapIdx / (n - 1) : 0;
-  _prSnapKnob.style.setProperty('--ang', (-135 + frac * 270) + 'deg');
-  _prSnapKnob.classList.toggle('off', !SEQ.rollSnap);
-  const tipEl = document.getElementById('seq-pr-snap-knob-tip');
-  if (tipEl) tipEl.textContent = SNAP_VALUES[_snapIdx].label;
-}
-syncPrSnapKnob();
-if (_prSnapKnob) {
-  let _sx = 0, _sy = 0, _sIdx = 0, _moved = false;
-  let _hideT = null, _hovered = false;
-  const showTip = () => { _prSnapKnob.classList.add('tip-show'); if (_hideT) clearTimeout(_hideT); };
-  const hideTip = (ms = 600) => {
-    if (_hideT) clearTimeout(_hideT);
-    _hideT = setTimeout(() => { if (!_hovered) _prSnapKnob.classList.remove('tip-show'); }, ms);
-  };
-  _prSnapKnob.addEventListener('pointerenter', () => { _hovered = true; showTip(); });
-  _prSnapKnob.addEventListener('pointerleave', () => { _hovered = false; hideTip(200); });
-  _prSnapKnob.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    _prSnapKnob.setPointerCapture(e.pointerId);
-    _moved = false; _sx = e.clientX; _sy = e.clientY; _sIdx = _snapIdx;
-    showTip();
-    const onMove = (ev) => {
-      const delta = ((ev.clientX - _sx) + (_sy - ev.clientY)) / 25;
-      if (!_moved && Math.abs(delta) < 0.5) return;
-      _moved = true;
-      const next = Math.max(0, Math.min(SNAP_VALUES.length - 1, _sIdx + Math.round(delta)));
-      if (next !== _snapIdx) {
-        _snapIdx = next;
-        SEQ.rollSnapVal = SNAP_VALUES[next].val;
-        syncPrSnapKnob();
-      }
-    };
-    const onUp = () => {
-      _prSnapKnob.removeEventListener('pointermove', onMove);
-      _prSnapKnob.removeEventListener('pointerup', onUp);
-      if (!_moved) { SEQ.rollSnap = !SEQ.rollSnap; syncPrSnapKnob(); }
-      hideTip();
-    };
-    _prSnapKnob.addEventListener('pointermove', onMove);
-    _prSnapKnob.addEventListener('pointerup', onUp);
+// Piano-roll snap controls — magnet toggle + unit dropdown.
+const _prSnapBtn = document.getElementById('seq-tool-snap');
+const _prSnapSel = document.getElementById('seq-snap-val');
+if (_prSnapBtn) {
+  _prSnapBtn.classList.toggle('active', !!SEQ.rollSnap);
+  _prSnapBtn.addEventListener('click', () => {
+    SEQ.rollSnap = !SEQ.rollSnap;
+    _prSnapBtn.classList.toggle('active', SEQ.rollSnap);
   });
-  _prSnapKnob.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const dir = Math.sign(e.deltaY) > 0 ? -1 : 1;
-    const next = Math.max(0, Math.min(SNAP_VALUES.length - 1, _snapIdx + dir));
-    if (next !== _snapIdx) {
-      _snapIdx = next;
-      SEQ.rollSnapVal = SNAP_VALUES[next].val;
-      syncPrSnapKnob();
-    }
-    showTip();
-    hideTip(800);
-  }, { passive: false });
+}
+if (_prSnapSel) {
+  _prSnapSel.value = String(_snapIdx);
+  _prSnapSel.addEventListener('change', (e) => {
+    _snapIdx = Math.max(0, Math.min(SNAP_VALUES.length - 1, parseInt(e.target.value, 10)));
+    SEQ.rollSnapVal = SNAP_VALUES[_snapIdx].val;
+  });
 }
 
 // Arrangement-view toolbar (above the tracks)
@@ -10178,87 +10596,22 @@ document.getElementById('pr-zoom-out')?.addEventListener('click', () => prApplyZ
   }, { passive: false });
 })();
 
-// Snap-knob — single combined snap toggle + unit picker. Click to toggle the
-// snap on/off (same state as the magnet button). Drag to step through the
-// snap-unit list. Stays in sync with the dropdown and magnet button.
-const _arrSnapKnob = document.getElementById('seq-arr-snap-knob');
-function syncArrSnapKnob() {
-  if (!_arrSnapKnob) return;
-  const n = SNAP_VALUES.length;
-  const frac = n > 1 ? _arrSnapIdx / (n - 1) : 0;
-  const ang  = -135 + frac * 270;
-  _arrSnapKnob.style.setProperty('--ang', ang + 'deg');
-  _arrSnapKnob.classList.toggle('off', !SEQ.arrSnap);
-  const tipEl = document.getElementById('seq-arr-snap-knob-tip');
-  if (tipEl) tipEl.textContent = SNAP_VALUES[_arrSnapIdx].label;
+// Arrangement snap controls — magnet toggle + unit dropdown.
+const _arrSnapBtn = document.getElementById('seq-arr-tool-snap');
+const _arrSnapSel = document.getElementById('seq-arr-snap-val');
+if (_arrSnapBtn) {
+  _arrSnapBtn.classList.toggle('active', !!SEQ.arrSnap);
+  _arrSnapBtn.addEventListener('click', () => {
+    SEQ.arrSnap = !SEQ.arrSnap;
+    _arrSnapBtn.classList.toggle('active', SEQ.arrSnap);
+  });
 }
-syncArrSnapKnob();
-if (_arrSnapKnob) {
-  let _dragStartX = 0, _dragStartY = 0, _dragStartIdx = 0, _moved = false;
-  let _tipHideT = null;
-  let _hovered = false;
-  const showTip = () => {
-    _arrSnapKnob.classList.add('tip-show');
-    if (_tipHideT) clearTimeout(_tipHideT);
-  };
-  const scheduleTipHide = (ms = 600) => {
-    if (_tipHideT) clearTimeout(_tipHideT);
-    _tipHideT = setTimeout(() => {
-      // Don't hide if cursor is still hovering — keep the tooltip visible.
-      if (!_hovered) _arrSnapKnob.classList.remove('tip-show');
-    }, ms);
-  };
-  _arrSnapKnob.addEventListener('pointerenter', () => {
-    _hovered = true;
-    showTip();
+if (_arrSnapSel) {
+  _arrSnapSel.value = String(_arrSnapIdx);
+  _arrSnapSel.addEventListener('change', (e) => {
+    _arrSnapIdx = Math.max(0, Math.min(SNAP_VALUES.length - 1, parseInt(e.target.value, 10)));
+    SEQ.arrSnapVal = SNAP_VALUES[_arrSnapIdx].val;
   });
-  _arrSnapKnob.addEventListener('pointerleave', () => {
-    _hovered = false;
-    scheduleTipHide(200);
-  });
-  _arrSnapKnob.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    _arrSnapKnob.setPointerCapture(e.pointerId);
-    _moved = false;
-    _dragStartX = e.clientX; _dragStartY = e.clientY;
-    _dragStartIdx = _arrSnapIdx;
-    showTip();
-    const onMove = (ev) => {
-      const delta = ((ev.clientX - _dragStartX) + (_dragStartY - ev.clientY)) / 25;
-      if (!_moved && Math.abs(delta) < 0.5) return;
-      _moved = true;
-      const next = Math.max(0, Math.min(SNAP_VALUES.length - 1, _dragStartIdx + Math.round(delta)));
-      if (next !== _arrSnapIdx) {
-        _arrSnapIdx = next;
-        SEQ.arrSnapVal = SNAP_VALUES[next].val;
-        syncArrSnapKnob();
-      }
-    };
-    const onUp = () => {
-      _arrSnapKnob.removeEventListener('pointermove', onMove);
-      _arrSnapKnob.removeEventListener('pointerup', onUp);
-      if (!_moved) {
-        // Plain click → toggle snap on/off.
-        SEQ.arrSnap = !SEQ.arrSnap;
-        syncArrSnapKnob();
-      }
-      scheduleTipHide();
-    };
-    _arrSnapKnob.addEventListener('pointermove', onMove);
-    _arrSnapKnob.addEventListener('pointerup', onUp);
-  });
-  _arrSnapKnob.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const dir = Math.sign(e.deltaY) > 0 ? -1 : 1;
-    const next = Math.max(0, Math.min(SNAP_VALUES.length - 1, _arrSnapIdx + dir));
-    if (next !== _arrSnapIdx) {
-      _arrSnapIdx = next;
-      SEQ.arrSnapVal = SNAP_VALUES[next].val;
-      syncArrSnapKnob();
-    }
-    showTip();
-    scheduleTipHide(800);
-  }, { passive: false });
 }
 arrSetTool(SEQ.arrTool);
 // Pan-mode (and marquee-select) on the arrangement wrap.
