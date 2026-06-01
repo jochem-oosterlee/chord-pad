@@ -1689,20 +1689,28 @@ function midiPortById(id) {
   if (!id) return state.output || null;
   return state.midiAccess.outputs.get(id) || state.output || null;
 }
-function sendNoteOn(note, velocity, channelOverride = null, portOverride = null) {
+function sendNoteOn(note, velocity, channelOverride = null, portOverride = null, whenMs = undefined) {
   if (!state.midiEnabled) return;
   const port = portOverride || state.output;
   if (!port) return;
   const ch = channelOverride ?? state.channel;
-  port.send([0x90 | ch, note & 0x7F, velocity & 0x7F]);
+  port.send([0x90 | ch, note & 0x7F, velocity & 0x7F], whenMs);
   blinkLed();
 }
-function sendNoteOff(note, channelOverride = null, portOverride = null) {
+function sendNoteOff(note, channelOverride = null, portOverride = null, whenMs = undefined) {
   if (!state.midiEnabled) return;
   const port = portOverride || state.output;
   if (!port) return;
   const ch = channelOverride ?? state.channel;
-  port.send([0x80 | ch, note & 0x7F, 0]);
+  port.send([0x80 | ch, note & 0x7F, 0], whenMs);
+}
+// Convert an AudioContext time (seconds) to a performance.now()-compatible
+// timestamp (ms) for Web MIDI's port.send(data, timestamp). The two clocks
+// are stable in rate but offset by an opaque constant — we estimate the
+// offset from the live values each call (good enough for ~ms precision).
+function audioTimeToMidiTs(t) {
+  const ctx = getAudioCtx();
+  return performance.now() + (t - ctx.currentTime) * 1000;
 }
 function panic() {
   // Send All-Notes-Off + All-Sound-Off on every channel of every known
@@ -5718,19 +5726,22 @@ function seqTickChordTrack(track, now, bd, horizon) {
     }
     const capturedNotes = [...notes], capturedBass = bassNote;
     const trkPort = useMidi ? midiPortById(track.midiPortId) : null;
+    // Schedule MIDI directly via port.send timestamps — sample-precise, no
+    // setTimeout jitter. Display updates still go through seqTimeout so
+    // they only run at "now" time (not preemptively).
+    if (useMidi && audible && trkPort) {
+      const onTs  = audioTimeToMidiTs(t);
+      const offTs = audioTimeToMidiTs(t + dur * 0.95);
+      capturedNotes.forEach(n => sendNoteOn(n, vel, track.channel, trkPort, onTs));
+      if (capturedBass !== null) sendNoteOn(capturedBass, vel, track.channel, trkPort, onTs);
+      capturedNotes.forEach(n => sendNoteOff(n, track.channel, trkPort, offTs));
+      if (capturedBass !== null) sendNoteOff(capturedBass, track.channel, trkPort, offTs);
+    }
     seqTimeout(() => {
-      if (useMidi && audible) {
-        capturedNotes.forEach(n => sendNoteOn(n, vel, track.channel, trkPort));
-        if (capturedBass !== null) sendNoteOn(capturedBass, vel, track.channel, trkPort);
-      }
       SEQ.nowChord = chordDisplayName(item.keyRoot, item.interval, item.q) + ' [' + capturedNotes.map(midiNoteName).join(' · ') + ']';
       seqUpdateNowPlaying();
     }, onDelay);
     seqTimeout(() => {
-      if (useMidi && audible) {
-        capturedNotes.forEach(n => sendNoteOff(n, track.channel, trkPort));
-        if (capturedBass !== null) sendNoteOff(capturedBass, track.channel, trkPort);
-      }
       SEQ.nowChord = '';
       seqUpdateNowPlaying();
     }, offDelay);
@@ -5801,13 +5812,17 @@ function seqTickFreeTrack(track, now, bd, horizon) {
     }
     const capturedMidi = item.midi, capturedLabel = item.label;
     const trkPort = useMidi ? midiPortById(track.midiPortId) : null;
+    if (useMidi && audible && trkPort) {
+      const onTs  = audioTimeToMidiTs(t);
+      const offTs = audioTimeToMidiTs(t + dur * 0.95);
+      sendNoteOn(capturedMidi, vel, track.channel, trkPort, onTs);
+      sendNoteOff(capturedMidi, track.channel, trkPort, offTs);
+    }
     seqTimeout(() => {
-      if (useMidi && audible) sendNoteOn(capturedMidi, vel, track.channel, trkPort);
       SEQ.nowNote = capturedLabel;
       seqUpdateNowPlaying();
     }, onDelay);
     seqTimeout(() => {
-      if (useMidi && audible) sendNoteOff(capturedMidi, track.channel, trkPort);
       SEQ.nowNote = '';
       seqUpdateNowPlaying();
     }, offDelay);
