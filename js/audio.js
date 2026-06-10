@@ -112,6 +112,7 @@ function getAudioCtx() {
 function _unlockAudioCtxOnGesture() {
   _audioCtxUnlocked = true;
   if (audioCtx?.state === 'suspended') audioCtx.resume().catch(() => {});
+  _drainPreloadQueue();
   ['pointerdown', 'keydown', 'touchstart'].forEach(ev =>
     window.removeEventListener(ev, _unlockAudioCtxOnGesture, true)
   );
@@ -180,12 +181,25 @@ function fetchSample(instrument, midiNote) {
   return p;
 }
 
-// Instruments load immediately on page-init. Chrome will show a one-time
-// console warning about AudioContext starting before a user gesture; the
-// context stays suspended until the first interaction and audio still
-// plays correctly.
-function preloadSamplesOnGesture(instrument) { return preloadSamples(instrument); }
-// Kick off the (large) SF2 download right away too.
+// Queue instrument preloads until the first user gesture unlocks the
+// AudioContext. Without this, fetchSample's XHR onload calls
+// decodeAudioData → getAudioCtx → new AudioContext() before any user
+// interaction and Chrome logs the autoplay-blocked warning. After the
+// first gesture, the queue drains and subsequent calls hit
+// preloadSamples directly.
+const _preloadQueue = new Set();
+function preloadSamplesOnGesture(instrument) {
+  if (_audioCtxUnlocked) return preloadSamples(instrument);
+  _preloadQueue.add(instrument);
+}
+function _drainPreloadQueue() {
+  const insts = [..._preloadQueue];
+  _preloadQueue.clear();
+  for (const i of insts) preloadSamples(i);
+}
+// Kick off the (large) SF2 download right away — fetch alone doesn't
+// touch the AudioContext; decoding happens lazily per-note when the
+// user actually plays something.
 setTimeout(() => loadSf2('fluid'), 0);
 
 async function preloadSamples(instrument) {
