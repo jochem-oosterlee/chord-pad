@@ -1424,8 +1424,7 @@ input[type="range"]::-moz-range-thumb {
 .seq-timesig:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
 .seq-timesig option { background: #1a1b1e; color: var(--text); }
 .seq-clock-sync {
-  display: inline-flex; align-items: center; gap: 4px;
-  margin-left: 8px;
+  display: inline-flex; align-items: center; gap: 8px;
 }
 .seq-clock-toggle {
   background: none;

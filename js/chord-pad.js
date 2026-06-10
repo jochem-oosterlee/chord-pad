@@ -3531,7 +3531,7 @@ function seqRenderRuler() {
   if (!toggle || !sel) return;
   const sync = () => {
     toggle.classList.toggle('active', !!state.midiClockEnabled);
-    toggle.textContent = state.midiClockEnabled ? 'Sync ON' : 'Sync';
+    toggle.textContent = 'Sync';
     const tempoInputs = document.querySelectorAll('#ctrl-tempo, #seq-tempo-val');
     tempoInputs.forEach(el => el.disabled = !!state.midiClockEnabled);
     sel.value = state.midiClockPortId || '';
