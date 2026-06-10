@@ -1792,30 +1792,37 @@ input[type="range"]::-moz-range-thumb {
   margin: 2px 4px;
   align-self: stretch;
 }
-/* Non-interactive icon used as a label in front of a select-dropdown
-   (e.g. the chord-length picker). Inherits the same box, border,
-   colors and icon-size as .seq-tool-btn — just without hover/active
-   states or click affordance. */
-.seq-tool-icon {
-  background: none;
-  border: 1px solid rgba(255,255,255,0.25);
-  color: var(--text-dim);
-  font-family: inherit;
-  font-size: 13px;
-  padding: 0 10px;
-  border-radius: 4px;
-  letter-spacing: 0.05em;
-  min-width: 28px;
+/* Chord-length picker: icon + native <select> packed into a single
+   button-shaped box. The wrapper carries the border + sizing; the
+   inner select drops its own chrome (border/background) so the two
+   read as one control with the icon as a label inside. */
+.seq-chordlen-wrap {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 4px;
   height: 24px;
+  padding: 0 4px 0 6px;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 4px;
+  color: var(--text-dim);
+  background: none;
   box-sizing: border-box;
-  pointer-events: none;
-  user-select: none;
+  cursor: pointer;
+  transition: all 0.1s ease;
 }
-.seq-tool-icon i,
-.seq-tool-icon svg { width: 13px; height: 13px; }
+.seq-chordlen-wrap:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
+.seq-chordlen-wrap:focus-within { border-color: var(--accent); }
+.seq-chordlen-wrap i,
+.seq-chordlen-wrap svg { width: 13px; height: 13px; color: inherit; pointer-events: none; }
+.seq-chordlen-select {
+  /* Reset the .seq-snap-select chrome — wrapper provides it instead. */
+  border: 0 !important;
+  background: none !important;
+  padding: 0 !important;
+  height: 100%;
+  color: inherit;
+}
+.seq-chordlen-select:focus { outline: none; }
 .seq-latency-ctrl {
   display: inline-flex; align-items: center; gap: 4px;
   font-family: 'JetBrains Mono', monospace; font-size: 10px;
