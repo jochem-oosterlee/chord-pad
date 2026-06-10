@@ -2410,7 +2410,9 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   color: rgba(255,255,255,0.35); cursor: pointer;
   display: inline-flex; align-items: center;
 }
-.seq-th-fx:hover { color: var(--accent); }
+@media (hover: hover) {
+  .seq-th-fx:hover { color: var(--accent); }
+}
 .seq-th-fx .lucide { width: 12px; height: 12px; }
 
 .track-fx-modal { position: fixed; inset: 0; z-index: 200; }
