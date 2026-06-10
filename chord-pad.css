@@ -1643,7 +1643,7 @@ input[type="range"]::-moz-range-thumb {
 }
 .seq-arrangement-tools {
   display: flex; align-items: center; gap: 4px;
-  margin-bottom: 4px;
+  margin: 12px 0;
 }
 /* Snap-unit dropdown (track + roll toolbars). Matches .seq-timesig style. */
 .seq-snap-select {
