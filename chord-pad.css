@@ -1812,6 +1812,7 @@ input[type="range"]::-moz-range-thumb {
 }
 .seq-snap-wrap:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
 .seq-snap-wrap:has(.seq-snap-toggle.active) { border-color: var(--accent); }
+.seq-snap-wrap:has(.seq-snap-toggle.active) .seq-snap-select { color: var(--accent); }
 /* Inner toggle button — strip its own border/background; keep clickable. */
 .seq-snap-wrap .seq-snap-toggle {
   border: 0 !important;

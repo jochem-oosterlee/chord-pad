@@ -5594,6 +5594,19 @@ _wireEditBtn('seq-pr-edit-delete',     () => prDeleteNotes());
   apply(idx);
   arrSel?.addEventListener('change', e => apply(parseInt(e.target.value, 10)));
   prSel ?.addEventListener('change', e => apply(parseInt(e.target.value, 10)));
+  // Clicking the icon area of the wrap should open the dropdown too,
+  // not just focus the select. Browsers don't natively open a <select>
+  // when its <label> is clicked, so trigger showPicker() ourselves.
+  document.querySelectorAll('.seq-chordlen-wrap').forEach(wrap => {
+    wrap.addEventListener('click', (e) => {
+      if (e.target.tagName === 'SELECT') return; // let the select handle its own click
+      const sel = wrap.querySelector('select');
+      if (sel && typeof sel.showPicker === 'function') {
+        e.preventDefault();
+        try { sel.showPicker(); } catch (_) { sel.focus(); }
+      }
+    });
+  });
 })();
 (function _initVisualLatencyCtrl() {
   const el = document.getElementById('seq-visual-latency');
