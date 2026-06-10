@@ -306,6 +306,12 @@
       <button class="btn seq-tool-btn" id="seq-arr-tool-split" title="Split clip at click position"><i data-lucide="split"></i></button>
       <button class="btn seq-tool-btn" id="seq-arr-tool-create" title="Create empty clip (click on a free lane)"><i data-lucide="square-plus"></i></button>
       <div class="seq-tool-sep"></div>
+      <button class="btn seq-tool-btn" id="seq-arr-edit-cut"       title="Cut (Ctrl+X)"><i data-lucide="scissors"></i></button>
+      <button class="btn seq-tool-btn" id="seq-arr-edit-copy"      title="Copy (Ctrl+C)"><i data-lucide="copy"></i></button>
+      <button class="btn seq-tool-btn" id="seq-arr-edit-paste"     title="Paste (Ctrl+V)"><i data-lucide="clipboard-paste"></i></button>
+      <button class="btn seq-tool-btn" id="seq-arr-edit-duplicate" title="Duplicate (Ctrl+D)"><i data-lucide="copy-plus"></i></button>
+      <button class="btn seq-tool-btn" id="seq-arr-edit-delete"    title="Delete (Del)"><i data-lucide="trash-2"></i></button>
+      <div class="seq-tool-sep"></div>
       <button class="btn seq-tool-btn" id="seq-arr-tool-snap" title="Snap"><i data-lucide="magnet"></i></button>
       <select class="seq-snap-select" id="seq-arr-snap-val" title="Snap unit">
         <option value="0">1/4</option>
@@ -315,6 +321,15 @@
         <option value="4">2</option>
         <option value="5">3</option>
         <option value="6">4</option>
+      </select>
+      <select class="seq-snap-select" id="seq-arr-chordlen" title="Chord length when dropped from the pad">
+        <option value="0">1/4</option>
+        <option value="1">1/3</option>
+        <option value="2">1/2</option>
+        <option value="3">1</option>
+        <option value="4">2</option>
+        <option value="5">3</option>
+        <option value="6" selected>4</option>
       </select>
       <div class="seq-tool-sep"></div>
       <button class="btn seq-tool-btn" id="seq-arr-zoom-out" title="Zoom out (more bars in view)"><i data-lucide="zoom-out"></i></button>
@@ -374,6 +389,12 @@
         <button class="btn seq-tool-btn" id="seq-tool-erase" title="Erase note"><i data-lucide="eraser"></i></button>
         <button class="btn seq-tool-btn" id="seq-tool-pan" title="Pan (hold space)"><i data-lucide="hand"></i></button>
         <div class="seq-tool-sep"></div>
+        <button class="btn seq-tool-btn" id="seq-pr-edit-cut"       title="Cut (Ctrl+X)"><i data-lucide="scissors"></i></button>
+        <button class="btn seq-tool-btn" id="seq-pr-edit-copy"      title="Copy (Ctrl+C)"><i data-lucide="copy"></i></button>
+        <button class="btn seq-tool-btn" id="seq-pr-edit-paste"     title="Paste (Ctrl+V)"><i data-lucide="clipboard-paste"></i></button>
+        <button class="btn seq-tool-btn" id="seq-pr-edit-duplicate" title="Duplicate (Ctrl+D)"><i data-lucide="copy-plus"></i></button>
+        <button class="btn seq-tool-btn" id="seq-pr-edit-delete"    title="Delete (Del)"><i data-lucide="trash-2"></i></button>
+        <div class="seq-tool-sep"></div>
         <button class="btn seq-tool-btn" id="seq-tool-snap" title="Snap"><i data-lucide="magnet"></i></button>
         <select class="seq-snap-select" id="seq-snap-val" title="Snap unit">
           <option value="0">1/4</option>
@@ -383,6 +404,15 @@
           <option value="4">2</option>
           <option value="5">3</option>
           <option value="6">4</option>
+        </select>
+        <select class="seq-snap-select" id="seq-pr-chordlen" title="Chord length when dropped from the pad">
+          <option value="0">1/4</option>
+          <option value="1">1/3</option>
+          <option value="2">1/2</option>
+          <option value="3">1</option>
+          <option value="4">2</option>
+          <option value="5">3</option>
+          <option value="6" selected>4</option>
         </select>
         <div class="seq-tool-sep"></div>
         <button class="btn seq-tool-btn" id="pr-zoom-out" title="Zoom out (more bars in view)"><i data-lucide="zoom-out"></i></button>

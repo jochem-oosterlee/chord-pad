@@ -6503,8 +6503,8 @@ function seqStartTouchDrag(touch, _legacyLaneId, getData, onCancelPlay) {
         const track = hit.track;
         // Chord tracks only accept chord drops; free tracks accept both.
         if (track.kind === 'chord' && !isChord) return;
-        const beat  = Math.max(0, Math.floor(((t.clientX - hit.rect.left) / BEAT_PX) * 2) / 2);
-        const beats = isChord ? state.beatsPerBar : 1;
+        const beat  = Math.max(0, arrSnap((t.clientX - hit.rect.left) / BEAT_PX));
+        const beats = isChord ? chordDropLen() : 1;
         hit.el.classList.add('drag-over');
         hit.el.querySelector('.seq-drop-hint')?.style.setProperty('color', 'var(--accent)');
         if (isChord && hit.el.classList.contains('roll-mode') && typeof seqSetRollGhost === 'function') {
@@ -6517,7 +6517,7 @@ function seqStartTouchDrag(touch, _legacyLaneId, getData, onCancelPlay) {
         const { track, clip } = focusedClipObjects();
         if (!track || !clip) return;
         const body = hit.el;
-        const beat = Math.max(0, Math.floor(((t.clientX - hit.rect.left + body.scrollLeft - prKbW()) / PR_BEAT_PX) * 2) / 2);
+        const beat = Math.max(0, rollSnap((t.clientX - hit.rect.left + body.scrollLeft - prKbW()) / PR_BEAT_PX));
         const cursorMidi = Math.max(0, Math.min(127, body._prHi - Math.floor((t.clientY - hit.rect.top + body.scrollTop) / PR_ROW_H)));
         const baseNotes = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
         if (baseNotes.length === 0) return;
@@ -6536,7 +6536,7 @@ function seqStartTouchDrag(touch, _legacyLaneId, getData, onCancelPlay) {
         notes.forEach((midi, i) => {
           const g = prGhostNotes[i];
           g.style.left   = (beat * PR_BEAT_PX + prKbW()) + 'px';
-          g.style.width  = (state.beatsPerBar * PR_BEAT_PX) + 'px';
+          g.style.width  = (chordDropLen() * PR_BEAT_PX) + 'px';
           g.style.top    = ((body._prHi - midi) * PR_ROW_H) + 'px';
           g.style.height = (PR_ROW_H - 2) + 'px';
           g.textContent  = midiNoteLabel(midi);
@@ -6559,18 +6559,19 @@ function seqStartTouchDrag(touch, _legacyLaneId, getData, onCancelPlay) {
         const { track, clip } = focusedClipObjects();
         if (!track || !clip) return;
         const body = hit.el;
-        const beat = Math.max(0, Math.floor(((t.clientX - hit.rect.left + body.scrollLeft - prKbW()) / PR_BEAT_PX) * 2) / 2);
+        const beat = Math.max(0, rollSnap((t.clientX - hit.rect.left + body.scrollLeft - prKbW()) / PR_BEAT_PX));
         const cursorMidi = Math.max(0, Math.min(127, body._prHi - Math.floor((t.clientY - hit.rect.top + body.scrollTop) / PR_ROW_H)));
         const baseNotes = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
         if (baseNotes.length === 0) return;
         const root = baseNotes[0];
         const shift = Math.round((cursorMidi - root) / 12) * 12;
+        const dropBeats = chordDropLen();
         baseNotes.map(m => m + shift).forEach(midi => clip.notes.push({
           midi, label: midiNoteLabel(midi),
-          start: beat, beats: state.beatsPerBar,
+          start: beat, beats: dropBeats,
         }));
         clip.notes.sort((a, b) => a.start - b.start);
-        if (beat + state.beatsPerBar > clip.beats) clip.beats = beat + state.beatsPerBar;
+        if (beat + dropBeats > clip.beats) clip.beats = beat + dropBeats;
         seqAutoExtendLoop(clip.start + clip.beats);
         renderPianoRoll();
         seqRenderTrack(track);
@@ -6580,18 +6581,19 @@ function seqStartTouchDrag(touch, _legacyLaneId, getData, onCancelPlay) {
       }
       // Lane drop — dispatch by track kind.
       const track   = hit.track;
-      const dropBeat = Math.max(0, Math.floor(((t.clientX - hit.rect.left) / BEAT_PX) * 2) / 2);
+      const dropBeat = Math.max(0, arrSnap((t.clientX - hit.rect.left) / BEAT_PX));
       if (track.kind === 'chord') {
         if (!isChord) return;
+        const beats = chordDropLen();
         track.items.push({
           interval: data.interval, q: data.q, bassInterval: data.bassInterval, label: data.label,
-          beats: state.beatsPerBar, start: dropBeat,
+          beats, start: dropBeat,
           keyRoot: state.keys[state.currentTemplate], template: state.currentTemplate,
         });
         track.items.sort((a, b) => a.start - b.start);
-        seqAutoExtendLoop(dropBeat + state.beatsPerBar);
+        seqAutoExtendLoop(dropBeat + beats);
       } else if (isChord) {
-        const beats = state.beatsPerBar;
+        const beats = chordDropLen();
         const midis = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
         const clip  = makeClip({
           start: dropBeat, beats,
@@ -9380,7 +9382,7 @@ function _prMakeNote(track, clip, note, idx, hi) {
     e.preventDefault();
     body.setPointerCapture(e.pointerId);
     const beat0 = Math.max(0, ((e.clientX - rect.left + body.scrollLeft - prKbW()) / PR_BEAT_PX));
-    const startBeat = Math.floor(beat0 * 2) / 2;
+    const startBeat = rollSnap(beat0);
     const midi = Math.max(0, Math.min(127, body._prHi - Math.floor((e.clientY - rect.top + body.scrollTop) / PR_ROW_H)));
     seqCheckpoint();
     const newNote = { midi, label: midiNoteLabel(midi), beats: 1, start: startBeat };
@@ -9433,7 +9435,7 @@ function _prMakeNote(track, clip, note, idx, hi) {
     const data = JSON.parse(_prDragData || 'null');
     if (!data) return null;
     const rect = body.getBoundingClientRect();
-    const beat = Math.max(0, Math.floor(((e.clientX - rect.left + body.scrollLeft - prKbW()) / PR_BEAT_PX) * 2) / 2);
+    const beat = Math.max(0, rollSnap((e.clientX - rect.left + body.scrollLeft - prKbW()) / PR_BEAT_PX));
     const cursorMidi = Math.max(0, Math.min(127, body._prHi - Math.floor((e.clientY - rect.top + body.scrollTop) / PR_ROW_H)));
     const baseNotes = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
     if (baseNotes.length === 0) return null;
@@ -9467,7 +9469,7 @@ function _prMakeNote(track, clip, note, idx, hi) {
     info.notes.forEach((midi, i) => {
       const g = _prGhostNotes[i];
       g.style.left   = (info.beat * PR_BEAT_PX + prKbW()) + 'px';
-      g.style.width  = (state.beatsPerBar * PR_BEAT_PX) + 'px';
+      g.style.width  = (chordDropLen() * PR_BEAT_PX) + 'px';
       g.style.top    = ((body._prHi - midi) * PR_ROW_H) + 'px';
       g.style.height = (PR_ROW_H - 2) + 'px';
       g.textContent  = midiNoteLabel(midi);
@@ -9488,12 +9490,13 @@ function _prMakeNote(track, clip, note, idx, hi) {
     const info = _prDragNotes(e);
     if (!info) return;
     seqCheckpoint();
+    const dropBeats = chordDropLen();
     info.notes.forEach(midi => clip.notes.push({
       midi, label: midiNoteLabel(midi),
-      start: info.beat, beats: state.beatsPerBar,
+      start: info.beat, beats: dropBeats,
     }));
     clip.notes.sort((a, b) => a.start - b.start);
-    if (info.beat + state.beatsPerBar > clip.beats) clip.beats = info.beat + state.beatsPerBar;
+    if (info.beat + dropBeats > clip.beats) clip.beats = info.beat + dropBeats;
     seqAutoExtendLoop(clip.start + clip.beats);
     renderPianoRoll();
     seqRenderTrack(track);
@@ -9761,8 +9764,8 @@ function initChordLane(lane) {
     lane.classList.add('drag-over');
     _hint()?.style.setProperty('color', 'var(--accent)');
     const rect = lane.getBoundingClientRect();
-    const beat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
-    seqSetGhost(lane, beat, state.beatsPerBar);
+    const beat = Math.max(0, arrSnap((e.clientX - rect.left) / BEAT_PX));
+    seqSetGhost(lane, beat, chordDropLen());
   });
   lane.addEventListener('dragleave', (e) => {
     if (!lane.contains(e.relatedTarget)) { lane.classList.remove('drag-over'); seqClearGhost(lane); }
@@ -9778,15 +9781,16 @@ function initChordLane(lane) {
     if (!t) return;
     const data = JSON.parse(raw);
     const rect = lane.getBoundingClientRect();
-    const dropBeat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
+    const dropBeat = Math.max(0, arrSnap((e.clientX - rect.left) / BEAT_PX));
+    const beats    = chordDropLen();
     seqCheckpoint();
     t.items.push({
       interval: data.interval, q: data.q, bassInterval: data.bassInterval, label: data.label,
-      beats: state.beatsPerBar, start: dropBeat,
+      beats, start: dropBeat,
       keyRoot: state.keys[state.currentTemplate], template: state.currentTemplate,
     });
     t.items.sort((a, b) => a.start - b.start);
-    seqAutoExtendLoop(dropBeat + state.beatsPerBar);
+    seqAutoExtendLoop(dropBeat + beats);
     seqRenderTrack(t);
     seqResyncTrack(t);
   });
@@ -9802,8 +9806,8 @@ function initFreeLane(lane) {
     e.dataTransfer.dropEffect = 'copy';
     lane.classList.add('drag-over');
     const rect = lane.getBoundingClientRect();
-    const beat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
-    seqSetGhost(lane, beat, hasChord ? state.beatsPerBar : 1);
+    const beat = Math.max(0, arrSnap((e.clientX - rect.left) / BEAT_PX));
+    seqSetGhost(lane, beat, hasChord ? chordDropLen() : 1);
   });
   lane.addEventListener('dragleave', (e) => {
     if (!lane.contains(e.relatedTarget)) { lane.classList.remove('drag-over'); seqClearGhost(lane); }
@@ -9815,12 +9819,12 @@ function initFreeLane(lane) {
     const t = getTrack();
     if (!t) return;
     const rect = lane.getBoundingClientRect();
-    const dropBeat = Math.max(0, Math.floor(((e.clientX - rect.left) / BEAT_PX) * 2) / 2);
+    const dropBeat = Math.max(0, arrSnap((e.clientX - rect.left) / BEAT_PX));
     // Chord-pad drop → create a chord-clip (one bar long, chord notes inside).
     const rawChord = e.dataTransfer.getData('application/x-chord');
     if (rawChord) {
       const data  = JSON.parse(rawChord);
-      const beats = state.beatsPerBar;
+      const beats = chordDropLen();
       const midis = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
       seqCheckpoint();
       const clip = makeClip({
@@ -10686,6 +10690,30 @@ function arrSnap(beat) {
   if (!SEQ.arrSnap) return beat;
   return Math.round(beat / SEQ.arrSnapVal) * SEQ.arrSnapVal;
 }
+function rollSnap(beat) {
+  if (!SEQ.rollSnap) return beat;
+  return Math.round(beat / SEQ.rollSnapVal) * SEQ.rollSnapVal;
+}
+// Beats a chord block / chord clip should span when dropped from the chord
+// pad onto a track or the piano-roll. Defaults to one bar in the current
+// time signature on first use, then sticks at whatever the user picks.
+SEQ.chordDropLen = SEQ.chordDropLen || state.beatsPerBar || 4;
+function chordDropLen() {
+  return SEQ.chordDropLen > 0 ? SEQ.chordDropLen : (state.beatsPerBar || 4);
+}
+// Delete the currently-selected notes in the piano-roll (mirrors the
+// inline Delete/Backspace handler so toolbar buttons can reuse the logic).
+function prDeleteNotes() {
+  if (!prRollHasNoteSelection()) return;
+  const { track, clip } = focusedClipObjects();
+  if (!clip) return;
+  seqCheckpoint();
+  clip.notes = clip.notes.filter(n => !SEQ.prSelection.has(n));
+  SEQ.prSelection.clear();
+  renderPianoRoll();
+  if (track) { seqRenderTrack(track); seqResyncTrack(track); }
+  seqSave();
+}
 ['select','erase','pan','merge','split','create'].forEach(t => {
   const btn = document.getElementById('seq-arr-tool-' + t);
   btn?.addEventListener('mousedown', e => e.preventDefault());
@@ -10694,6 +10722,46 @@ function arrSnap(beat) {
     arrSetTool(SEQ.arrTool === t && t !== 'select' ? 'select' : t);
   });
 });
+
+// Edit-action toolbar buttons (mirror the Ctrl+X/C/V/D/Del shortcuts).
+// Arrangement-view buttons act on the clip selection; piano-roll buttons
+// act on the note selection inside the focused clip.
+function _wireEditBtn(id, fn) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.addEventListener('mousedown', e => e.preventDefault());
+  btn.addEventListener('click', () => fn());
+}
+_wireEditBtn('seq-arr-edit-cut',       () => seqCutSelection());
+_wireEditBtn('seq-arr-edit-copy',      () => seqCopySelection());
+_wireEditBtn('seq-arr-edit-paste',     () => seqPasteSelection());
+_wireEditBtn('seq-arr-edit-duplicate', () => seqDuplicateSelection());
+_wireEditBtn('seq-arr-edit-delete',    () => seqDeleteSelection());
+_wireEditBtn('seq-pr-edit-cut',        () => prCutNotes());
+_wireEditBtn('seq-pr-edit-copy',       () => prCopyNotes());
+_wireEditBtn('seq-pr-edit-paste',      () => prPasteNotes());
+_wireEditBtn('seq-pr-edit-duplicate',  () => prDuplicateNotes());
+_wireEditBtn('seq-pr-edit-delete',     () => prDeleteNotes());
+
+// Chord-length dropdowns (arrangement + piano-roll) — kept in sync so the
+// same setting drives the duration of any chord dropped from the pad,
+// whether onto a track lane or into the roll.
+(function _initChordLenSelects() {
+  const arrSel = document.getElementById('seq-arr-chordlen');
+  const prSel  = document.getElementById('seq-pr-chordlen');
+  let idx = SNAP_VALUES.findIndex(s => s.val === SEQ.chordDropLen);
+  if (idx < 0) idx = 6; // default to "4" beats
+  const apply = (i) => {
+    idx = Math.max(0, Math.min(SNAP_VALUES.length - 1, i));
+    SEQ.chordDropLen = SNAP_VALUES[idx].val;
+    if (arrSel) arrSel.value = String(idx);
+    if (prSel)  prSel.value  = String(idx);
+    seqSave();
+  };
+  apply(idx);
+  arrSel?.addEventListener('change', e => apply(parseInt(e.target.value, 10)));
+  prSel ?.addEventListener('change', e => apply(parseInt(e.target.value, 10)));
+})();
 (function _initVisualLatencyCtrl() {
   const el = document.getElementById('seq-visual-latency');
   if (!el) return;
