@@ -6344,15 +6344,40 @@ function chordNotesAtY(lane, clientY, interval, q) {
   return base.map(m => m + oct * 12).filter(m => m >= ROLL_BOT_MIDI && m <= ROLL_TOP_MIDI);
 }
 
-function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
+function seqStartTouchDrag(touch, _legacyLaneId, getData, onCancelPlay) {
     const tid = touch.identifier;
     const startX = touch.clientX, startY = touch.clientY;
     let dragging = false;
     let ghost = null;
     let lastTouch = touch;
     let scrollRaf = null;
+    let prGhostNotes = [];
 
-    const stopScroll = () => { if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null; } };
+    const clearPrGhost = () => { prGhostNotes.forEach(g => g.remove()); prGhostNotes = []; };
+    const stopScroll  = () => { if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null; } };
+
+    // Hit-test the finger against every track lane plus the piano-roll body.
+    // Returns { kind: 'lane'|'pr', el, rect, track? } or null.
+    const hitTest = (cx, cy) => {
+      const prBody = document.getElementById('seq-pianoroll-body');
+      if (prBody && prBody.offsetParent !== null) {
+        const r = prBody.getBoundingClientRect();
+        if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) {
+          return { kind: 'pr', el: prBody, rect: r };
+        }
+      }
+      const lanes = document.querySelectorAll('.seq-lane[data-track-id]');
+      for (const lane of lanes) {
+        if (lane.offsetParent === null) continue;
+        const r = lane.getBoundingClientRect();
+        if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) {
+          const track = trackById(lane.dataset.trackId);
+          if (!track) continue;
+          return { kind: 'lane', el: lane, rect: r, track };
+        }
+      }
+      return null;
+    };
 
     const autoScroll = () => {
       if (!dragging) return;
@@ -6363,23 +6388,72 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
       else if (y > vh - edge) speed =  maxSpeed * (1 - (vh - y) / edge);
       if (speed !== 0) window.scrollBy(0, speed);
 
-      const midiLane = document.getElementById('seq-midi-lane');
-      if (midiLane && midiLane.classList.contains('roll-mode')) {
-        const laneRect = midiLane.getBoundingClientRect();
-        const laneEdge = 40, laneMaxSpeed = 4;
-        let laneSpeed = 0;
-        if (y < laneRect.top + laneEdge)
-          laneSpeed = -laneMaxSpeed * (1 - (y - laneRect.top) / laneEdge);
-        else if (y > laneRect.bottom - laneEdge)
-          laneSpeed =  laneMaxSpeed * (1 - (laneRect.bottom - y) / laneEdge);
-        if (laneSpeed !== 0) {
-          midiLane.scrollTop += laneSpeed;
-          updateRollOverflow();
-          updateKeyboardPosition();
+      // Auto-scroll the piano-roll body vertically AND horizontally when the
+      // finger is over it near an edge — lets you drop chords on notes that
+      // are outside the visible roll viewport.
+      const prBody = document.getElementById('seq-pianoroll-body');
+      if (prBody && prBody.offsetParent !== null) {
+        const r = prBody.getBoundingClientRect();
+        if (lastTouch.clientX >= r.left && lastTouch.clientX <= r.right) {
+          const edge2 = 40, maxSpeed2 = 4;
+          let spy = 0;
+          if (y < r.top + edge2)         spy = -maxSpeed2 * (1 - (y - r.top) / edge2);
+          else if (y > r.bottom - edge2) spy =  maxSpeed2 * (1 - (r.bottom - y) / edge2);
+          if (spy !== 0) prBody.scrollTop += spy;
+        }
+        if (y >= r.top && y <= r.bottom) {
+          const edgeH = 50, maxSpH = 14;
+          let spx = 0;
+          if (lastTouch.clientX < r.left + edgeH)
+            spx = -maxSpH * (1 - (lastTouch.clientX - r.left) / edgeH);
+          else if (lastTouch.clientX > r.right - edgeH)
+            spx =  maxSpH * (1 - (r.right - lastTouch.clientX) / edgeH);
+          if (spx !== 0) prBody.scrollLeft += spx;
         }
       }
 
+      // Horizontal auto-scroll in the arrangement view when the finger is
+      // near the left/right edge of the lane-wrap viewport.
+      const laneWrap = document.getElementById('seq-lane-wrap');
+      if (laneWrap && laneWrap.offsetParent !== null) {
+        const r = laneWrap.getBoundingClientRect();
+        if (y >= r.top && y <= r.bottom) {
+          const edgeH = 60, maxSpH = 18;
+          let sp = 0;
+          if (lastTouch.clientX < r.left + edgeH)
+            sp = -maxSpH * (1 - (lastTouch.clientX - r.left) / edgeH);
+          else if (lastTouch.clientX > r.right - edgeH)
+            sp =  maxSpH * (1 - (r.right - lastTouch.clientX) / edgeH);
+          if (sp !== 0) laneWrap.scrollLeft += sp;
+        }
+      }
+
+      // Roll-mode lanes (the legacy MIDI lane when it shows notes inline)
+      // also need vertical scroll while a chord-drag is over them.
+      document.querySelectorAll('.seq-lane[data-track-id].roll-mode').forEach(l => {
+        const r = l.getBoundingClientRect();
+        if (lastTouch.clientX < r.left || lastTouch.clientX > r.right) return;
+        const edge2 = 40, maxSpeed2 = 4;
+        let sp = 0;
+        if (y < r.top + edge2)         sp = -maxSpeed2 * (1 - (y - r.top) / edge2);
+        else if (y > r.bottom - edge2) sp =  maxSpeed2 * (1 - (r.bottom - y) / edge2);
+        if (sp !== 0) {
+          l.scrollTop += sp;
+          if (typeof updateRollOverflow === 'function') updateRollOverflow();
+          if (typeof updateKeyboardPosition === 'function') updateKeyboardPosition();
+        }
+      });
+
       scrollRaf = requestAnimationFrame(autoScroll);
+    };
+
+    const clearAllLaneGhosts = () => {
+      document.querySelectorAll('.seq-lane[data-track-id]').forEach(l => {
+        l.classList.remove('drag-over');
+        l.querySelector('.seq-drop-hint')?.style.removeProperty('color');
+        seqClearGhost(l);
+        if (typeof seqClearRollGhost === 'function') seqClearRollGhost(l);
+      });
     };
 
     const cleanup = () => {
@@ -6389,14 +6463,8 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
       stopScroll();
       if (ghost) { ghost.remove(); ghost = null; }
       document.body.classList.remove('seq-dragging-chord', 'seq-dragging-note');
-      for (const lid of ['seq-lane', 'seq-note-lane', 'seq-midi-lane']) {
-        const l = document.getElementById(lid);
-        if (!l) continue;
-        l.classList.remove('drag-over');
-        l.querySelector('.seq-drop-hint')?.style.removeProperty('color');
-        seqClearGhost(l);
-        seqClearRollGhost(l);
-      }
+      clearAllLaneGhosts();
+      clearPrGhost();
     };
 
     const onMove = (ev) => {
@@ -6417,31 +6485,62 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
         const isChordData = data.interval !== undefined;
         document.body.classList.add(isChordData ? 'seq-dragging-chord' : 'seq-dragging-note');
         SEQ._dragChord = isChordData ? { interval: data.interval, q: data.q } : null;
-        const lane = document.getElementById(laneId);
-        if (lane) lane.querySelector('.seq-drop-hint')?.style.setProperty('color', 'var(--accent)');
         autoScroll();
       }
       ev.preventDefault();
       ghost.style.left = t.clientX + 'px';
       ghost.style.top  = t.clientY + 'px';
-      for (const lid of ['seq-lane', 'seq-note-lane', 'seq-midi-lane']) {
-        const l = document.getElementById(lid);
-        if (!l) continue;
-        const r = l.getBoundingClientRect();
-        if (t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom) {
-          const beat = Math.max(0, Math.floor(((t.clientX - r.left) / BEAT_PX) * 2) / 2);
-          const beats = lid === 'seq-note-lane' ? 1 : state.beatsPerBar;
-          if (lid === 'seq-midi-lane' && SEQ._dragChord && l.classList.contains('roll-mode')) {
-            seqClearGhost(l);
-            seqSetRollGhost(l, beat, beats, chordNotesAtY(l, t.clientY, SEQ._dragChord.interval, SEQ._dragChord.q));
-          } else {
-            seqClearRollGhost(l);
-            seqSetGhost(l, beat, beats);
-          }
+
+      clearAllLaneGhosts();
+      clearPrGhost();
+
+      const hit = hitTest(t.clientX, t.clientY);
+      if (!hit) return;
+      const data = getData();
+      const isChord = data.interval !== undefined;
+
+      if (hit.kind === 'lane') {
+        const track = hit.track;
+        // Chord tracks only accept chord drops; free tracks accept both.
+        if (track.kind === 'chord' && !isChord) return;
+        const beat  = Math.max(0, Math.floor(((t.clientX - hit.rect.left) / BEAT_PX) * 2) / 2);
+        const beats = isChord ? state.beatsPerBar : 1;
+        hit.el.classList.add('drag-over');
+        hit.el.querySelector('.seq-drop-hint')?.style.setProperty('color', 'var(--accent)');
+        if (isChord && hit.el.classList.contains('roll-mode') && typeof seqSetRollGhost === 'function') {
+          seqSetRollGhost(hit.el, beat, beats, chordNotesAtY(hit.el, t.clientY, data.interval, data.q));
         } else {
-          seqClearGhost(l);
-          seqClearRollGhost(l);
+          seqSetGhost(hit.el, beat, beats);
         }
+      } else if (hit.kind === 'pr') {
+        if (!isChord) return;
+        const { track, clip } = focusedClipObjects();
+        if (!track || !clip) return;
+        const body = hit.el;
+        const beat = Math.max(0, Math.floor(((t.clientX - hit.rect.left + body.scrollLeft - prKbW()) / PR_BEAT_PX) * 2) / 2);
+        const cursorMidi = Math.max(0, Math.min(127, body._prHi - Math.floor((t.clientY - hit.rect.top + body.scrollTop) / PR_ROW_H)));
+        const baseNotes = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
+        if (baseNotes.length === 0) return;
+        const root = baseNotes[0];
+        const shift = Math.round((cursorMidi - root) / 12) * 12;
+        const notes = baseNotes.map(m => m + shift);
+        if (prGhostNotes.length !== notes.length) {
+          clearPrGhost();
+          notes.forEach(() => {
+            const g = document.createElement('div');
+            g.className = 'pr-note pr-ghost-note';
+            body.appendChild(g);
+            prGhostNotes.push(g);
+          });
+        }
+        notes.forEach((midi, i) => {
+          const g = prGhostNotes[i];
+          g.style.left   = (beat * PR_BEAT_PX + prKbW()) + 'px';
+          g.style.width  = (state.beatsPerBar * PR_BEAT_PX) + 'px';
+          g.style.top    = ((body._prHi - midi) * PR_ROW_H) + 'px';
+          g.style.height = (PR_ROW_H - 2) + 'px';
+          g.textContent  = midiNoteLabel(midi);
+        });
       }
     };
 
@@ -6449,54 +6548,72 @@ function seqStartTouchDrag(touch, laneId, getData, onCancelPlay) {
       const t = Array.from(ev.changedTouches).find(t => t.identifier === tid);
       if (!t) return;
       if (!dragging) { cleanup(); return; }
-      const dropX = t.clientX, dropY = t.clientY;
-      cleanup();
+      const hit = hitTest(t.clientX, t.clientY);
       const data = getData();
       const isChord = data.interval !== undefined;
-      // Find which lane was actually hit (allows cross-lane drops)
-      let hitLaneId = null, hitBeat = 0;
-      for (const lid of ['seq-lane', 'seq-note-lane', 'seq-midi-lane']) {
-        const laneEl = document.getElementById(lid);
-        if (!laneEl) continue;
-        const r = laneEl.getBoundingClientRect();
-        if (dropX >= r.left && dropX <= r.right && dropY >= r.top && dropY <= r.bottom) {
-          hitLaneId = lid;
-          hitBeat = Math.max(0, Math.floor(((dropX - r.left) / BEAT_PX) * 2) / 2);
-          break;
-        }
-      }
-      if (!hitLaneId) return;
+      cleanup();
+      if (!hit) return;
       seqCheckpoint();
-      if (hitLaneId === 'seq-midi-lane') {
-        if (isChord) {
-          const notes = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
-          notes.forEach(midi => SEQ.midiItems.push({ midi, label: midiNoteLabel(midi), beats: state.beatsPerBar, start: hitBeat }));
-        } else {
-          SEQ.midiItems.push({ midi: data.midi, label: data.label, beats: 1, start: hitBeat });
-        }
-        SEQ.midiItems.sort((a, b) => a.start - b.start);
-        seqAutoExtendLoop(hitBeat + (isChord ? state.beatsPerBar : 1));
-        seqRenderMidi();
-        seqResyncMidi();
-      } else if (hitLaneId === 'seq-note-lane') {
-        if (isChord) return;
-        SEQ.noteItems.push({ midi: data.midi, label: data.label, beats: 1, start: hitBeat });
-        SEQ.noteItems.sort((a, b) => a.start - b.start);
-        seqAutoExtendLoop(hitBeat + 1);
-        seqRenderNotes();
-        seqResyncNotes();
-      } else {
+      if (hit.kind === 'pr') {
         if (!isChord) return;
-        SEQ.items.push({
+        const { track, clip } = focusedClipObjects();
+        if (!track || !clip) return;
+        const body = hit.el;
+        const beat = Math.max(0, Math.floor(((t.clientX - hit.rect.left + body.scrollLeft - prKbW()) / PR_BEAT_PX) * 2) / 2);
+        const cursorMidi = Math.max(0, Math.min(127, body._prHi - Math.floor((t.clientY - hit.rect.top + body.scrollTop) / PR_ROW_H)));
+        const baseNotes = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
+        if (baseNotes.length === 0) return;
+        const root = baseNotes[0];
+        const shift = Math.round((cursorMidi - root) / 12) * 12;
+        baseNotes.map(m => m + shift).forEach(midi => clip.notes.push({
+          midi, label: midiNoteLabel(midi),
+          start: beat, beats: state.beatsPerBar,
+        }));
+        clip.notes.sort((a, b) => a.start - b.start);
+        if (beat + state.beatsPerBar > clip.beats) clip.beats = beat + state.beatsPerBar;
+        seqAutoExtendLoop(clip.start + clip.beats);
+        renderPianoRoll();
+        seqRenderTrack(track);
+        seqResyncTrack(track);
+        seqSave();
+        return;
+      }
+      // Lane drop — dispatch by track kind.
+      const track   = hit.track;
+      const dropBeat = Math.max(0, Math.floor(((t.clientX - hit.rect.left) / BEAT_PX) * 2) / 2);
+      if (track.kind === 'chord') {
+        if (!isChord) return;
+        track.items.push({
           interval: data.interval, q: data.q, bassInterval: data.bassInterval, label: data.label,
-          beats: state.beatsPerBar, start: hitBeat,
+          beats: state.beatsPerBar, start: dropBeat,
           keyRoot: state.keys[state.currentTemplate], template: state.currentTemplate,
         });
-        SEQ.items.sort((a, b) => a.start - b.start);
-        seqAutoExtendLoop(hitBeat + state.beatsPerBar);
-        seqRender();
-        seqResyncChords();
+        track.items.sort((a, b) => a.start - b.start);
+        seqAutoExtendLoop(dropBeat + state.beatsPerBar);
+      } else if (isChord) {
+        const beats = state.beatsPerBar;
+        const midis = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
+        const clip  = makeClip({
+          start: dropBeat, beats,
+          label: data.label || null,
+          notes: midis.map(midi => ({ midi, label: midiNoteLabel(midi), start: 0, beats })),
+        });
+        track.items.push(clip);
+        track.items.sort((a, b) => a.start - b.start);
+        seqAutoExtendLoop(dropBeat + beats);
+      } else {
+        const clip = makeClip({
+          start: dropBeat, beats: 1,
+          label: data.label,
+          notes: [{ midi: data.midi, label: data.label, start: 0, beats: 1 }],
+        });
+        track.items.push(clip);
+        track.items.sort((a, b) => a.start - b.start);
+        seqAutoExtendLoop(dropBeat + 1);
       }
+      seqRenderTrack(track);
+      seqResyncTrack(track);
+      seqSave();
     };
 
     document.addEventListener('touchmove',   onMove, { passive: false });
