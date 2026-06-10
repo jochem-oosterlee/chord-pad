@@ -1664,7 +1664,7 @@ input[type="range"]::-moz-range-thumb {
   margin: 0 4px;
 }
 .seq-snap-select:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
-.seq-snap-select:focus { outline: none; border-color: var(--accent); }
+.seq-snap-select:focus { outline: none; }
 .seq-snap-select option { background: #1a1b1e; color: var(--text); }
 
 /* Experimental: snap knob next to the dropdown.
@@ -1858,7 +1858,6 @@ input[type="range"]::-moz-range-thumb {
   transition: all 0.1s ease;
 }
 .seq-chordlen-wrap:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
-.seq-chordlen-wrap:focus-within { border-color: var(--accent); }
 .seq-chordlen-wrap i,
 .seq-chordlen-wrap svg { width: 13px; height: 13px; color: inherit; pointer-events: none; }
 .seq-chordlen-select {
