@@ -1792,6 +1792,52 @@ input[type="range"]::-moz-range-thumb {
   margin: 2px 4px;
   align-self: stretch;
 }
+/* Snap picker: magnet toggle button + native <select> packed into a
+   single button-shaped box, same dimensions as .seq-chordlen-wrap.
+   The icon stays a real <button> (clicking it toggles snap on/off),
+   the select dropdown still opens by clicking the value. */
+.seq-snap-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  height: 24px;
+  padding: 0 0 0 6px;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 4px;
+  color: var(--text-dim);
+  background: none;
+  box-sizing: border-box;
+  transition: all 0.1s ease;
+}
+.seq-snap-wrap:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
+.seq-snap-wrap:focus-within { border-color: var(--accent); }
+/* Inner toggle button — strip its own border/background; keep clickable. */
+.seq-snap-wrap .seq-snap-toggle {
+  border: 0 !important;
+  background: none !important;
+  padding: 0 4px 0 0 !important;
+  min-width: 0 !important;
+  height: 100%;
+  color: inherit !important;
+}
+.seq-snap-wrap .seq-snap-toggle:hover { color: var(--text) !important; }
+.seq-snap-wrap .seq-snap-toggle.active {
+  background: none !important;
+  color: var(--accent) !important;
+}
+.seq-snap-wrap .seq-snap-toggle i,
+.seq-snap-wrap .seq-snap-toggle svg { width: 13px; height: 13px; }
+/* Inner select — reset .seq-snap-select chrome (wrapper provides it). */
+.seq-snap-wrap .seq-snap-select {
+  border: 0 !important;
+  background: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  height: 100%;
+  color: inherit;
+}
+.seq-snap-wrap .seq-snap-select:focus { outline: none; }
+
 /* Chord-length picker: icon + native <select> packed into a single
    button-shaped box. The wrapper carries the border + sizing; the
    inner select drops its own chrome (border/background) so the two
