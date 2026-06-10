@@ -83,12 +83,18 @@ function _buildAudioCtx() {
   ctx._delay    = delay;
   ctx._delayFb  = delayFb;
   ctx._delayWet = delayWet;
-  // Warm up audio graph so first chord hits a primed compressor
+  return ctx;
+}
+// Prime the audio graph (compressor / reverb / delay) with a silent
+// oscillator so the first real note doesn't see a "cold" compressor
+// attack. Has to run AFTER the first user gesture — wo.start() on a
+// suspended context logs an autoplay warning. Called from
+// _unlockAudioCtxOnGesture below.
+function _warmupAudioGraph(ctx) {
   const wo = ctx.createOscillator();
   const wg = ctx.createGain(); wg.gain.value = 0;
   wo.connect(wg); wg.connect(ctx._out);
   wo.start(); wo.stop(ctx.currentTime + 0.01);
-  return ctx;
 }
 
 // Release audio device cleanly on page unload so Windows doesn't get stuck
@@ -112,6 +118,7 @@ function getAudioCtx() {
 function _unlockAudioCtxOnGesture() {
   _audioCtxUnlocked = true;
   if (audioCtx?.state === 'suspended') audioCtx.resume().catch(() => {});
+  if (audioCtx) _warmupAudioGraph(audioCtx);
   _drainPreloadQueue();
   ['pointerdown', 'keydown', 'touchstart'].forEach(ev =>
     window.removeEventListener(ev, _unlockAudioCtxOnGesture, true)
