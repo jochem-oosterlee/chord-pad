@@ -2031,18 +2031,16 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 .seq-add-track-btn {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px; letter-spacing: 0.08em;
-  background: rgba(255,255,255,0.04);
+  background: none;
   border: 0;
   color: rgba(255,255,255,0.55);
-  border-radius: 4px;
   padding: 6px 8px;
   cursor: pointer;
-  transition: color 0.12s, background 0.12s;
+  transition: color 0.12s;
   margin-top: 4px;
 }
-.seq-add-track-btn:hover {
-  color: var(--accent);
-  background: rgba(255,170,51,0.06);
+@media (hover: hover) {
+  .seq-add-track-btn:hover { color: var(--accent); }
 }
 
 /* Piano-roll detail-view, opens at the bottom of the sequencer when a
