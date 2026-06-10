@@ -10732,6 +10732,10 @@ function _wireEditBtn(id, fn) {
   btn.addEventListener('mousedown', e => e.preventDefault());
   btn.addEventListener('click', () => fn());
 }
+_wireEditBtn('seq-arr-edit-undo',      () => seqUndo());
+_wireEditBtn('seq-arr-edit-redo',      () => seqRedo());
+_wireEditBtn('seq-pr-edit-undo',       () => seqUndo());
+_wireEditBtn('seq-pr-edit-redo',       () => seqRedo());
 _wireEditBtn('seq-arr-edit-cut',       () => seqCutSelection());
 _wireEditBtn('seq-arr-edit-copy',      () => seqCopySelection());
 _wireEditBtn('seq-arr-edit-paste',     () => seqPasteSelection());
