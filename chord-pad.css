@@ -1792,6 +1792,20 @@ input[type="range"]::-moz-range-thumb {
   margin: 2px 4px;
   align-self: stretch;
 }
+/* Non-interactive icon used as a label in front of a select-dropdown
+   (e.g. the chord-length picker). Styled like a tool-button but
+   without hover/active states. */
+.seq-tool-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  color: var(--text-dim);
+  pointer-events: none;
+  user-select: none;
+}
+.seq-tool-icon i,
+.seq-tool-icon svg { width: 13px; height: 13px; }
 .seq-latency-ctrl {
   display: inline-flex; align-items: center; gap: 4px;
   font-family: 'JetBrains Mono', monospace; font-size: 10px;
