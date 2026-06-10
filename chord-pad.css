@@ -2016,7 +2016,6 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   padding: 4px 6px;
   user-select: none;
   border-radius: 0;
-  background: rgba(255,255,255,0.025);
   border: 0;
   border-bottom: 1px solid rgba(255,255,255,0.08);
   transition: color 0.15s;
@@ -2342,22 +2341,16 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 }
 .seq-th-del:hover { color: #ff7766; }
 
-/* "→ Free" convert button on chord-track headers */
+/* "→ Free" convert button on chord-track headers — same minimal look
+   as the other track-header icon buttons (fx / collapse / delete). */
 .seq-th-convert {
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 3px;
-  width: 18px; height: 18px;
-  padding: 0;
-  color: rgba(255,255,255,0.55);
-  cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; padding: 0 2px;
+  color: rgba(255,255,255,0.35); cursor: pointer;
+  display: inline-flex; align-items: center;
 }
-.seq-th-convert .lucide { width: 11px; height: 11px; }
-.seq-th-convert:hover {
-  color: var(--accent);
-  border-color: rgba(255,170,51,0.45);
-  background: rgba(255,170,51,0.08);
+.seq-th-convert .lucide { width: 12px; height: 12px; }
+@media (hover: hover) {
+  .seq-th-convert:hover { color: var(--accent); }
 }
 
 /* Add-track dropdown menu */
