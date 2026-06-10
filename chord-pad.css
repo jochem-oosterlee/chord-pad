@@ -1355,7 +1355,7 @@ input[type="range"]::-moz-range-thumb {
   padding: 12px 20px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 24px;
 }
 .seq-header {
   font-size: 9px;
@@ -1643,7 +1643,6 @@ input[type="range"]::-moz-range-thumb {
 }
 .seq-arrangement-tools {
   display: flex; align-items: center; gap: 4px;
-  margin: 12px 0;
 }
 /* Snap-unit dropdown (track + roll toolbars). Matches .seq-timesig style. */
 .seq-snap-select {
@@ -1983,7 +1982,7 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   flex: 1;
   min-width: 0;
   overflow-x: auto;
-  padding-top: 2px;
+  padding-top: 4px;
   padding-bottom: 4px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255,255,255,0.15) transparent;
@@ -2033,17 +2032,16 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px; letter-spacing: 0.08em;
   background: rgba(255,255,255,0.04);
-  border: 1px dashed rgba(255,255,255,0.18);
+  border: 0;
   color: rgba(255,255,255,0.55);
   border-radius: 4px;
   padding: 6px 8px;
   cursor: pointer;
-  transition: color 0.12s, border-color 0.12s, background 0.12s;
+  transition: color 0.12s, background 0.12s;
   margin-top: 4px;
 }
 .seq-add-track-btn:hover {
   color: var(--accent);
-  border-color: rgba(255,170,51,0.45);
   background: rgba(255,170,51,0.06);
 }
 
