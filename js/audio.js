@@ -458,7 +458,7 @@ function startAudioNote(midiNote, velocity, at = null, autoRelease = null, instr
 // still have the LFS-pulled binary at sf2/FluidR3_GM.sf2 as a fallback.
 const SF2_FILES = {
   fluid: {
-    url: 'https://storage.googleapis.com/chord-pad-assets-jo/FluidR3_GM.sf2',
+    url: 'https://storage.googleapis.com/chord-pad-assets-2026/FluidR3_GM.sf2',
     fallbackUrl: 'sf2/FluidR3_GM.sf2',
     sf2: null, loading: null, total: 0, loaded: 0,
   },
