@@ -94,12 +94,31 @@ function _buildAudioCtx() {
 // Release audio device cleanly on page unload so Windows doesn't get stuck
 window.addEventListener('beforeunload', () => { audioCtx?.close(); });
 
+// Browsers refuse to start an AudioContext until the user has
+// interacted with the page; calling .resume() before that point logs
+// a console warning every time getAudioCtx() runs (which is dozens of
+// times during SF2 prewarm). Gate the resume on a flag that flips on
+// the first user gesture. After that point, getAudioCtx() resumes
+// freely so auto-suspend after tab-blur still recovers on next click.
+let _audioCtxUnlocked = false;
 function getAudioCtx() {
   if (audioCtx?.state === 'closed') audioCtx = null;
   if (!audioCtx) audioCtx = _buildAudioCtx();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (_audioCtxUnlocked && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
   return audioCtx;
 }
+function _unlockAudioCtxOnGesture() {
+  _audioCtxUnlocked = true;
+  if (audioCtx?.state === 'suspended') audioCtx.resume().catch(() => {});
+  ['pointerdown', 'keydown', 'touchstart'].forEach(ev =>
+    window.removeEventListener(ev, _unlockAudioCtxOnGesture, true)
+  );
+}
+['pointerdown', 'keydown', 'touchstart'].forEach(ev =>
+  window.addEventListener(ev, _unlockAudioCtxOnGesture, true)
+);
 
 function midiToFreq(note) {
   return 440 * Math.pow(2, (note - 69) / 12);
