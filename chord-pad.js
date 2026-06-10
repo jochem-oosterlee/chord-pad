@@ -5010,7 +5010,6 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
       item.beats = Math.max(snap, item.beats - delta);
       seqAutoExtendLoop(item.start + item.beats);
       if (ownerL) seqRenderTrack(ownerL);
-      else if (isMidi) seqRenderMidi(); else if (isNote) seqRenderNotes(); else seqRender();
     };
     resizeL.addEventListener('pointermove', onMove);
     resizeL.addEventListener('pointerup', onUp);
@@ -5065,7 +5064,6 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
       const i = items2.indexOf(item);
       if (i >= 0) items2.splice(i, 1);
       if (ot2) { seqRenderTrack(ot2); seqResyncTrack(ot2); }
-      else if (isMidi) seqRenderMidi(); else if (isNote) seqRenderNotes(); else seqRender();
       seqSave();
       return;
     }
@@ -5191,7 +5189,6 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
         } else {
           items.sort((a, b) => a.start - b.start);
           if (ownerTrack) seqRenderTrack(ownerTrack);
-          else if (isMidi) seqRenderMidi(); else if (isNote) seqRenderNotes(); else seqRender();
         }
         seqAutoExtendLoop(item.start + item.beats);
       } else if (ownerTrack) {
@@ -5356,25 +5353,6 @@ function seqRender() {
   }
   _appendLaneOverlays(lane);
   seqUpdateLoopVisible();
-  syncTrackLabelHeights();
-  seqRenderRuler();
-  refreshLucide();
-  seqRefreshSelectionVisuals();
-  seqSave();
-}
-
-function seqRenderNotes() {
-  const lane = document.getElementById('seq-note-lane');
-  if (!lane) return;
-  lane.innerHTML = '';
-  if (SEQ.noteItems.length === 0) {
-    lane.style.minWidth = '';
-  } else {
-    lane.style.minWidth = seqLaneWidth(SEQ.noteItems) + 'px';
-    SEQ.noteItems.forEach((item, idx) => lane.appendChild(seqMakeBlock(item, idx, true)));
-  }
-  seqRollAddLines(lane);
-  seqUpdateLoopEnd();
   syncTrackLabelHeights();
   seqRenderRuler();
   refreshLucide();
@@ -6030,7 +6008,6 @@ function seqResyncAllThrottled() {
 
 function seqResyncChords() { seqResyncTrack(firstTrackOfKind('chord')); }
 
-function seqResyncNotes() { /* melody removed — no-op */ }
 
 function seqResyncMidi() { seqResyncTrack(firstTrackOfKind('free')); }
 
@@ -6598,50 +6575,6 @@ function initSeqLanePan() {
     const touch = e.changedTouches[0];
     const tid   = touch.identifier;
 
-    // Pen tool: draw note on roll
-    if (SEQ.rollTool === 'pen' && laneEl.id === 'seq-midi-lane') {
-      e.preventDefault();
-      const laneRect  = laneEl.getBoundingClientRect();
-      const relX      = touch.clientX - laneRect.left + wrap.scrollLeft;
-      const relY      = touch.clientY - laneRect.top  + laneEl.scrollTop;
-      const startBeat = rollSnapFloor(relX / BEAT_PX);
-      const midi      = Math.max(ROLL_BOT_MIDI, Math.min(ROLL_TOP_MIDI, ROLL_TOP_MIDI - Math.floor(relY / ROLL_ROW_H)));
-      const defBeats  = SEQ.rollSnap ? SEQ.rollSnapVal : 0.25;
-      const ghost     = document.createElement('div');
-      ghost.className = 'roll-note roll-note-ghost';
-      ghost.style.left   = (startBeat * BEAT_PX) + 'px';
-      ghost.style.top    = (ROLL_TOP_MIDI - midi) * ROLL_ROW_H + 'px';
-      ghost.style.height = (ROLL_ROW_H - 1) + 'px';
-      ghost.style.width  = (defBeats * BEAT_PX) + 'px';
-      laneEl.appendChild(ghost);
-      let beats = defBeats;
-      const onMove = (ev) => {
-        const t = Array.from(ev.changedTouches).find(t => t.identifier === tid);
-        if (!t) return;
-        ev.preventDefault();
-        const rx = t.clientX - laneRect.left + wrap.scrollLeft;
-        const raw = Math.max(defBeats, rx / BEAT_PX - startBeat);
-        beats = SEQ.rollSnap ? Math.max(SEQ.rollSnapVal, rollSnapBeat(raw)) : Math.max(0.25, Math.round(raw * 4) / 4);
-        ghost.style.width = (beats * BEAT_PX) + 'px';
-      };
-      const onUp = () => {
-        document.removeEventListener('touchmove', onMove);
-        document.removeEventListener('touchend',  onUp);
-        document.removeEventListener('touchcancel', onUp);
-        ghost.remove();
-        seqCheckpoint();
-        SEQ.midiItems.push({ midi, label: midiNoteLabel(midi), beats, start: startBeat });
-        SEQ.midiItems.sort((a, b) => a.start - b.start);
-        seqAutoExtendLoop(startBeat + beats);
-        seqRenderMidi();
-        seqResyncMidi();
-      };
-      document.addEventListener('touchmove',   onMove, { passive: false });
-      document.addEventListener('touchend',    onUp);
-      document.addEventListener('touchcancel', onUp);
-      return;
-    }
-
     const pan = startPan(touch.clientX, touch.clientY, laneEl);
     const onMove = (ev) => {
       const t = Array.from(ev.changedTouches).find(t => t.identifier === tid);
@@ -6664,49 +6597,9 @@ function initSeqLanePan() {
     if (target.closest(EXCLUDE)) return;
     const laneEl = target.closest('#seq-lane, #seq-note-lane, #seq-midi-lane');
     if (!laneEl) return;
-    // Click on empty lane area clears selection (unless modifier or pen tool)
-    if (!target.closest('.seq-block, .roll-note') && !e.ctrlKey && !e.metaKey && !e.shiftKey
-        && !(SEQ.rollTool === 'pen' && laneEl.id === 'seq-midi-lane')) {
+    // Click on empty lane area clears selection (unless modifier held)
+    if (!target.closest('.seq-block, .roll-note') && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       seqClearSelection();
-    }
-
-    // Pen tool: draw note on roll background — drag sets duration
-    if (SEQ.rollTool === 'pen' && laneEl.id === 'seq-midi-lane') {
-      const laneRect = laneEl.getBoundingClientRect();
-      const relX = e.clientX - laneRect.left + wrap.scrollLeft;
-      const relY = e.clientY - laneRect.top + laneEl.scrollTop;
-      const startBeat = rollSnapFloor(relX / BEAT_PX);
-      const midi = Math.max(ROLL_BOT_MIDI, Math.min(ROLL_TOP_MIDI, ROLL_TOP_MIDI - Math.floor(relY / ROLL_ROW_H)));
-      const defBeats = SEQ.rollSnap ? SEQ.rollSnapVal : 0.25;
-      // Ghost element for live preview
-      const ghost = document.createElement('div');
-      ghost.className = 'roll-note roll-note-ghost';
-      ghost.style.left   = (startBeat * BEAT_PX) + 'px';
-      ghost.style.top    = (ROLL_TOP_MIDI - midi) * ROLL_ROW_H + 'px';
-      ghost.style.height = (ROLL_ROW_H - 1) + 'px';
-      ghost.style.width  = (defBeats * BEAT_PX) + 'px';
-      laneEl.appendChild(ghost);
-      let beats = defBeats;
-      const onMove = (ev) => {
-        const rx = ev.clientX - laneRect.left + wrap.scrollLeft;
-        const raw = Math.max(defBeats, rx / BEAT_PX - startBeat);
-        beats = SEQ.rollSnap ? Math.max(SEQ.rollSnapVal, rollSnapBeat(raw)) : Math.max(0.25, Math.round(raw * 4) / 4);
-        ghost.style.width = (beats * BEAT_PX) + 'px';
-      };
-      const onUp = () => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        ghost.remove();
-        seqCheckpoint();
-        SEQ.midiItems.push({ midi, label: midiNoteLabel(midi), beats, start: startBeat });
-        SEQ.midiItems.sort((a, b) => a.start - b.start);
-        seqAutoExtendLoop(startBeat + beats);
-        seqRenderMidi();
-        seqResyncMidi();
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-      return;
     }
 
     const pan = startPan(e.clientX, e.clientY, laneEl);
@@ -7513,9 +7406,7 @@ document.getElementById('seq-clear-btn')?.addEventListener('click', () => {
   SEQ.items = [];
   SEQ.noteItems = [];
   SEQ.midiItems = [];
-  seqRender();
-  seqRenderNotes();
-  seqRenderMidi();
+  seqRenderAll();
 });
 
 document.getElementById('seq-tempo-down').addEventListener('click', () => {
@@ -7569,10 +7460,7 @@ document.getElementById('seq-timesig').value  = String(state.beatsPerBar);
 document.getElementById('seq-tempo-val').value = state.tempo;
 document.getElementById('ctrl-tempo').value    = state.tempo;
 document.getElementById('seq-loop-btn').classList.toggle('active', SEQ.loop);
-seqRender();
-seqRenderNotes();
-seqRenderMidi();
-seqRenderAll(); // render any extra tracks too
+seqRenderAll();
 syncTrackLabelHeights();
 refreshLucide();
 requestAnimationFrame(seqUpdateHints);
