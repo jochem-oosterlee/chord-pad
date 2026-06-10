@@ -1793,14 +1793,24 @@ input[type="range"]::-moz-range-thumb {
   align-self: stretch;
 }
 /* Non-interactive icon used as a label in front of a select-dropdown
-   (e.g. the chord-length picker). Styled like a tool-button but
-   without hover/active states. */
+   (e.g. the chord-length picker). Inherits the same box, border,
+   colors and icon-size as .seq-tool-btn — just without hover/active
+   states or click affordance. */
 .seq-tool-icon {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.25);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 0 10px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+  min-width: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px; height: 18px;
-  color: var(--text-dim);
+  height: 24px;
+  box-sizing: border-box;
   pointer-events: none;
   user-select: none;
 }
