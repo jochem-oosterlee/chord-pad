@@ -4285,6 +4285,27 @@ _wireEditBtn('seq-arr-edit-paste',     () => seqPasteSelection());
 _wireEditBtn('seq-arr-edit-duplicate', () => seqDuplicateSelection());
 _wireEditBtn('seq-arr-edit-delete',    () => seqDeleteSelection());
 _wireEditBtn('seq-arr-edit-quantize',  () => seqQuantizeSelection());
+// Project export / import (download / upload .json).
+_wireEditBtn('seq-arr-project-export', () => seqExportProject());
+_wireEditBtn('seq-arr-project-import', () => document.getElementById('seq-arr-project-import-input')?.click());
+document.getElementById('seq-arr-project-import-input')?.addEventListener('change', (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!seqImportProject(data)) {
+        alert('Could not import project — JSON did not match expected shape.');
+      }
+    } catch (err) {
+      alert('Could not parse JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  // Clear so picking the same file twice still triggers change.
+  e.target.value = '';
+});
 _wireEditBtn('seq-pr-edit-cut',        () => prCutNotes());
 _wireEditBtn('seq-pr-edit-copy',       () => prCopyNotes());
 _wireEditBtn('seq-pr-edit-paste',      () => prPasteNotes());

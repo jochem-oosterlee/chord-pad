@@ -1074,32 +1074,98 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
 
 const SEQ_KEY = 'chord-pad-seq-v1';
 
+// Produce the JSON-serializable snapshot of the whole project. Same shape
+// used by seqSave() (→ localStorage) and seqExportProject() (→ download).
+function seqProjectSnapshot() {
+  // Serialize each track minus its transient playback / drag state.
+  const tracksOut = SEQ.tracksList.map(t => ({
+    id: t.id, kind: t.kind, name: t.name,
+    instrument: t.instrument, channel: t.channel, volume: t.volume, output: t.output, midiPortId: t.midiPortId, midiInPortId: t.midiInPortId,
+    muted: t.muted, soloed: t.soloed, synth: t.synth,
+    items: t.items,
+  }));
+  return {
+    tracksList: tracksOut,
+    loopStart: SEQ.loopStart,
+    loopEnd: SEQ.loopEnd,
+    loop: SEQ.loop,
+    beatsPerBar: state.beatsPerBar,
+    tempo: state.tempo,
+    volumeBalance: state.volumeBalance,
+    padOutput: state.padOutput,
+    padChannel: state.padChannel,
+    padMidiPortId: state.padMidiPortId,
+    midiClockPortId: state.midiClockPortId,
+    midiClockEnabled: state.midiClockEnabled,
+    prBodyHeight: SEQ.prBodyHeight,
+    visualLatencyMs: SEQ.visualLatencyMs,
+  };
+}
 function seqSave() {
-  try {
-    // Serialize each track minus its transient playback / drag state.
-    const tracksOut = SEQ.tracksList.map(t => ({
-      id: t.id, kind: t.kind, name: t.name,
-      instrument: t.instrument, channel: t.channel, volume: t.volume, output: t.output, midiPortId: t.midiPortId, midiInPortId: t.midiInPortId,
-      muted: t.muted, soloed: t.soloed, synth: t.synth,
-      items: t.items,
-    }));
-    localStorage.setItem(SEQ_KEY, JSON.stringify({
-      tracksList: tracksOut,
-      loopStart: SEQ.loopStart,
-      loopEnd: SEQ.loopEnd,
-      loop: SEQ.loop,
-      beatsPerBar: state.beatsPerBar,
-      tempo: state.tempo,
-      volumeBalance: state.volumeBalance,
-      padOutput: state.padOutput,
-      padChannel: state.padChannel,
-      padMidiPortId: state.padMidiPortId,
-      midiClockPortId: state.midiClockPortId,
-      midiClockEnabled: state.midiClockEnabled,
-      prBodyHeight: SEQ.prBodyHeight,
-      visualLatencyMs: SEQ.visualLatencyMs,
-    }));
-  } catch (_) {}
+  try { localStorage.setItem(SEQ_KEY, JSON.stringify(seqProjectSnapshot())); } catch (_) {}
+}
+
+// Trigger a browser download of the current project as a .json file.
+function seqExportProject() {
+  const data  = JSON.stringify({ chordPad: 1, savedAt: new Date().toISOString(), ...seqProjectSnapshot() }, null, 2);
+  const blob  = new Blob([data], { type: 'application/json' });
+  const url   = URL.createObjectURL(blob);
+  const a     = document.createElement('a');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  a.href = url;
+  a.download = `chord-pad-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Apply an imported project snapshot. Same logic as seqLoad but reading
+// from an arbitrary object instead of localStorage. Re-renders + saves
+// so the new state immediately takes over (and persists).
+function seqImportProject(d) {
+  if (!d || typeof d !== 'object') return false;
+  // Drop transient runtime state before swapping.
+  if (SEQ.playing) seqStop();
+  if (typeof d.loopStart       === 'number')  SEQ.loopStart        = d.loopStart;
+  if (typeof d.loopEnd         === 'number')  SEQ.loopEnd          = d.loopEnd;
+  if (typeof d.loop            === 'boolean') SEQ.loop             = d.loop;
+  if (typeof d.beatsPerBar     === 'number')  state.beatsPerBar    = d.beatsPerBar;
+  if (typeof d.tempo           === 'number')  state.tempo          = d.tempo;
+  if (typeof d.volumeBalance   === 'boolean') state.volumeBalance  = d.volumeBalance;
+  if (d.padOutput === 'midi' || d.padOutput === 'instrument') state.padOutput = d.padOutput;
+  if (typeof d.padChannel      === 'number')  state.padChannel     = Math.max(0, Math.min(15, d.padChannel));
+  if (typeof d.padMidiPortId   === 'string')  state.padMidiPortId  = d.padMidiPortId;
+  if (typeof d.midiClockPortId === 'string')  state.midiClockPortId = d.midiClockPortId;
+  if (typeof d.midiClockEnabled === 'boolean') state.midiClockEnabled = d.midiClockEnabled;
+  if (typeof d.prBodyHeight    === 'number')  SEQ.prBodyHeight     = d.prBodyHeight;
+  if (typeof d.visualLatencyMs === 'number')  SEQ.visualLatencyMs  = d.visualLatencyMs;
+  if (Array.isArray(d.tracksList)) {
+    SEQ.tracksList.length = 0;
+    for (const tIn of d.tracksList) {
+      let items = Array.isArray(tIn.items) ? tIn.items : [];
+      if ((tIn.kind || 'free') === 'free') {
+        items = items.map(it => Array.isArray(it.notes) ? it : clipFromLegacyNote(it));
+      }
+      SEQ.tracksList.push(makeTrack({
+        id: tIn.id, kind: tIn.kind || 'free', name: tIn.name,
+        instrument: tIn.instrument, channel: tIn.channel, volume: tIn.volume,
+        output: tIn.output, midiPortId: tIn.midiPortId, midiInPortId: tIn.midiInPortId,
+        muted: tIn.muted, soloed: tIn.soloed, synth: tIn.synth,
+        items,
+      }));
+    }
+  }
+  // Clear selection — old refs point at removed item objects.
+  SEQ.selection = [];
+  if (SEQ.prSelection) SEQ.prSelection.clear();
+  SEQ.focusedClip = null;
+  // Rebuild UI from scratch + persist.
+  if (typeof rebuildTracksUI === 'function') rebuildTracksUI();
+  if (typeof seqRenderAll === 'function') seqRenderAll();
+  if (typeof renderPianoRoll === 'function') renderPianoRoll();
+  seqSave();
+  return true;
 }
 
 function seqLoad() {
