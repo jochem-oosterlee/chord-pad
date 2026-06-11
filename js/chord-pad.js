@@ -2164,11 +2164,12 @@ function seqRenderRuler() {
   for (const tr of SEQ.tracksList) trackMax = Math.max(trackMax, seqLaneWidth(tr.items));
   const bpb = state.beatsPerBar;
   const extraBars = 32; // empty pannable territory after the last clip
+  const chordItems = firstTrackOfKind('chord')?.items || [];
+  const freeItems  = firstTrackOfKind('free')?.items || [];
   const rawWidth = Math.max(
     trackMax + extraBars * bpb * BEAT_PX,
-    seqLaneWidth(SEQ.items),
-    seqLaneWidth(SEQ.noteItems),
-    seqLaneWidth(SEQ.midiItems),
+    seqLaneWidth(chordItems),
+    seqLaneWidth(freeItems),
     visibleW + extraBars * bpb * BEAT_PX,
     4 * BEAT_PX + 64
   );
@@ -2295,7 +2296,9 @@ function seqRenderRuler() {
 document.getElementById('seq-timesig').addEventListener('change', (e) => {
   state.beatsPerBar = parseInt(e.target.value);
   seqUpdateBarLine();
-  if (SEQ.items.length === 0 && SEQ.noteItems.length === 0 && SEQ.midiItems.length === 0) {
+  const _chord = firstTrackOfKind('chord');
+  const _free  = firstTrackOfKind('free');
+  if (!_chord?.items?.length && !_free?.items?.length) {
     SEQ.loopStart = 0;
     SEQ.loopEnd   = state.beatsPerBar;
     seqUpdateLoopStart();
@@ -2320,10 +2323,11 @@ document.getElementById('seq-loop-btn').addEventListener('click', () => {
 
 document.getElementById('seq-clear-btn')?.addEventListener('click', () => {
   seqStop();
-  if (SEQ.items.length || SEQ.noteItems.length || SEQ.midiItems.length) seqCheckpoint();
-  SEQ.items = [];
-  SEQ.noteItems = [];
-  SEQ.midiItems = [];
+  const _chord = firstTrackOfKind('chord');
+  const _free  = firstTrackOfKind('free');
+  if (_chord?.items?.length || _free?.items?.length) seqCheckpoint();
+  if (_chord) _chord.items.length = 0;
+  if (_free)  _free.items.length  = 0;
   seqRenderAll();
 });
 
