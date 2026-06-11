@@ -1,4 +1,4 @@
-const CACHE = 'chord-pad-v40';
+const CACHE = 'chord-pad-v41';
 const OFFLINE_ASSETS = [
   './chord-pad.html',
   './chord-pad.css',
@@ -6,6 +6,7 @@ const OFFLINE_ASSETS = [
   './js/midi.js',
   './js/audio.js',
   './js/seq.js',
+  './js/pads.js',
   './js/pianoroll.js',
   './manifest.json',
   './icon-192.png',
