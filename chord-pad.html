@@ -24,6 +24,10 @@
   <header class="header">
     <span class="brand" id="brand-logo" title="Triple-click to reset">chord pad</span>
     <div class="header-right">
+      <button class="header-project-btn" id="seq-project-export" title="Export project to JSON file"><i data-lucide="download"></i></button>
+      <button class="header-project-btn" id="seq-project-import" title="Import project from JSON file"><i data-lucide="upload"></i></button>
+      <input type="file" id="seq-project-import-input" accept="application/json,.json" style="display:none">
+      <div class="header-sep"></div>
       <button class="header-section-toggle active" data-section="chord-pad"  title="Chord Pad"><i data-lucide="layout-grid"></i></button>
       <button class="header-section-toggle active" data-section="keyboard"   title="Keyboard"><i data-lucide="keyboard-music"></i></button>
       <button class="header-section-toggle active" data-section="sequencer"  title="Tracks"><i data-lucide="panel-top-bottom-dashed"></i></button>
@@ -357,9 +361,6 @@
       <button class="seq-rec-btn" id="seq-rec-btn"><i data-lucide="circle"></i> Rec</button>
       <button class="seq-metro-btn" id="seq-metro-btn"><i data-lucide="metronome"></i> Metro</button>
       <button class="seq-loop-btn" id="seq-loop-btn"><i data-lucide="repeat"></i> Loop</button>
-      <button class="btn seq-project-btn" id="seq-project-export" title="Export project to JSON file"><i data-lucide="download"></i></button>
-      <button class="btn seq-project-btn" id="seq-project-import" title="Import project from JSON file"><i data-lucide="upload"></i></button>
-      <input type="file" id="seq-project-import-input" accept="application/json,.json" style="display:none">
       <div class="seq-timesig-tempo">
         <select class="seq-timesig" id="seq-timesig">
           <option value="2">2/4</option>

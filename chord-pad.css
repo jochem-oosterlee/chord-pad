@@ -133,6 +133,27 @@ body::before {
 .header-section-toggle:hover { color: rgba(255,255,255,0.65); border-color: rgba(255,255,255,0.10); }
 .header-section-toggle.active { color: var(--accent); border-color: rgba(255,170,51,0.30); }
 .header-section-toggle [data-lucide] { width: 18px; height: 18px; }
+/* Project Export / Import buttons in the top bar — visual twin of
+   .header-section-toggle but never "active". */
+.header-project-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgba(255,255,255,0.30);
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.header-project-btn [data-lucide] { width: 18px; height: 18px; }
+@media (hover: hover) {
+  .header-project-btn:hover { color: rgba(255,255,255,0.65); border-color: rgba(255,255,255,0.10); }
+}
+.header-sep {
+  width: 1px; height: 18px;
+  background: rgba(255,255,255,0.10);
+  margin: 0 4px;
+}
 body.hide-chord-pad .tabs-header,
 body.hide-chord-pad .tabs,
 body.hide-chord-pad .page          { display: none !important; }
@@ -1375,15 +1396,6 @@ input[type="range"]::-moz-range-thumb {
   gap: 8px;
   flex-wrap: wrap;
 }
-/* Project save / load buttons in the transport bar. Sized to match
-   the Play / Rec / Loop trio next to them. */
-.seq-project-btn {
-  padding: 0 8px !important;
-  min-width: 0 !important;
-  height: 26px;
-}
-.seq-project-btn .lucide { width: 14px; height: 14px; }
-
 /* Transport navigation — six small buttons jumping the play cursor to
    start/end of project (T), selection (S) or loop (L). */
 .seq-nav-group {
