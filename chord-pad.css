@@ -2380,6 +2380,23 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 }
 .seq-th-del:hover { color: #ff7766; }
 
+/* Record-arm button on free-track headers. Off = dim circle outline,
+   armed = solid red. While armed and Play hasn't started, the global
+   REC button also lights up. */
+.seq-th-arm {
+  background: transparent; border: 0; padding: 0 2px;
+  color: rgba(255,255,255,0.35); cursor: pointer;
+  display: inline-flex; align-items: center;
+}
+.seq-th-arm .lucide { width: 12px; height: 12px; }
+.seq-th-arm.armed {
+  color: #ff5555;
+}
+.seq-th-arm.armed .lucide { fill: currentColor; }
+@media (hover: hover) {
+  .seq-th-arm:hover { color: #ff5555; }
+}
+
 /* "→ Free" convert button on chord-track headers — same minimal look
    as the other track-header icon buttons (fx / collapse / delete). */
 .seq-th-convert {

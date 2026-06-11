@@ -1936,6 +1936,10 @@ function recStop() {
   REC.pendingChords.clear();
   REC.pendingNotes.clear();
   REC.pendingMidi.clear();
+  if (typeof clearAllPerTrackRecPending === 'function') clearAllPerTrackRecPending();
+  // Drop the per-track arm flag too — fresh session each recording.
+  for (const t of SEQ.tracksList) t.armed = false;
+  document.querySelectorAll('.seq-th-arm.armed').forEach(b => b.classList.remove('armed'));
   if (REC.rafId) { cancelAnimationFrame(REC.rafId); REC.rafId = null; }
   if (!SEQ.playing) metroHalt();
   document.getElementById('seq-rec-btn').classList.remove('active');
@@ -2967,9 +2971,16 @@ function populateTrackHeader(label, track) {
   const convertBtn = track.kind === 'chord'
     ? `<button class="seq-th-convert" title="Convert to Free (bake chords to notes — one way)"><i data-lucide="arrow-right-from-line"></i></button>`
     : '';
+  // Per-track record arm button — free tracks only. When armed and Play
+  // starts, any MIDI input on this track's midiInPortId gets captured
+  // into a new clip.
+  const armBtn = track.kind === 'free'
+    ? `<button class="seq-th-arm${track.armed ? ' armed' : ''}" title="Arm for MIDI recording"><i data-lucide="circle"></i></button>`
+    : '';
   label.innerHTML = `
     <div class="seq-th-row seq-th-top">
       <span class="seq-th-name" title="Click to focus · double-click to rename">${escapeHtml(track.name)}</span>
+      ${armBtn}
       ${convertBtn}
       <button class="seq-th-fx" title="Track instrument settings"><i data-lucide="sliders-horizontal"></i></button>
       <button class="seq-th-collapse" title="Collapse / expand"><i data-lucide="chevrons-down-up"></i></button>
@@ -2988,6 +2999,18 @@ function populateTrackHeader(label, track) {
     label.querySelector('.seq-th-convert')?.addEventListener('click', (e) => {
       e.stopPropagation();
       convertChordToFree(track);
+    });
+  }
+  if (track.kind === 'free') {
+    label.querySelector('.seq-th-arm')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.currentTarget.blur();
+      track.armed = !track.armed;
+      e.currentTarget.classList.toggle('armed', track.armed);
+      // Mirror to global REC.armed so Play can call recActivate.
+      REC.armed = SEQ.tracksList.some(t => t.armed);
+      const recBtn = document.getElementById('seq-rec-btn');
+      if (recBtn) recBtn.classList.toggle('armed', REC.armed && !REC.active);
     });
   }
   // Keep events from bubbling up to the lane behind the sidebar

@@ -184,6 +184,12 @@ function onTrackMidiMessage(msg, tracks) {
           SEQ.activeNodes.add(node);
         }
       }
+      // Per-track recording: armed + REC.active → remember the note's
+      // start so the matching note-off can close it into a clip.
+      if (t.armed && typeof REC !== 'undefined' && REC.active) {
+        const startBeat = recCurrentBeat();
+        _trackRecPending(t).set(note, { startBeat, velocity: vel });
+      }
     } else if (status === 0x80 || (status === 0x90 && vel === 0)) {
       if (t.output === 'midi') {
         sendNoteOff(note, t.channel, midiPortById(t.midiPortId));
@@ -196,7 +202,43 @@ function onTrackMidiMessage(msg, tracks) {
           _liveTrackNotes.delete(key);
         }
       }
+      // Per-track recording note-off: finalize into a 1-note clip.
+      if (t.armed && typeof REC !== 'undefined' && REC.active) {
+        const pending = _trackRecPending(t);
+        const p = pending.get(note);
+        if (p) {
+          const beats = Math.max(0.1, recCurrentBeat() - p.startBeat);
+          t.items.push(makeClip({
+            start: p.startBeat, beats,
+            label: midiNoteLabel(note),
+            notes: [{ midi: note, label: midiNoteLabel(note), start: 0, beats, velocity: p.velocity }],
+          }));
+          t.items.sort((a, b) => a.start - b.start);
+          seqAutoExtendLoop(p.startBeat + beats);
+          invalidateFreeTrackFlat(t);
+          seqRenderTrack(t);
+          seqResyncTrack(t);
+          pending.delete(note);
+        }
+      }
     }
+  }
+}
+// Per-track recording — pending note-on map keyed by track. Lazy-created
+// so tracks without active recording don't carry an empty Map.
+const _trackRecPendingMaps = new WeakMap();
+function _trackRecPending(track) {
+  let m = _trackRecPendingMaps.get(track);
+  if (!m) { m = new Map(); _trackRecPendingMaps.set(track, m); }
+  return m;
+}
+// Called from recStop() to forget any notes still held down when the
+// user stops recording — they never got a matching note-off, so we
+// drop them rather than recording a runaway-length clip.
+function clearAllPerTrackRecPending() {
+  for (const t of (SEQ?.tracksList || [])) {
+    const m = _trackRecPendingMaps.get(t);
+    if (m) m.clear();
   }
 }
 
