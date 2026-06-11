@@ -7,6 +7,7 @@
   flex-shrink: 0;
 }
 .seq-play-btn .lucide,
+.seq-stop-btn .lucide,
 .seq-metro-btn .lucide,
 .seq-loop-btn .lucide { width: 11px; height: 11px; vertical-align: -1px; }
 .seq-zoom-btns .lucide { width: 14px; height: 14px; vertical-align: -3px; }
@@ -1419,7 +1420,7 @@ input[type="range"]::-moz-range-thumb {
   letter-spacing: 0;
   line-height: 1;
 }
-.seq-play-btn, .seq-rec-btn, .seq-metro-btn, .seq-loop-btn {
+.seq-play-btn, .seq-stop-btn, .seq-rec-btn, .seq-metro-btn, .seq-loop-btn {
   background: none;
   border: 1px solid rgba(255,255,255,0.25);
   border-radius: 4px;
@@ -1433,7 +1434,7 @@ input[type="range"]::-moz-range-thumb {
   gap: 4px;
   height: 24px; box-sizing: border-box;
 }
-.seq-play-btn:hover, .seq-metro-btn:hover, .seq-loop-btn:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
+.seq-play-btn:hover, .seq-stop-btn:hover, .seq-metro-btn:hover, .seq-loop-btn:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
 .seq-play-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 .seq-metro-btn.active, .seq-loop-btn.active { border-color: var(--accent); color: var(--accent); }
 

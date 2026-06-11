@@ -2130,7 +2130,10 @@ document.getElementById('dly-time-sync').addEventListener('click', () => {
 // Sequencer controls
 
 document.getElementById('seq-play-btn').addEventListener('click', () => {
-  if (SEQ.playing) seqStop(); else seqPlay();
+  if (!SEQ.playing) seqPlay();
+});
+document.getElementById('seq-stop-btn')?.addEventListener('click', () => {
+  if (SEQ.playing) seqStop();
 });
 
 document.getElementById('seq-rec-btn').addEventListener('click', () => {
@@ -4357,13 +4360,41 @@ _wireEditBtn('seq-pr-edit-duplicate',  () => prDuplicateNotes());
 _wireEditBtn('seq-pr-edit-delete',     () => prDeleteNotes());
 _wireEditBtn('seq-pr-edit-quantize',   () => prQuantizeNotes());
 // Transport navigation buttons (jump play-cursor to start/end of
-// track / selection / loop).
+// project / loop).
 _wireEditBtn('seq-nav-track-start', () => seqJumpTrackStart());
 _wireEditBtn('seq-nav-track-end',   () => seqJumpTrackEnd());
-_wireEditBtn('seq-nav-sel-start',   () => seqJumpSelStart());
-_wireEditBtn('seq-nav-sel-end',     () => seqJumpSelEnd());
 _wireEditBtn('seq-nav-loop-start',  () => seqJumpLoopStart());
 _wireEditBtn('seq-nav-loop-end',    () => seqJumpLoopEnd());
+
+// Step-cursor buttons with press-and-hold to repeat. Each press shifts
+// the play-cursor by one snap unit (or 1 beat if snap is off). Holding
+// the button repeats every 80 ms after a 300 ms initial delay.
+function _wireStepCursor(id, dir) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  let delayTimer = null, repeatTimer = null;
+  const step = () => {
+    const unit = SEQ.arrSnap ? SEQ.arrSnapVal : 1;
+    seqJumpToBeat((SEQ.startBeat || 0) + dir * unit);
+  };
+  const stop = () => {
+    if (delayTimer)  { clearTimeout(delayTimer);  delayTimer  = null; }
+    if (repeatTimer) { clearInterval(repeatTimer); repeatTimer = null; }
+  };
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    btn.setPointerCapture(e.pointerId);
+    step();
+    delayTimer = setTimeout(() => {
+      repeatTimer = setInterval(step, 80);
+    }, 300);
+  });
+  btn.addEventListener('pointerup',     stop);
+  btn.addEventListener('pointercancel', stop);
+  btn.addEventListener('pointerleave',  stop);
+}
+_wireStepCursor('seq-nav-cursor-left',  -1);
+_wireStepCursor('seq-nav-cursor-right', +1);
 
 // Chord-length dropdowns (arrangement + piano-roll) — kept in sync so the
 // same setting drives the duration of any chord dropped from the pad,

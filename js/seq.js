@@ -1994,8 +1994,7 @@ function seqInitPlay(t0) {
   });
   if (SEQ.rafId) cancelAnimationFrame(SEQ.rafId);
   SEQ.rafId = requestAnimationFrame(seqAnimatePlayhead);
-  document.getElementById('seq-play-btn').classList.add('active');
-  document.getElementById('seq-play-btn').innerHTML = '<i data-lucide="square"></i> Stop'; refreshLucide();
+  document.getElementById('seq-play-btn')?.classList.add('active');
 }
 
 function startPrecount(onDone) {
@@ -2029,8 +2028,7 @@ function startPrecount(onDone) {
   REC._precountRaf = requestAnimationFrame(tick);
 
   // mark play btn immediately so Stop works during precount
-  document.getElementById('seq-play-btn').classList.add('active');
-  document.getElementById('seq-play-btn').innerHTML = '<i data-lucide="square"></i> Stop'; refreshLucide();
+  document.getElementById('seq-play-btn')?.classList.add('active');
   SEQ.playing = true;
 }
 
@@ -2174,8 +2172,7 @@ function seqStop() {
   document.querySelectorAll('.seq-block').forEach(b => b.classList.remove('active'));
   const npn = document.getElementById('now-playing-notes');
   if (npn) npn.textContent = '—';
-  const btn = document.getElementById('seq-play-btn');
-  if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i data-lucide="play"></i> Play'; refreshLucide(); }
+  document.getElementById('seq-play-btn')?.classList.remove('active');
 }
 
 function seqIsOpen() {
