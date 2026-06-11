@@ -4284,11 +4284,13 @@ _wireEditBtn('seq-arr-edit-copy',      () => seqCopySelection());
 _wireEditBtn('seq-arr-edit-paste',     () => seqPasteSelection());
 _wireEditBtn('seq-arr-edit-duplicate', () => seqDuplicateSelection());
 _wireEditBtn('seq-arr-edit-delete',    () => seqDeleteSelection());
+_wireEditBtn('seq-arr-edit-quantize',  () => seqQuantizeSelection());
 _wireEditBtn('seq-pr-edit-cut',        () => prCutNotes());
 _wireEditBtn('seq-pr-edit-copy',       () => prCopyNotes());
 _wireEditBtn('seq-pr-edit-paste',      () => prPasteNotes());
 _wireEditBtn('seq-pr-edit-duplicate',  () => prDuplicateNotes());
 _wireEditBtn('seq-pr-edit-delete',     () => prDeleteNotes());
+_wireEditBtn('seq-pr-edit-quantize',   () => prQuantizeNotes());
 
 // Chord-length dropdowns (arrangement + piano-roll) — kept in sync so the
 // same setting drives the duration of any chord dropped from the pad,

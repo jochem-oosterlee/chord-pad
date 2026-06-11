@@ -464,6 +464,21 @@ function seqDuplicateSelection() {
   seqRenderAll();
 }
 
+// Snap every selected clip's `start` to the current arrangement-snap
+// grid. Item `beats` stays untouched so users can pre-set length and
+// then quantize the position separately. With snap turned off this is
+// a no-op (arrSnap returns the raw beat).
+function seqQuantizeSelection() {
+  if (SEQ.selection.length === 0) return;
+  seqCheckpoint();
+  for (const sel of SEQ.selection) {
+    sel.item.start = Math.max(0, arrSnap(sel.item.start));
+  }
+  for (const t of SEQ.tracksList) t.items.sort((a, b) => a.start - b.start);
+  seqRenderAll();
+  seqSave();
+}
+
 // ---- Piano-roll note clipboard --------------------------------------------
 // Mirrors the clip-level copy/cut/paste/duplicate semantics but operates on
 // note objects within the currently-focused clip.
@@ -550,6 +565,22 @@ function prDuplicateNotes() {
   seqAutoExtendLoop(clip.start + clip.beats);
   SEQ.prSelection.clear();
   clones.forEach(c => SEQ.prSelection.add(c));
+  renderPianoRoll();
+  if (track) { seqRenderTrack(track); seqResyncTrack(track); }
+  seqSave();
+}
+// Snap every selected note's `start` to the piano-roll snap grid.
+// `beats` stays untouched. If snap is off, rollSnap returns the raw
+// beat so this becomes a no-op.
+function prQuantizeNotes() {
+  if (!prRollHasNoteSelection()) return;
+  const { track, clip } = focusedClipObjects();
+  if (!clip) return;
+  seqCheckpoint();
+  clip.notes.forEach(n => {
+    if (SEQ.prSelection.has(n)) n.start = Math.max(0, rollSnap(n.start));
+  });
+  clip.notes.sort((a, b) => a.start - b.start);
   renderPianoRoll();
   if (track) { seqRenderTrack(track); seqResyncTrack(track); }
   seqSave();
