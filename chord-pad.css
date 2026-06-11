@@ -2136,10 +2136,21 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   cursor: ns-resize;
   touch-action: none;
   opacity: 0.55;
+  z-index: 1;
 }
-.pr-vel-bar.selected { opacity: 1; }
+.pr-vel-bar.selected { opacity: 1; z-index: 3; }
+/* Non-selected bars while a selection exists — dim, not interactive,
+   sit behind so the selected bar on top of an overlap is grabbable. */
+.pr-vel-bar.inactive {
+  opacity: 0.15;
+  pointer-events: none;
+  cursor: default;
+  z-index: 0;
+}
 @media (hover: hover) {
   .pr-vel-bar:hover { opacity: 0.85; }
+  .pr-vel-bar.selected:hover { opacity: 1; }
+  .pr-vel-bar.inactive:hover { opacity: 0.15; }
 }
 
 .seq-pianoroll-resize {
@@ -2872,10 +2883,10 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 .seq-th-ch {
   width: 22px; font-family: inherit; font-size: 9.5px;
   background: transparent; color: var(--text); border: 0; padding: 1px 0;
-  text-align: center; -moz-appearance: textfield;
+  text-align: center; -moz-appearance: textfield; appearance: textfield;
 }
 .seq-th-ch::-webkit-inner-spin-button, .seq-th-ch::-webkit-outer-spin-button {
-  -webkit-appearance: none; margin: 0;
+  -webkit-appearance: none; appearance: none; margin: 0;
 }
 /* Track-header volume knob. --ang is set by JS (degrees, 0 = up). The
    indicator line sits inside, rotating to point from center outward. */

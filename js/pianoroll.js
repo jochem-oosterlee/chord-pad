@@ -128,12 +128,16 @@ function _prSyncSelection(body) {
   clip.notes.forEach((n, i) => {
     if (SEQ.prSelection.has(n) && noteEls[i]) noteEls[i].classList.add('selected');
   });
-  // Mirror the selection-tint onto the velocity bars too.
+  // Mirror the selection-tint + active state onto the velocity bars.
   const lane = document.getElementById('seq-pr-vel-lane');
   if (lane) {
     const bars = lane.querySelectorAll('.pr-vel-bar');
+    const hasSelection = SEQ.prSelection.size > 0;
     clip.notes.forEach((n, i) => {
-      if (bars[i]) bars[i].classList.toggle('selected', SEQ.prSelection.has(n));
+      if (!bars[i]) return;
+      const sel = SEQ.prSelection.has(n);
+      bars[i].classList.toggle('selected', sel);
+      bars[i].classList.toggle('inactive', hasSelection && !sel);
     });
   }
 }
@@ -367,11 +371,18 @@ function renderVelocityLane() {
   // Render bars: thin vertical stick at each note's attack (note.start),
   // shifted right by the piano-keyboard width so x lines up with the
   // note in the body above. Width is fixed (DAW-style); height = velocity.
+  // When a selection exists, only selected notes' bars are interactive
+  // — non-selected bars dim out and ignore pointer events. Solves the
+  // overlap problem when several notes in a chord share a start time.
   const BAR_W = 4;
+  const hasSelection = SEQ.prSelection && SEQ.prSelection.size > 0;
   clip.notes.forEach((note, idx) => {
     const vel = (typeof note.velocity === 'number') ? note.velocity : 100;
+    const isSelected = SEQ.prSelection?.has(note);
     const bar = document.createElement('div');
-    bar.className = 'pr-vel-bar' + (SEQ.prSelection?.has(note) ? ' selected' : '');
+    bar.className = 'pr-vel-bar'
+      + (isSelected ? ' selected' : '')
+      + (hasSelection && !isSelected ? ' inactive' : '');
     bar.style.left = (note.start * PR_BEAT_PX + kbW) + 'px';
     bar.style.width = BAR_W + 'px';
     bar.style.height = Math.max(2, (vel / 127) * 100) + '%';
