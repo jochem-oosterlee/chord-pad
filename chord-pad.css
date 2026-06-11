@@ -1375,6 +1375,15 @@ input[type="range"]::-moz-range-thumb {
   gap: 8px;
   flex-wrap: wrap;
 }
+/* Project save / load buttons in the transport bar. Sized to match
+   the Play / Rec / Loop trio next to them. */
+.seq-project-btn {
+  padding: 0 8px !important;
+  min-width: 0 !important;
+  height: 26px;
+}
+.seq-project-btn .lucide { width: 14px; height: 14px; }
+
 /* Transport navigation — six small buttons jumping the play cursor to
    start/end of project (T), selection (S) or loop (L). */
 .seq-nav-group {

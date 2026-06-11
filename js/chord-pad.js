@@ -4328,10 +4328,11 @@ _wireEditBtn('seq-arr-edit-paste',     () => seqPasteSelection());
 _wireEditBtn('seq-arr-edit-duplicate', () => seqDuplicateSelection());
 _wireEditBtn('seq-arr-edit-delete',    () => seqDeleteSelection());
 _wireEditBtn('seq-arr-edit-quantize',  () => seqQuantizeSelection());
-// Project export / import (download / upload .json).
-_wireEditBtn('seq-arr-project-export', () => seqExportProject());
-_wireEditBtn('seq-arr-project-import', () => document.getElementById('seq-arr-project-import-input')?.click());
-document.getElementById('seq-arr-project-import-input')?.addEventListener('change', (e) => {
+// Project export / import (download / upload .json). Lives in the
+// transport bar — operates on the whole project, not the arrangement.
+_wireEditBtn('seq-project-export', () => seqExportProject());
+_wireEditBtn('seq-project-import', () => document.getElementById('seq-project-import-input')?.click());
+document.getElementById('seq-project-import-input')?.addEventListener('change', (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
   const reader = new FileReader();

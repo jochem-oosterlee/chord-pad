@@ -316,10 +316,6 @@
       <button class="btn seq-tool-btn" id="seq-arr-edit-delete"    title="Delete (Del)"><i data-lucide="trash-2"></i></button>
       <button class="btn seq-tool-btn" id="seq-arr-edit-quantize"  title="Quantize selection to snap grid"><span class="seq-tool-letter">Q</span></button>
       <div class="seq-tool-sep"></div>
-      <button class="btn seq-tool-btn" id="seq-arr-project-export" title="Export project to JSON file"><i data-lucide="download"></i></button>
-      <button class="btn seq-tool-btn" id="seq-arr-project-import" title="Import project from JSON file"><i data-lucide="upload"></i></button>
-      <input type="file" id="seq-arr-project-import-input" accept="application/json,.json" style="display:none">
-      <div class="seq-tool-sep"></div>
       <span class="seq-snap-wrap">
         <button class="btn seq-tool-btn seq-snap-toggle" id="seq-arr-tool-snap" title="Snap"><i data-lucide="magnet"></i></button>
         <select class="seq-snap-select" id="seq-arr-snap-val" title="Snap unit"></select>
@@ -361,6 +357,9 @@
       <button class="seq-rec-btn" id="seq-rec-btn"><i data-lucide="circle"></i> Rec</button>
       <button class="seq-metro-btn" id="seq-metro-btn"><i data-lucide="metronome"></i> Metro</button>
       <button class="seq-loop-btn" id="seq-loop-btn"><i data-lucide="repeat"></i> Loop</button>
+      <button class="btn seq-project-btn" id="seq-project-export" title="Export project to JSON file"><i data-lucide="download"></i></button>
+      <button class="btn seq-project-btn" id="seq-project-import" title="Import project from JSON file"><i data-lucide="upload"></i></button>
+      <input type="file" id="seq-project-import-input" accept="application/json,.json" style="display:none">
       <div class="seq-timesig-tempo">
         <select class="seq-timesig" id="seq-timesig">
           <option value="2">2/4</option>
