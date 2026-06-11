@@ -1645,7 +1645,9 @@ input[type="range"]::-moz-range-thumb {
   line-height: 1;
 }
 .seq-arrangement-tools {
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 4px; row-gap: 6px;
+  margin: 12px 0;
 }
 /* Snap-unit dropdown (track + roll toolbars). Matches .seq-timesig style. */
 .seq-snap-select {
@@ -2082,7 +2084,8 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 }
 .seq-pianoroll-header > .synth-header { display: block; }
 .seq-pianoroll-tools {
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 4px; row-gap: 6px;
 }
 .seq-pianoroll-title { flex: 1; margin-top: 12px; }
 .seq-pianoroll-title {
