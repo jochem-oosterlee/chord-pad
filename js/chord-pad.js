@@ -4200,17 +4200,37 @@ document.getElementById('seq-tool-erase')?.addEventListener('click',  () => _prT
 document.getElementById('seq-tool-pan')?.addEventListener('click',    () => _prToggleTool('pan'));
 SEQ.rollSnap    = SEQ.rollSnap    ?? true;
 SEQ.rollSnapVal = SEQ.rollSnapVal || 1;
+// DAW-standard note values. Stored as beat lengths (1 beat = 1/4 note in
+// 4/4); labels are the conventional musical notation (1/4 quarter,
+// 1/8 eighth, 1/8t triplet eighth, etc.). One unified set shared by
+// both the snap-unit selectors and the chord-drop-length picker.
 const SNAP_VALUES = [
-  { val: 0.25,       label: '1/4' },
-  { val: 1/3,        label: '1/3' },
-  { val: 0.5,        label: '1/2' },
-  { val: 1,          label: '1'   },
-  { val: 2,          label: '2'   },
-  { val: 3,          label: '3'   },
-  { val: 4,          label: '4'   },
+  { val: 0.25,        label: '1/16' },  // sixteenth — smallest
+  { val: 1/3,         label: '1/8t' },  // eighth triplet
+  { val: 0.5,         label: '1/8'  },  // eighth
+  { val: 0.75,        label: '1/8d' },  // dotted eighth
+  { val: 2/3,         label: '1/4t' },  // quarter triplet
+  { val: 1,           label: '1/4'  },  // quarter — default for snap
+  { val: 1.5,         label: '1/4d' },  // dotted quarter
+  { val: 2,           label: '1/2'  },  // half
+  { val: 3,           label: '1/2d' },  // dotted half
+  { val: 4,           label: '1'    },  // whole / 1 bar in 4/4
+  { val: 8,           label: '2'    },  // 2 bars
+  { val: 16,          label: '4'    },  // 4 bars
 ];
+const SNAP_DEFAULT_IDX = SNAP_VALUES.findIndex(s => s.label === '1/4');
+// Default chord-drop length = 1 bar (whole note in 4/4) → the '1' entry.
+const SNAP_CHORDLEN_DEFAULT_IDX = SNAP_VALUES.findIndex(s => s.label === '1');
+// Populate a <select> from SNAP_VALUES so labels stay in sync with the
+// array. Marks selectedIdx with `selected`.
+function _fillSnapSelect(sel, selectedIdx) {
+  if (!sel) return;
+  sel.innerHTML = SNAP_VALUES.map((s, i) =>
+    `<option value="${i}"${i === selectedIdx ? ' selected' : ''}>${s.label}</option>`
+  ).join('');
+}
 let _snapIdx = SNAP_VALUES.findIndex(s => s.val === SEQ.rollSnapVal);
-if (_snapIdx < 0) _snapIdx = 3;
+if (_snapIdx < 0) _snapIdx = SNAP_DEFAULT_IDX;
 
 // Piano-roll snap controls — magnet toggle + unit dropdown.
 const _prSnapBtn = document.getElementById('seq-tool-snap');
@@ -4223,7 +4243,7 @@ if (_prSnapBtn) {
   });
 }
 if (_prSnapSel) {
-  _prSnapSel.value = String(_snapIdx);
+  _fillSnapSelect(_prSnapSel, _snapIdx);
   _prSnapSel.addEventListener('change', (e) => {
     _snapIdx = Math.max(0, Math.min(SNAP_VALUES.length - 1, parseInt(e.target.value, 10)));
     SEQ.rollSnapVal = SNAP_VALUES[_snapIdx].val;
@@ -4235,7 +4255,7 @@ SEQ.arrTool    = SEQ.arrTool    || 'select';
 SEQ.arrSnap    = SEQ.arrSnap    ?? true;
 SEQ.arrSnapVal = SEQ.arrSnapVal || 1;
 let _arrSnapIdx = SNAP_VALUES.findIndex(s => s.val === SEQ.arrSnapVal);
-if (_arrSnapIdx < 0) _arrSnapIdx = 2;
+if (_arrSnapIdx < 0) _arrSnapIdx = SNAP_DEFAULT_IDX;
 function arrSetTool(tool) {
   SEQ.arrTool = tool;
   ['select','erase','pan','merge','split','create'].forEach(t => {
@@ -4343,7 +4363,10 @@ _wireEditBtn('seq-pr-edit-quantize',   () => prQuantizeNotes());
   const arrSel = document.getElementById('seq-arr-chordlen');
   const prSel  = document.getElementById('seq-pr-chordlen');
   let idx = SNAP_VALUES.findIndex(s => s.val === SEQ.chordDropLen);
-  if (idx < 0) idx = 6; // default to "4" beats
+  if (idx < 0) idx = SNAP_CHORDLEN_DEFAULT_IDX; // default = "1" (one bar in 4/4)
+  // Populate both dropdowns once, then keep them in sync on change.
+  _fillSnapSelect(arrSel, idx);
+  _fillSnapSelect(prSel,  idx);
   const apply = (i) => {
     idx = Math.max(0, Math.min(SNAP_VALUES.length - 1, i));
     SEQ.chordDropLen = SNAP_VALUES[idx].val;
@@ -4413,7 +4436,7 @@ if (_arrSnapBtn) {
   });
 }
 if (_arrSnapSel) {
-  _arrSnapSel.value = String(_arrSnapIdx);
+  _fillSnapSelect(_arrSnapSel, _arrSnapIdx);
   _arrSnapSel.addEventListener('change', (e) => {
     _arrSnapIdx = Math.max(0, Math.min(SNAP_VALUES.length - 1, parseInt(e.target.value, 10)));
     SEQ.arrSnapVal = SNAP_VALUES[_arrSnapIdx].val;
