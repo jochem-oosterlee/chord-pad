@@ -372,7 +372,7 @@ function renderVelocityLane() {
     const vel = (typeof note.velocity === 'number') ? note.velocity : 100;
     const bar = document.createElement('div');
     bar.className = 'pr-vel-bar' + (SEQ.prSelection?.has(note) ? ' selected' : '');
-    bar.style.left = (note.start * PR_BEAT_PX + kbW - BAR_W / 2) + 'px';
+    bar.style.left = (note.start * PR_BEAT_PX + kbW) + 'px';
     bar.style.width = BAR_W + 'px';
     bar.style.height = Math.max(2, (vel / 127) * 100) + '%';
     bar.title = `${note.label || ''} · velocity ${vel}`;
