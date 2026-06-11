@@ -1900,6 +1900,15 @@ input[type="range"]::-moz-range-thumb {
 .seq-tool-btn {
   font-size: 13px !important;
 }
+/* Letter-based tool button (e.g. "Q" for Quantize) — match the icon
+   buttons' visual weight so a single character doesn't look thin. */
+.seq-tool-letter {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0;
+  line-height: 1;
+}
 .seq-tool-btn.active {
   color: var(--accent) !important;
   background: rgba(255,170,51,0.12) !important;
