@@ -1765,6 +1765,7 @@ function freeTrackFlatNotes(track) {
           label: note.label || midiNoteLabel(note.midi),
           beats: effBeats,
           start: clip.start + note.start,
+          velocity: note.velocity,
         });
       }
     }
@@ -1786,7 +1787,10 @@ function seqTickFreeTrack(track, now, bd, horizon) {
     const onDelay  = Math.max(0, (t - now) * 1000);
     const offDelay = Math.max(0, (t + dur * 0.95 - now) * 1000);
     const audible  = seqTrackAudible(track);
-    const vel      = seqTrackVel(track, state.velocity);
+    // Per-note velocity overrides the track's, but still get scaled by
+    // the track's mute/solo gain via seqTrackVel.
+    const baseVel  = (typeof item.velocity === 'number') ? item.velocity : state.velocity;
+    const vel      = seqTrackVel(track, baseVel);
     const inst     = seqTrackInstrument(track);
     const useInstrument = track.output !== 'midi';
     const useMidi       = track.output === 'midi';

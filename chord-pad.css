@@ -2058,6 +2058,39 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   flex-direction: column;
   gap: 8px;
 }
+/* Velocity-lane strip below the piano-roll body. One bar per note in
+   the focused clip; vertical drag adjusts that note's velocity. */
+.seq-pr-vel-lane {
+  position: relative;
+  height: 56px;
+  background: rgba(0,0,0,0.25);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.seq-pr-vel-lane::-webkit-scrollbar { display: none; }
+.seq-pr-vel-inner {
+  position: relative;
+  height: 100%;
+  box-sizing: border-box;
+}
+.pr-vel-bar {
+  position: absolute;
+  bottom: 0;
+  background: rgba(255,170,51,0.35);
+  border-top: 1px solid var(--accent);
+  border-radius: 1px 1px 0 0;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.pr-vel-bar.selected {
+  background: rgba(255,170,51,0.6);
+}
+.pr-vel-bar:hover {
+  background: rgba(255,170,51,0.55);
+}
+
 .seq-pianoroll-resize {
   position: relative;
   height: 6px;

@@ -128,6 +128,14 @@ function _prSyncSelection(body) {
   clip.notes.forEach((n, i) => {
     if (SEQ.prSelection.has(n) && noteEls[i]) noteEls[i].classList.add('selected');
   });
+  // Mirror the selection-tint onto the velocity bars too.
+  const lane = document.getElementById('seq-pr-vel-lane');
+  if (lane) {
+    const bars = lane.querySelectorAll('.pr-vel-bar');
+    clip.notes.forEach((n, i) => {
+      if (bars[i]) bars[i].classList.toggle('selected', SEQ.prSelection.has(n));
+    });
+  }
 }
 function prSetTool(tool) {
   SEQ.prTool = tool;
@@ -332,6 +340,73 @@ function renderPianoRoll() {
     body.scrollTop = Math.max(0, centerTop - body.clientHeight / 2 + PR_ROW_H / 2);
     body.dataset.initialized = '1';
   }
+  renderVelocityLane();
+}
+
+// Strip below the piano-roll body showing one vertical bar per note in
+// the focused clip. Bar height = note.velocity / 127. Drag a bar up/down
+// to change that note's velocity. Stays horizontally aligned with the
+// body via the body.scroll listener at the top of renderPianoRoll.
+function renderVelocityLane() {
+  const lane = document.getElementById('seq-pr-vel-lane');
+  if (!lane) return;
+  lane.innerHTML = '';
+  const body = document.getElementById('seq-pianoroll-body');
+  const { track, clip } = focusedClipObjects();
+  if (!clip || !body) { lane.style.display = 'none'; return; }
+  lane.style.display = '';
+  const kbW = prKbW();
+  // Match the body's content width so bars line up under their notes.
+  const sizer = body.querySelector('.pr-sizer');
+  if (sizer) lane.style.setProperty('--pr-vel-content-w', sizer.style.width);
+  // Inner scroll-syncs container so bars track the body's scrollLeft.
+  const inner = document.createElement('div');
+  inner.className = 'seq-pr-vel-inner';
+  inner.style.width = sizer ? sizer.style.width : '100%';
+  inner.style.paddingLeft = kbW + 'px';
+  lane.appendChild(inner);
+  // Render bars.
+  clip.notes.forEach((note, idx) => {
+    const vel = (typeof note.velocity === 'number') ? note.velocity : 100;
+    const bar = document.createElement('div');
+    bar.className = 'pr-vel-bar' + (SEQ.prSelection?.has(note) ? ' selected' : '');
+    bar.style.left = (note.start * PR_BEAT_PX) + 'px';
+    bar.style.width = Math.max(2, note.beats * PR_BEAT_PX - 1) + 'px';
+    bar.style.height = Math.max(2, (vel / 127) * 100) + '%';
+    bar.title = `${note.label || ''} · velocity ${vel}`;
+    bar.dataset.noteIdx = idx;
+    // Vertical drag to adjust velocity.
+    bar.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      bar.setPointerCapture(e.pointerId);
+      seqCheckpoint();
+      const rect = lane.getBoundingClientRect();
+      const apply = (clientY) => {
+        const frac = 1 - Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+        note.velocity = Math.max(1, Math.min(127, Math.round(frac * 127)));
+        bar.style.height = Math.max(2, (note.velocity / 127) * 100) + '%';
+        bar.title = `${note.label || ''} · velocity ${note.velocity}`;
+      };
+      apply(e.clientY);
+      const onMove = (ev) => apply(ev.clientY);
+      const onUp = () => {
+        bar.removeEventListener('pointermove', onMove);
+        bar.removeEventListener('pointerup', onUp);
+        if (track) { invalidateFreeTrackFlat(track); seqResyncTrackThrottled(track); }
+        seqSave();
+      };
+      bar.addEventListener('pointermove', onMove);
+      bar.addEventListener('pointerup', onUp);
+    });
+    inner.appendChild(bar);
+  });
+  // Keep horizontal scroll in sync with the body.
+  if (!lane.dataset.scrollSyncBound) {
+    lane.dataset.scrollSyncBound = '1';
+    body.addEventListener('scroll', () => { lane.scrollLeft = body.scrollLeft; });
+  }
+  lane.scrollLeft = body.scrollLeft || 0;
 }
 
 // White-key height in the piano-roll sidebar (px). Black keys derive from
