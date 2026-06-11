@@ -363,15 +363,17 @@ function renderVelocityLane() {
   const inner = document.createElement('div');
   inner.className = 'seq-pr-vel-inner';
   inner.style.width = sizer ? sizer.style.width : '100%';
-  inner.style.paddingLeft = kbW + 'px';
   lane.appendChild(inner);
-  // Render bars.
+  // Render bars: thin vertical stick at each note's attack (note.start),
+  // shifted right by the piano-keyboard width so x lines up with the
+  // note in the body above. Width is fixed (DAW-style); height = velocity.
+  const BAR_W = 4;
   clip.notes.forEach((note, idx) => {
     const vel = (typeof note.velocity === 'number') ? note.velocity : 100;
     const bar = document.createElement('div');
     bar.className = 'pr-vel-bar' + (SEQ.prSelection?.has(note) ? ' selected' : '');
-    bar.style.left = (note.start * PR_BEAT_PX) + 'px';
-    bar.style.width = Math.max(2, note.beats * PR_BEAT_PX - 1) + 'px';
+    bar.style.left = (note.start * PR_BEAT_PX + kbW - BAR_W / 2) + 'px';
+    bar.style.width = BAR_W + 'px';
     bar.style.height = Math.max(2, (vel / 127) * 100) + '%';
     bar.title = `${note.label || ''} · velocity ${vel}`;
     bar.dataset.noteIdx = idx;

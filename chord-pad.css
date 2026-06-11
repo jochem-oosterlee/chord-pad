@@ -2131,17 +2131,15 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
 .pr-vel-bar {
   position: absolute;
   bottom: 0;
-  background: rgba(255,170,51,0.35);
-  border-top: 1px solid var(--accent);
+  background: var(--accent);
   border-radius: 1px 1px 0 0;
   cursor: ns-resize;
   touch-action: none;
+  opacity: 0.55;
 }
-.pr-vel-bar.selected {
-  background: rgba(255,170,51,0.6);
-}
-.pr-vel-bar:hover {
-  background: rgba(255,170,51,0.55);
+.pr-vel-bar.selected { opacity: 1; }
+@media (hover: hover) {
+  .pr-vel-bar:hover { opacity: 0.85; }
 }
 
 .seq-pianoroll-resize {
