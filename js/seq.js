@@ -2034,6 +2034,78 @@ function startPrecount(onDone) {
   SEQ.playing = true;
 }
 
+// Jump the play-cursor to a specific song-absolute beat. Updates the
+// SEQ.startBeat/animBeat anchors and re-positions every visible playhead
+// (arrangement, ruler, piano-roll). If playback is running, also
+// re-anchors the audio scheduler so the next tick fires from there.
+function seqJumpToBeat(beat) {
+  const b = Math.max(0, beat);
+  SEQ.startBeat = b;
+  SEQ.animBeat  = b;
+  // Arrangement playheads (full-height ones + per-lane ones).
+  document.querySelectorAll('.seq-playhead-global, .seq-lane .seq-playhead').forEach(ph => {
+    ph.style.display = 'block';
+    ph.style.left = (b * BEAT_PX) + 'px';
+  });
+  // Piano-roll playhead is clip-relative + keyboard offset; only update
+  // if the focused clip overlaps the jump target.
+  const prBody = document.getElementById('seq-pianoroll-body');
+  const prPh   = prBody?.querySelector('.seq-playhead');
+  if (prPh && typeof focusedClipObjects === 'function') {
+    const { clip } = focusedClipObjects();
+    if (clip && b >= clip.start && b <= clip.start + clip.beats) {
+      prPh.style.display = 'block';
+      prPh.style.left = ((b - clip.start) * PR_BEAT_PX + prKbW()) + 'px';
+    } else if (prPh) {
+      prPh.style.display = 'none';
+    }
+  }
+  if (SEQ.playing) seqReanchorPlayStart();
+}
+
+// Maximum song-end beat across all tracks. Empty project → 0.
+function seqProjectEndBeat() {
+  let end = 0;
+  for (const t of SEQ.tracksList) {
+    for (const it of t.items) {
+      end = Math.max(end, (it.start || 0) + (it.beats || 1));
+    }
+  }
+  return end;
+}
+
+// Start / end of the current selection. Prefers piano-roll note
+// selection if the roll is open and has notes selected; falls back to
+// the arrangement clip-level selection. Returns null when nothing is
+// selected.
+function seqSelectionRange() {
+  if (SEQ.pianoRollOpen && SEQ.prSelection && SEQ.prSelection.size > 0 && typeof focusedClipObjects === 'function') {
+    const { clip } = focusedClipObjects();
+    if (clip) {
+      const notes = clip.notes.filter(n => SEQ.prSelection.has(n));
+      if (notes.length) {
+        const start = clip.start + Math.min(...notes.map(n => n.start));
+        const end   = clip.start + Math.max(...notes.map(n => n.start + n.beats));
+        return { start, end };
+      }
+    }
+  }
+  if (SEQ.selection.length > 0) {
+    const items = SEQ.selection.map(s => s.item);
+    const start = Math.min(...items.map(i => i.start || 0));
+    const end   = Math.max(...items.map(i => (i.start || 0) + (i.beats || 1)));
+    return { start, end };
+  }
+  return null;
+}
+
+function seqJumpTrackStart() { seqJumpToBeat(0); }
+function seqJumpTrackEnd()   { seqJumpToBeat(seqProjectEndBeat()); }
+function seqJumpSelStart()   { const r = seqSelectionRange(); if (r) seqJumpToBeat(r.start); }
+function seqJumpSelEnd()     { const r = seqSelectionRange(); if (r) seqJumpToBeat(r.end); }
+function seqJumpLoopStart()  { seqJumpToBeat(SEQ.loopStart || 0); }
+function seqJumpLoopEnd()    { seqJumpToBeat(SEQ.loopEnd   || 0); }
+
 function seqPlay(leadSec) {
   const ctx = getAudioCtx();
   // Default lead-in of 50 ms gives the scheduler safety margin. MIDI-clock

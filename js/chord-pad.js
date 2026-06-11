@@ -4355,6 +4355,14 @@ _wireEditBtn('seq-pr-edit-paste',      () => prPasteNotes());
 _wireEditBtn('seq-pr-edit-duplicate',  () => prDuplicateNotes());
 _wireEditBtn('seq-pr-edit-delete',     () => prDeleteNotes());
 _wireEditBtn('seq-pr-edit-quantize',   () => prQuantizeNotes());
+// Transport navigation buttons (jump play-cursor to start/end of
+// track / selection / loop).
+_wireEditBtn('seq-nav-track-start', () => seqJumpTrackStart());
+_wireEditBtn('seq-nav-track-end',   () => seqJumpTrackEnd());
+_wireEditBtn('seq-nav-sel-start',   () => seqJumpSelStart());
+_wireEditBtn('seq-nav-sel-end',     () => seqJumpSelEnd());
+_wireEditBtn('seq-nav-loop-start',  () => seqJumpLoopStart());
+_wireEditBtn('seq-nav-loop-end',    () => seqJumpLoopEnd());
 
 // Chord-length dropdowns (arrangement + piano-roll) — kept in sync so the
 // same setting drives the duration of any chord dropped from the pad,
