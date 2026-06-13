@@ -787,6 +787,14 @@ function seqAutoExtendLoop(blockEnd) {
   if (blockEnd > SEQ.loopEnd) {
     SEQ.loopEnd = blockEnd;
     seqUpdateLoopEnd();
+    // The loop's total length just changed. During playback, every
+    // track's pending schedule was anchored to the OLD total via its
+    // cycleStart — keeping any of those would put tracks out of phase
+    // with the new boundary (the symptom: some chords sound softer
+    // because re-scheduled notes overlap held ones, and the loop
+    // appears to shift). Re-anchor + resync ALL tracks against the
+    // new total so they wrap together.
+    if (SEQ.playing) seqLoopBaseChangedResync();
   }
 }
 
