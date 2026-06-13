@@ -17,8 +17,8 @@
 SEQ.focusedChordTrackId = SEQ.focusedChordTrackId || null;
 SEQ.chordViewOpen = SEQ.chordViewOpen ?? false;
 
-const CHORDVIEW_PX_PER_BEAT = 60;
-const CHORDVIEW_MIN_CARD_W  = 110;
+const CHORDVIEW_PX_PER_BEAT = 90;
+const CHORDVIEW_MIN_CARD_W  = 140;
 
 function focusedChordTrack() {
   return trackById(SEQ.focusedChordTrackId) || firstTrackOfKind('chord');

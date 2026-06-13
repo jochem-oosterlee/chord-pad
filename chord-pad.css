@@ -2169,7 +2169,9 @@ body.hide-chordview .seq-chordview { display: none !important; }
   gap: 6px;
   padding: 0 50% 0 50%;     /* allows centre-scrolling — first chord can sit at centre, last can scroll past */
   will-change: transform;
-  transition: transform 0.12s linear;
+  /* No transition: the playhead in the arrangement updates per RAF
+     frame, so smoothing the track here would let the chord-view
+     cursor drift behind the real one. */
 }
 .chordview-card {
   flex: 0 0 auto;
