@@ -104,6 +104,21 @@ function renderChordView() {
       const beats = document.createElement('div');
       beats.className = 'chordview-beats';
       beats.textContent = item.beats + 'b';
+      // Beat-divider lines on every whole-beat boundary inside the card.
+      // For a 4-beat chord that's 3 inner ticks at 25/50/75% — mirrors
+      // the .seq-block-ticks pattern on the arrangement chord blocks.
+      const wholeBeats = Math.floor(item.beats);
+      if (wholeBeats > 1) {
+        const ticks = document.createElement('div');
+        ticks.className = 'chordview-ticks';
+        for (let b = 1; b < wholeBeats; b++) {
+          const tk = document.createElement('span');
+          tk.className = 'chordview-tick';
+          tk.style.left = ((b / item.beats) * 100) + '%';
+          ticks.appendChild(tk);
+        }
+        card.appendChild(ticks);
+      }
       card.appendChild(name);
       card.appendChild(beats);
       card.addEventListener('click', () => {

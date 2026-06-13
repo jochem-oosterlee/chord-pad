@@ -2211,6 +2211,21 @@ body.hide-chordview .seq-chordview { display: none !important; }
   color: rgba(255,255,255,0.4);
   letter-spacing: 0.08em;
 }
+/* Inner beat-divider lines — vertical hairlines at every whole-beat
+   boundary inside a card. Drawn below the label, above the background. */
+.chordview-card { position: relative; }
+.chordview-ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.chordview-tick {
+  position: absolute;
+  top: 12%; bottom: 12%;
+  width: 1px;
+  background: rgba(255,255,255,0.08);
+}
+.chordview-card.current .chordview-tick { background: rgba(255,170,51,0.20); }
 .chordview-card.past    { opacity: 0.25; }
 .chordview-card.future  { opacity: 0.7; }
 .chordview-card.current {
