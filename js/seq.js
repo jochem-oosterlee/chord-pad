@@ -2015,7 +2015,16 @@ function seqReanchorPlayStart() {
   const bd   = seqBeatDur();
   const lo   = SEQ.loopStart;
   const hi   = SEQ.loopEnd;
-  const beat = Math.max(lo, Math.min(hi - 0.001, SEQ.animBeat || lo));
+  // SEQ.animBeat is the latency-compensated VISUAL position — anchoring
+  // the scheduler to it puts the next note's audio time one outputLatency
+  // behind the actual beat grid. Each re-anchor (loop-extend, jump,
+  // tempo change) compounded the shift, so audio attacks drifted behind
+  // the playhead the more you edited mid-play. Add lat/bd back to get
+  // the SCHEDULER-time beat that corresponds to ctx.currentTime.
+  const lat = (ctx.outputLatency ?? ctx.baseLatency ?? 0) + (SEQ.visualLatencyMs || 0) / 1000;
+  const visualBeat    = SEQ.animBeat || lo;
+  const schedulerBeat = visualBeat + lat / bd;
+  const beat = Math.max(lo, Math.min(hi - 0.001, schedulerBeat));
   SEQ.playStartTime = ctx.currentTime - (beat - lo) * bd - 0.05;
   // Re-anchor each track's per-loop cycleStart so the scheduler picks up
   // the new origin on the next tick.
