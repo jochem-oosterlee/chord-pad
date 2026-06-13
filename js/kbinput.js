@@ -219,9 +219,12 @@ function kbNoteOn(midi, sendMidi = true) {
 }
 
 function kbNoteOff(midi, sendMidi = true) {
+  if (!kbActive.has(midi)) return;
   const node = kbActive.get(midi);
-  if (!node) return;
-  stopAudioNote(node);
+  // Audio node may be null (engine off, SF2 not loaded yet, …) but
+  // we must still drop the entry, otherwise the analyzer sees ghost
+  // notes that the user never thinks they're holding.
+  if (node) stopAudioNote(node);
   if (sendMidi) sendNoteOff(midi);
   kbActive.delete(midi);
   document.querySelector(`.kb-key[data-midi="${midi}"]`)?.classList.remove('active');
