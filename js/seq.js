@@ -396,9 +396,14 @@ function dropChord(track, beat, data) {
     }));
   }
   track.items.sort((a, b) => a.start - b.start);
+  // Capture loopEnd before the extend call — if it changes, seqAutoExtendLoop
+  // triggers a FULL sync via seqLoopBaseChangedResync (every track), so the
+  // per-track resync below would just re-do work and risk a second tiny
+  // glitch. Skip it in that case.
+  const prevLoopEnd = SEQ.loopEnd;
   seqAutoExtendLoop(beat + beats);
   seqRenderTrack(track);
-  seqResyncTrack(track);
+  if (SEQ.loopEnd === prevLoopEnd) seqResyncTrack(track);
   seqSave();
 }
 function dropNote(track, beat, data) {
