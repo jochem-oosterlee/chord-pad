@@ -2026,10 +2026,14 @@ function seqReanchorPlayStart() {
 // drag/resize edits without 60Hz reschedule churn.
 function seqResyncTrackThrottled(track) {
   if (!track || !SEQ.playing) return;
+  // ALWAYS invalidate the flat-notes cache — it's cheap (sets a flag)
+  // and otherwise the scheduler's 25 ms ticks between throttled resyncs
+  // would schedule the next note from STALE note positions, audibly
+  // running behind the visual playhead during a drag.
+  invalidateFreeTrackFlat(track);
   const now = performance.now();
   if (track._lastResyncT && now - track._lastResyncT < 80) return;
   track._lastResyncT = now;
-  invalidateFreeTrackFlat(track);
   seqResyncTrack(track);
 }
 // Call when something that affects the global time-base changed (loop bounds,
