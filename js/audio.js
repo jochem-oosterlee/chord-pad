@@ -85,16 +85,44 @@ function _buildAudioCtx() {
   ctx._delayWet = delayWet;
   return ctx;
 }
-// Prime the audio graph (compressor / reverb / delay) with a silent
-// oscillator so the first real note doesn't see a "cold" compressor
-// attack. Has to run AFTER the first user gesture — wo.start() on a
-// suspended context logs an autoplay warning. Called from
-// _unlockAudioCtxOnGesture below.
+// Prime the audio graph + JIT-compile the per-voice code paths so the
+// first real note doesn't run cold. Two stages:
+//   1. Quick silent oscillator → exercises the compressor / reverb /
+//      delay chain so its internal state (history buffers, etc.) is
+//      no longer at zero.
+//   2. A handful of silent SF2/sample voices over ~600 ms — runs the
+//      real startAudioNote / startSf2Voice code path with audioVolume
+//      forced to 0, letting V8 optimise the hot loops while the user
+//      is still finding the Play button. Without this the first
+//      seconds of playback after a refresh sound soft + glitchy
+//      until the JIT catches up.
 function _warmupAudioGraph(ctx) {
   const wo = ctx.createOscillator();
   const wg = ctx.createGain(); wg.gain.value = 0;
   wo.connect(wg); wg.connect(ctx._out);
   wo.start(); wo.stop(ctx.currentTime + 0.01);
+  // Stage 2 — silent voice warmup. Defer one tick so the chord-pad.js
+  // globals (state, startAudioNote) are available regardless of script
+  // load order.
+  setTimeout(() => {
+    if (typeof state === 'undefined' || typeof startAudioNote !== 'function') return;
+    const savedVolume = state.audioVolume;
+    state.audioVolume = 0; // every voice's peak gain = 0 → completely silent
+    try {
+      const t0 = ctx.currentTime + 0.02;
+      // Five C-major notes spread over 100 ms, each lasting ~120 ms.
+      [60, 62, 64, 65, 67].forEach((m, i) => {
+        try {
+          const n = startAudioNote(m, 1, t0 + i * 0.02);
+          setTimeout(() => { try { stopAudioNote(n); } catch (_) {} }, 150 + i * 20);
+        } catch (_) {}
+      });
+    } finally {
+      // Restore volume after the warmup voices have fired (their peak
+      // captures the value at start-time, so they stay silent).
+      setTimeout(() => { state.audioVolume = savedVolume; }, 50);
+    }
+  }, 0);
 }
 
 // Release audio device cleanly on page unload so Windows doesn't get stuck
