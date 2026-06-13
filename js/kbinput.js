@@ -409,10 +409,11 @@ function buildKeyboard() {
     container.appendChild(key);
   }
 
-  // Scroll so C4 (MIDI 60) is centered
-  const f4WhiteIdx = 26;
+  // Scroll so C4 (MIDI 60) is centred. White-key index of C4 = 23
+  // counting from A0=0 (A0 B0 C1 D1 … B3 = 22 whites before C4).
+  const c4WhiteIdx = 23;
   const wrap = container.parentElement;
-  wrap.scrollLeft = f4WhiteIdx * KB_WW - wrap.clientWidth / 2;
+  wrap.scrollLeft = Math.max(0, c4WhiteIdx * KB_WW + KB_WW / 2 - wrap.clientWidth / 2);
 }
 
 function addKbHandlers(key, midi) {
