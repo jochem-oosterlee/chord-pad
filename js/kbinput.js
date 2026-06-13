@@ -204,6 +204,7 @@ function kbNoteOn(midi, sendMidi = true) {
   if (sendMidi) sendNoteOn(midi, state.velocity);
   kbActive.set(midi, node);
   document.querySelector(`.kb-key[data-midi="${midi}"]`)?.classList.add('active');
+  if (typeof updateChordAnalyzer === 'function') updateChordAnalyzer();
   if (REC.active) {
     const rawBeat = Math.round(recCurrentBeat() * 2) / 2;
     const startBeat = SEQ.loop ? rawBeat % SEQ.loopEnd : rawBeat;
@@ -224,6 +225,7 @@ function kbNoteOff(midi, sendMidi = true) {
   if (sendMidi) sendNoteOff(midi);
   kbActive.delete(midi);
   document.querySelector(`.kb-key[data-midi="${midi}"]`)?.classList.remove('active');
+  if (typeof updateChordAnalyzer === 'function') updateChordAnalyzer();
   if (REC.active && REC.pendingNotes.has(midi)) {
     const p = REC.pendingNotes.get(midi);
     const beats = Math.max(0.5, Math.round(recCurrentBeat() * 2) / 2 - p.startBeat) || 0.5;

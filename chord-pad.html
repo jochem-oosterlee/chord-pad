@@ -290,7 +290,15 @@
 
   <!-- Keyboard -->
   <div class="keyboard-panel" id="keyboard-panel">
-    <div class="synth-header" id="keyboard-header">Keyboard</div>
+    <div class="kb-header-row">
+      <div class="synth-header" id="keyboard-header">Keyboard</div>
+      <div class="chord-analyzer" id="chord-analyzer">
+        <span class="chord-analyzer-notes" id="chord-analyzer-notes"></span>
+        <span class="chord-analyzer-arrow" id="chord-analyzer-arrow"></span>
+        <span class="chord-analyzer-main" id="chord-analyzer-main"></span>
+        <span class="chord-analyzer-alts" id="chord-analyzer-alts"></span>
+      </div>
+    </div>
     <div class="kb-wrap">
       <div class="kb-container" id="kb-container"></div>
     </div>
@@ -567,5 +575,6 @@
 <script src="js/chord-pad.js"></script>
 <script src="js/pianoroll.js"></script>
 <script src="js/chordview.js"></script>
+<script src="js/analyzer.js"></script>
 </body>
 </html>

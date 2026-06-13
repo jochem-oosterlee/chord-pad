@@ -1547,6 +1547,42 @@ input[type="range"]::-moz-range-thumb {
   flex-direction: column;
   gap: 8px;
 }
+.kb-header-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+/* Chord analyzer — live read-out of whatever notes are currently held
+   on the keyboard (mouse or external MIDI). Shows the detected name(s). */
+.chord-analyzer {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--text-dim);
+  min-height: 18px;
+}
+.chord-analyzer-notes {
+  color: rgba(255,255,255,0.45);
+  font-size: 11px;
+}
+.chord-analyzer-arrow {
+  color: rgba(255,255,255,0.30);
+  margin: 0 2px;
+}
+.chord-analyzer-main {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 15px;
+}
+.chord-analyzer-alts {
+  color: rgba(255,255,255,0.45);
+  font-size: 11px;
+}
+.chord-analyzer-unknown { color: rgba(255,255,255,0.30); }
+.chord-analyzer sub { font-size: 0.7em; }
 
 .kb-wrap {
   display: flex;

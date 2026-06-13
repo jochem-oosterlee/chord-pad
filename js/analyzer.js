@@ -1,0 +1,122 @@
+// ============================================================
+// CHORD ANALYZER
+// ============================================================
+//
+// Live chord-name detection from notes currently held on the keyboard
+// (visual click OR external MIDI input — both routed through
+// kbNoteOn / kbNoteOff which populate kbActive).
+//
+// Cross-file dependencies (resolved at runtime via window scope):
+//   chord-pad.js: CHORD_INTERVALS, QUALITY_GLYPH, formatChordRoot,
+//                 qualityToHTML
+//   kbinput.js:   kbActive (Map<midi, audioNode> of currently-held keys)
+//
+// Public surface (called from kbinput.js):
+//   updateChordAnalyzer()  — read kbActive, detect, render
+
+const PC_NAMES_FLAT  = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
+const PC_NAMES_SHARP = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+
+// Reverse lookup: sorted-deduped-mod-12 interval set → list of
+// qualities. Built lazily on first detection. Common roots/triads end
+// up with multiple qualities mapped to the same key (e.g. a fully-
+// diminished 7 = '0,3,6,9' = four enharmonic dim7 spellings).
+let _CHORD_REVERSE_MAP = null;
+function _buildChordReverseMap() {
+  if (_CHORD_REVERSE_MAP) return _CHORD_REVERSE_MAP;
+  const map = {};
+  if (typeof CHORD_INTERVALS !== 'object') return map;
+  for (const [q, ivs] of Object.entries(CHORD_INTERVALS)) {
+    const pcs = [...new Set(ivs.map(i => ((i % 12) + 12) % 12))].sort((a, b) => a - b);
+    const key = pcs.join(',');
+    if (!map[key]) map[key] = [];
+    map[key].push(q);
+  }
+  _CHORD_REVERSE_MAP = map;
+  return map;
+}
+
+// Identify every (root, quality) pair whose pitch-class footprint
+// matches the given MIDI notes. The same set of notes may map to
+// multiple interpretations — e.g. C-E-G-B♭-D = C9, but also Em7♭5
+// inversions etc.; the analyzer surfaces the first as primary and
+// the rest as synonyms.
+function detectChords(midiNotes) {
+  if (!midiNotes || midiNotes.length === 0) return [];
+  const pcSet = [...new Set(midiNotes.map(n => ((n % 12) + 12) % 12))].sort((a, b) => a - b);
+  const map = _buildChordReverseMap();
+  const results = [];
+  for (const root of pcSet) {
+    const intervals = pcSet.map(pc => (pc - root + 12) % 12).sort((a, b) => a - b);
+    const key = intervals.join(',');
+    const qs = map[key];
+    if (qs) for (const q of qs) results.push({ root, quality: q });
+  }
+  // Sort: prefer "simpler" qualities at the top (shorter glyph string,
+  // tends to be the most readable interpretation).
+  results.sort((a, b) => {
+    const ga = (QUALITY_GLYPH[a.quality] || '').length;
+    const gb = (QUALITY_GLYPH[b.quality] || '').length;
+    return ga - gb;
+  });
+  return results;
+}
+
+// Build the chord label HTML the way the pads do — root name (with
+// proper flat/sharp glyph) + quality glyph passed through qualityToHTML
+// so °/+/ø render as SVG.
+function _renderChordLabel(root, quality) {
+  // Prefer flats for chords that "live in flat-key territory" (dim, m7b5,
+  // mMaj7, etc.). Triads/dom7 with sharp roots stay sharp.
+  const prefersFlats = /dim|m7b5|ø|°/.test(QUALITY_GLYPH[quality] || '') || quality.includes('min');
+  const names = prefersFlats ? PC_NAMES_FLAT : PC_NAMES_SHARP;
+  const rootName = names[root];
+  const formattedRoot = (typeof formatChordRoot === 'function') ? formatChordRoot(rootName) : rootName;
+  const glyph = QUALITY_GLYPH[quality] || quality;
+  const qHTML = (typeof qualityToHTML === 'function') ? qualityToHTML(glyph) : glyph;
+  return formattedRoot + qHTML;
+}
+
+function _renderNoteList(midiNotes) {
+  if (!midiNotes.length) return '';
+  const names = midiNotes.slice().sort((a, b) => a - b).map(n => {
+    const pc  = ((n % 12) + 12) % 12;
+    const oct = Math.floor(n / 12) - 1;
+    const nm  = PC_NAMES_FLAT[pc];
+    const formatted = (typeof formatChordRoot === 'function') ? formatChordRoot(nm) : nm;
+    return formatted + '<sub>' + oct + '</sub>';
+  });
+  return names.join(' · ');
+}
+
+// Read the currently-held keys from kbActive, run detection, write
+// the result into the .chord-analyzer DOM nodes. Called whenever a
+// keyboard key goes down or up.
+function updateChordAnalyzer() {
+  const notesEl = document.getElementById('chord-analyzer-notes');
+  const mainEl  = document.getElementById('chord-analyzer-main');
+  const altsEl  = document.getElementById('chord-analyzer-alts');
+  const arrowEl = document.getElementById('chord-analyzer-arrow');
+  if (!mainEl || !altsEl) return;
+  const held = (typeof kbActive !== 'undefined') ? [...kbActive.keys()] : [];
+  if (notesEl) notesEl.innerHTML = _renderNoteList(held);
+  if (held.length < 2) {
+    mainEl.innerHTML = '';
+    altsEl.innerHTML = '';
+    if (arrowEl) arrowEl.textContent = '';
+    return;
+  }
+  const results = detectChords(held);
+  if (results.length === 0) {
+    if (arrowEl) arrowEl.textContent = '→';
+    mainEl.innerHTML = '<span class="chord-analyzer-unknown">—</span>';
+    altsEl.innerHTML = '';
+    return;
+  }
+  if (arrowEl) arrowEl.textContent = '→';
+  const [primary, ...rest] = results;
+  mainEl.innerHTML = _renderChordLabel(primary.root, primary.quality);
+  altsEl.innerHTML = rest.length
+    ? ' · ' + rest.slice(0, 5).map(r => _renderChordLabel(r.root, r.quality)).join(' · ')
+    : '';
+}
