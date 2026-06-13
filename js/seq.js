@@ -809,6 +809,7 @@ function seqUpdateLoopEnd() {
   const freeItems  = firstTrackOfKind('free')?.items  || [];
   if (cLane && chordItems.length > 0) cLane.style.minWidth = seqLaneWidth(chordItems) + 'px';
   if (mLane && freeItems.length  > 0) mLane.style.minWidth = seqLaneWidth(freeItems) + 'px';
+  _syncRulerLoopBar();
   seqUpdateLoopVisible();
 }
 
@@ -816,7 +817,18 @@ function seqUpdateLoopStart() {
   const px = SEQ.loopStart * BEAT_PX;
   document.querySelectorAll('.seq-loop-start').forEach(h => { h.style.left = Math.max(0, px - 11) + 'px'; });
   document.querySelectorAll('.seq-loop-start-line').forEach(l => { l.style.left = px + 'px'; });
+  _syncRulerLoopBar();
   seqUpdateLoopVisible();
+}
+
+// Re-sync the orange loop-range bar on the ruler with the current
+// SEQ.loopStart / SEQ.loopEnd. Called whenever the loop boundaries
+// move — keep this here instead of relying on the bar being re-created.
+function _syncRulerLoopBar() {
+  const bar = document.querySelector('#seq-ruler .seq-loop-bar');
+  if (!bar) return;
+  bar.style.left  = (SEQ.loopStart * BEAT_PX) + 'px';
+  bar.style.width = Math.max(2, (SEQ.loopEnd - SEQ.loopStart) * BEAT_PX) + 'px';
 }
 
 function seqMakeBlock(item, idx, isNote, isMidi = false) {
