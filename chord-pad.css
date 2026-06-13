@@ -1550,7 +1550,10 @@ input[type="range"]::-moz-range-thumb {
 
 .kb-wrap {
   display: flex;
-  justify-content: center;
+  /* No justify-content: center — combined with overflow-x: auto it
+     pushes the start of the content (A0, B0, C1) into negative scroll
+     territory that scrollLeft can't reach. Pin the row to the left so
+     the scrollbar maps to the full 88-key range. */
   overflow-x: auto;
   padding-bottom: 6px;
   scrollbar-width: thin;
