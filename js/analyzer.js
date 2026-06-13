@@ -62,16 +62,20 @@ function detectChords(midiNotes) {
   return results;
 }
 
+// Black keys: roots where the sharp and flat name differ
+// (D♯ = E♭, etc.). For those we show both spellings as "D♯/E♭…".
+const _BLACK_KEYS = new Set([1, 3, 6, 8, 10]);
 // Build the chord label HTML the way the pads do — root name (with
 // proper flat/sharp glyph) + quality glyph passed through qualityToHTML
 // so °/+/ø render as SVG.
 function _renderChordLabel(root, quality) {
-  // Prefer flats for chords that "live in flat-key territory" (dim, m7b5,
-  // mMaj7, etc.). Triads/dom7 with sharp roots stay sharp.
-  const prefersFlats = /dim|m7b5|ø|°/.test(QUALITY_GLYPH[quality] || '') || quality.includes('min');
-  const names = prefersFlats ? PC_NAMES_FLAT : PC_NAMES_SHARP;
-  const rootName = names[root];
-  const formattedRoot = (typeof formatChordRoot === 'function') ? formatChordRoot(rootName) : rootName;
+  const fmt = (typeof formatChordRoot === 'function') ? formatChordRoot : (s => s);
+  let formattedRoot;
+  if (_BLACK_KEYS.has(root)) {
+    formattedRoot = fmt(PC_NAMES_SHARP[root]) + '/' + fmt(PC_NAMES_FLAT[root]);
+  } else {
+    formattedRoot = fmt(PC_NAMES_SHARP[root]);
+  }
   const glyph = QUALITY_GLYPH[quality] || quality;
   const qHTML = (typeof qualityToHTML === 'function') ? qualityToHTML(glyph) : glyph;
   return formattedRoot + qHTML;
