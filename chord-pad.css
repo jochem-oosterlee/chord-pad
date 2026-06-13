@@ -1584,6 +1584,25 @@ input[type="range"]::-moz-range-thumb {
   font-weight: 600;
   font-size: 15px;
 }
+/* The universal .q-dim / .q-halfdim / .q-aug rule uses vertical-align:
+   0.65em to lift the SVG glyph as a superscript. Inside the chord
+   analyzer that pushes the inline content up a few pixels relative to
+   the rest of the row, so the chord text appears to jump when a dim
+   chord is matched. Force the SVG out of the inline flow with
+   position: relative + a negative top, keeping the line box height
+   identical with or without a glyph. */
+.chord-analyzer-main .q-dim,
+.chord-analyzer-main .q-halfdim,
+.chord-analyzer-main .q-aug,
+.chord-analyzer-alts .q-dim,
+.chord-analyzer-alts .q-halfdim,
+.chord-analyzer-alts .q-aug {
+  vertical-align: baseline;
+  width: 0.55em;
+  height: 0.55em;
+  position: relative;
+  top: -0.45em;
+}
 .chord-analyzer-alts {
   color: rgba(255,255,255,0.45);
   font-size: 11px;
@@ -1593,15 +1612,16 @@ input[type="range"]::-moz-range-thumb {
 
 .kb-wrap {
   display: flex;
-  /* No justify-content: center — combined with overflow-x: auto it
-     pushes the start of the content (A0, B0, C1) into negative scroll
-     territory that scrollLeft can't reach. Pin the row to the left so
-     the scrollbar maps to the full 88-key range. */
   overflow-x: auto;
   padding-bottom: 6px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255,255,255,0.2) transparent;
 }
+/* Centre the keyboard when there's spare horizontal room, but collapse
+   the auto-margins to 0 when content overflows so the scrollbar maps
+   to the full A0–C8 range (no clipped-left-edge bug from
+   justify-content: center). */
+.kb-wrap > .kb-container { margin-left: auto; margin-right: auto; }
 .kb-wrap::-webkit-scrollbar       { height: 6px; }
 .kb-wrap::-webkit-scrollbar-track { background: transparent; }
 .kb-wrap::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
