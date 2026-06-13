@@ -1397,29 +1397,16 @@ input[type="range"]::-moz-range-thumb {
   gap: 8px;
   flex-wrap: wrap;
 }
-/* Transport navigation — six small buttons jumping the play cursor to
-   start/end of project (T), selection (S) or loop (L). */
+/* Transport navigation — three nav buttons on each side of the
+   Loop/Stop/Play/Rec block. Same size as those transport buttons so
+   the row reads as one continuous control strip. */
 .seq-nav-group {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
-.seq-nav-btn {
-  padding: 0 4px !important;
-  min-width: 0 !important;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
-}
-.seq-nav-btn .lucide { width: 11px; height: 11px; }
-.seq-nav-label {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0;
-  line-height: 1;
-}
+/* .seq-nav-btn inherits .btn (28px min-width, 24px height, padding 0 10px). */
+.seq-nav-btn .lucide { width: 12px; height: 12px; }
 .seq-play-btn, .seq-stop-btn, .seq-rec-btn, .seq-metro-btn, .seq-loop-btn {
   background: none;
   border: 1px solid rgba(255,255,255,0.25);
