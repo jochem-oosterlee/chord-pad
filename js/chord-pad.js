@@ -2374,6 +2374,27 @@ if (state.instrument !== 'synth') {
   preloadSamplesOnGesture(state.instrument);
 }
 updateSynthOnlyVisibility();
+// Prewarm the SF2 preset for the default instrument + every track that
+// runs on an SF2-backed instrument. Without this, on a cold refresh
+// the first few seconds of playback decode samples lazily (one decode
+// per first-played note) — audible as soft volume / a small stutter
+// for the first ~3 bars. Fires after the SF2 file finishes loading.
+(async function _prewarmDefaultInstruments() {
+  await loadSf2('fluid');
+  const fluid = SF2_FILES.fluid.sf2;
+  if (!fluid) return;
+  const seen = new Set();
+  const tryPrewarm = (inst) => {
+    if (!inst || seen.has(inst)) return;
+    seen.add(inst);
+    const preset = INSTRUMENT_TO_SF2[inst];
+    if (preset != null) prewarmSf2Preset(fluid, preset);
+  };
+  tryPrewarm(state.instrument);
+  if (typeof SEQ !== 'undefined' && Array.isArray(SEQ.tracksList)) {
+    for (const t of SEQ.tracksList) tryPrewarm(t.instrument);
+  }
+})();
 
 buildKeyboard();
 initKbDragStrip();
