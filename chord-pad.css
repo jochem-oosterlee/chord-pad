@@ -1559,7 +1559,13 @@ input[type="range"]::-moz-range-thumb {
    on the keyboard (mouse or external MIDI). Shows the detected name(s). */
 .chord-analyzer {
   display: inline-flex;
-  align-items: baseline;
+  /* align-items: center pins every child to the row's vertical centre
+     regardless of its font-size or whether it has a <sub>. With
+     baseline alignment the row's baseline shifted up when only the
+     small 11-px note list was visible (single key) and shifted back
+     down when the 15-px main label appeared (chord), making the note
+     text visibly jump a couple of pixels between the two states. */
+  align-items: center;
   gap: 6px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
