@@ -45,6 +45,9 @@ function detectChords(midiNotes) {
   if (!midiNotes || midiNotes.length === 0) return [];
   const pcSet = [...new Set(midiNotes.map(n => ((n % 12) + 12) % 12))].sort((a, b) => a - b);
   const map = _buildChordReverseMap();
+  // The pitch class of the LOWEST sounding note — strong hint that
+  // it's the chord's root. Used to rank interpretations below.
+  const bassPc = ((Math.min(...midiNotes) % 12) + 12) % 12;
   const results = [];
   for (const root of pcSet) {
     const intervals = pcSet.map(pc => (pc - root + 12) % 12).sort((a, b) => a - b);
@@ -52,9 +55,13 @@ function detectChords(midiNotes) {
     const qs = map[key];
     if (qs) for (const q of qs) results.push({ root, quality: q });
   }
-  // Sort: prefer "simpler" qualities at the top (shorter glyph string,
-  // tends to be the most readable interpretation).
+  // Rank interpretations:
+  //  1. Bass note == root → much more likely the user's intended reading.
+  //  2. Simpler glyph (shorter string) wins among equals.
   results.sort((a, b) => {
+    const ba = a.root === bassPc ? 0 : 1;
+    const bb = b.root === bassPc ? 0 : 1;
+    if (ba !== bb) return ba - bb;
     const ga = (QUALITY_GLYPH[a.quality] || '').length;
     const gb = (QUALITY_GLYPH[b.quality] || '').length;
     return ga - gb;
