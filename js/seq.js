@@ -1721,6 +1721,45 @@ function seqDebugRenderHUD(s) {
   hud.textContent = JSON.stringify(s, null, 2);
 }
 
+// Per-track scheduled-events tracking. Each entry describes a single
+// note (or chord, for chord-tracks): when it starts, when it ends, the
+// AudioBufferSource nodes (if instrument output) and the MIDI port +
+// midi numbers (if MIDI output). seqResyncTrack walks this list and
+// selectively cancels only events whose `startAt` is still in the
+// future, leaving currently-playing ones untouched. Stops the "soft
+// note" double-fire that used to happen on mid-play mutations.
+function _seqRecordEvent(track, event) {
+  if (!track._scheduled) track._scheduled = [];
+  track._scheduled.push(event);
+}
+function _seqCancelFuture(track, now) {
+  if (!track._scheduled || track._scheduled.length === 0) return;
+  const kept = [];
+  for (const ev of track._scheduled) {
+    if (ev.endAt <= now) continue;            // finished — drop
+    if (ev.startAt > now + 0.001) {           // future — cancel
+      // Audio: stop scheduled BufferSource before it starts (no sound).
+      if (ev.audioNodes) {
+        for (const node of ev.audioNodes) {
+          try { node.stop(now); } catch (_) {}
+          SEQ.activeNodes?.delete(node);
+        }
+      }
+      // MIDI: the note-on already sits in the OS driver queue with a
+      // future timestamp — we can't unqueue it. Send a note-off at the
+      // same timestamp + 1 ms so the driver fires noteOn → noteOff
+      // back-to-back; effectively inaudible (< 1 ms note).
+      if (ev.port && ev.midiNotes) {
+        const cancelTs = audioTimeToMidiTs(ev.startAt + 0.001);
+        for (const m of ev.midiNotes) sendNoteOff(m, ev.channel, ev.port, cancelTs);
+      }
+      continue;
+    }
+    kept.push(ev);                            // currently playing — keep
+  }
+  track._scheduled = kept;
+}
+
 function seqTickChordTrack(track, now, bd, horizon) {
   while (track.items.length > 0 && track.pendingTime < horizon) {
     const item = track.items[track.pendingIdx];
@@ -1739,6 +1778,18 @@ function seqTickChordTrack(track, now, bd, horizon) {
 
     const useInstrument = track.output !== 'midi';
     const useMidi       = track.output === 'midi';
+    const capturedNotes = [...notes], capturedBass = bassNote;
+    const trkPort = useMidi ? midiPortById(track.midiPortId) : null;
+    // Event record for selective cancellation on mutation. Populated
+    // below as we schedule audio + MIDI.
+    const event = {
+      startAt: t,
+      endAt: t + dur * 0.95,
+      audioNodes: null,
+      port: useMidi && audible ? trkPort : null,
+      channel: track.channel,
+      midiNotes: useMidi && audible ? (capturedBass !== null ? [...capturedNotes, capturedBass] : capturedNotes) : null,
+    };
     if (useInstrument && state.audioEnabled && audible) {
       const fire = () => {
         const audioNodes = notes.map((n, i) => startAudioNote(n, vel, t + i * 0.002, null, inst));
@@ -1747,13 +1798,13 @@ function seqTickChordTrack(track, now, bd, horizon) {
         if (bassNote !== null) {
           const bassNode = startBassNote(bassNote, t, null, inst);
           SEQ.activeNodes.add(bassNode);
+          audioNodes.push(bassNode);
           seqTimeout(() => { stopAudioNote(bassNode); SEQ.activeNodes.delete(bassNode); }, offDelay);
         }
+        event.audioNodes = audioNodes;
       };
       withSynth(track.synth, fire);
     }
-    const capturedNotes = [...notes], capturedBass = bassNote;
-    const trkPort = useMidi ? midiPortById(track.midiPortId) : null;
     // Schedule MIDI directly via port.send timestamps — sample-precise, no
     // setTimeout jitter. Display updates still go through seqTimeout so
     // they only run at "now" time (not preemptively).
@@ -1765,6 +1816,7 @@ function seqTickChordTrack(track, now, bd, horizon) {
       capturedNotes.forEach(n => sendNoteOff(n, track.channel, trkPort, offTs));
       if (capturedBass !== null) sendNoteOff(capturedBass, track.channel, trkPort, offTs);
     }
+    _seqRecordEvent(track, event);
     seqTimeout(() => {
       SEQ.nowChord = chordDisplayName(item.keyRoot, item.interval, item.q) + ' [' + capturedNotes.map(midiNoteName).join(' · ') + ']';
       seqUpdateNowPlaying();
@@ -1835,21 +1887,31 @@ function seqTickFreeTrack(track, now, bd, horizon) {
     const inst     = seqTrackInstrument(track);
     const useInstrument = track.output !== 'midi';
     const useMidi       = track.output === 'midi';
+    const capturedMidi = item.midi, capturedLabel = item.label;
+    const trkPort = useMidi ? midiPortById(track.midiPortId) : null;
+    const event = {
+      startAt: t,
+      endAt: t + dur * 0.95,
+      audioNodes: null,
+      port: useMidi && audible ? trkPort : null,
+      channel: track.channel,
+      midiNotes: useMidi && audible ? [capturedMidi] : null,
+    };
     if (useInstrument && state.audioEnabled && audible) {
       withSynth(track.synth, () => {
         const node = startAudioNote(item.midi, vel, t, null, inst);
         SEQ.activeNodes.add(node);
+        event.audioNodes = [node];
         seqTimeout(() => { stopAudioNote(node); SEQ.activeNodes.delete(node); }, offDelay);
       });
     }
-    const capturedMidi = item.midi, capturedLabel = item.label;
-    const trkPort = useMidi ? midiPortById(track.midiPortId) : null;
     if (useMidi && audible && trkPort) {
       const onTs  = audioTimeToMidiTs(t);
       const offTs = audioTimeToMidiTs(t + dur * 0.95);
       sendNoteOn(capturedMidi, vel, track.channel, trkPort, onTs);
       sendNoteOff(capturedMidi, track.channel, trkPort, offTs);
     }
+    _seqRecordEvent(track, event);
     seqTimeout(() => {
       SEQ.nowNote = capturedLabel;
       seqUpdateNowPlaying();
@@ -1908,12 +1970,18 @@ function seqAdvanceTrackPending(track, bd) {
 function seqResyncTrack(track) {
   if (!SEQ.playing || !track) return;
   invalidateFreeTrackFlat(track);
+  const ctxNow = getAudioCtx().currentTime;
+  // Cancel any events that haven't started yet for this track so we
+  // don't double-fire when the upcoming tick reschedules. Currently-
+  // playing events are kept (their note-on already happened — we let
+  // them ring out so the user doesn't hear them clipped).
+  _seqCancelFuture(track, ctxNow);
   const list = track.kind === 'free' ? freeTrackFlatNotes(track) : track.items;
   if (list.length === 0) return;
   const bd    = seqBeatDur();
   const tRef  = SEQ.playStartTime + 0.05;
   const total = seqTotalDur();
-  const now   = getAudioCtx().currentTime;
+  const now   = ctxNow;
   const ls    = seqLoopOffset();
   const cycleNum   = SEQ.loop ? Math.max(0, Math.floor((now - tRef) / total)) : 0;
   const cycleStart = tRef + cycleNum * total;
@@ -2174,8 +2242,14 @@ function seqPlay(leadSec) {
 function seqStop() {
   SEQ.playing = false;
   // Reset every track's active highlight so on next play the playhead
-  // starts from a clean state.
-  for (const tr of SEQ.tracksList) tr.activeIdx = -1;
+  // starts from a clean state. Also drop any in-flight scheduled-event
+  // records — the global pendingTimers + activeNodes are cleared below
+  // and panic() takes care of MIDI all-notes-off, so the per-track
+  // tracker would only carry stale references after this point.
+  for (const tr of SEQ.tracksList) {
+    tr.activeIdx = -1;
+    tr._scheduled = null;
+  }
   if (typeof resetChordViewLoopIter === 'function') resetChordViewLoopIter();
   SEQ.nowChord = '';
   SEQ.nowNote  = '';
