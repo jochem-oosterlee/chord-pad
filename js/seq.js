@@ -2160,12 +2160,33 @@ function seqJumpToBeat(beat) {
   const b = Math.max(0, beat);
   SEQ.startBeat = b;
   SEQ.animBeat  = b;
-  // While playing, also kill any audio currently in flight — otherwise
-  // the just-cancelled notes keep ringing through and overlap with the
-  // freshly-scheduled ones from the new position.
+  // While playing, hard-cut every in-flight note. stopAudioNote does a
+  // 0.5 s release envelope which is too soft for a cursor jump — the
+  // listener still hears the old position fading for half a second.
+  // Stop oscillators directly + send MIDI all-notes-off for every port
+  // used by a track.
   if (SEQ.playing) {
-    SEQ.activeNodes?.forEach(n => { try { stopAudioNote(n); } catch (_) {} });
+    const ctx0 = getAudioCtx();
+    SEQ.activeNodes?.forEach(node => {
+      try { node.oscs?.forEach(o => o.stop(ctx0.currentTime)); } catch (_) {}
+    });
     SEQ.activeNodes?.clear?.();
+    // MIDI: send all-notes-off on every port any track might be using.
+    if (state.midiAccess) {
+      const ports = new Set();
+      if (state.output) ports.add(state.output);
+      for (const t of SEQ.tracksList) {
+        if (t.midiPortId) {
+          const p = state.midiAccess.outputs.get(t.midiPortId);
+          if (p) ports.add(p);
+        }
+      }
+      ports.forEach(p => {
+        for (let ch = 0; ch < 16; ch++) {
+          try { p.send([0xB0 | ch, 123, 0]); } catch (_) {}
+        }
+      });
+    }
     for (const tr of SEQ.tracksList) tr._scheduled = null;
   }
   if (typeof resetChordViewLoopIter === 'function') resetChordViewLoopIter();
