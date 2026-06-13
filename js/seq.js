@@ -1136,6 +1136,7 @@ function seqProjectSnapshot() {
     padMidiPortId: state.padMidiPortId,
     midiClockPortId: state.midiClockPortId,
     midiClockEnabled: state.midiClockEnabled,
+    keyboardMidiPortId: state.keyboardMidiPortId,
     prBodyHeight: SEQ.prBodyHeight,
     visualLatencyMs: SEQ.visualLatencyMs,
   };
@@ -1177,6 +1178,7 @@ function seqImportProject(d) {
   if (typeof d.padMidiPortId   === 'string')  state.padMidiPortId  = d.padMidiPortId;
   if (typeof d.midiClockPortId === 'string')  state.midiClockPortId = d.midiClockPortId;
   if (typeof d.midiClockEnabled === 'boolean') state.midiClockEnabled = d.midiClockEnabled;
+  if (typeof d.keyboardMidiPortId === 'string') state.keyboardMidiPortId = d.keyboardMidiPortId;
   if (typeof d.prBodyHeight    === 'number')  SEQ.prBodyHeight     = d.prBodyHeight;
   if (typeof d.visualLatencyMs === 'number')  SEQ.visualLatencyMs  = d.visualLatencyMs;
   if (Array.isArray(d.tracksList)) {
@@ -1223,6 +1225,7 @@ function seqLoad() {
     if (typeof d.padMidiPortId === 'string') state.padMidiPortId = d.padMidiPortId;
     if (typeof d.midiClockPortId === 'string') state.midiClockPortId = d.midiClockPortId;
     if (typeof d.midiClockEnabled === 'boolean') state.midiClockEnabled = d.midiClockEnabled;
+    if (typeof d.keyboardMidiPortId === 'string') state.keyboardMidiPortId = d.keyboardMidiPortId;
     if (typeof d.prBodyHeight  === 'number')  SEQ.prBodyHeight    = d.prBodyHeight;
     if (typeof d.visualLatencyMs === 'number') SEQ.visualLatencyMs = d.visualLatencyMs;
 

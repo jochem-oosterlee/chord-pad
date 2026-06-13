@@ -84,24 +84,44 @@ function attachMidiInput() {
     if (!t.midiInPortId) continue;
     const inp = state.midiAccess.inputs.get(t.midiInPortId);
     if (!inp) continue;
-    if (!inputsByPort.has(inp.id)) inputsByPort.set(inp.id, { inp, tracks: [], clock: false });
+    if (!inputsByPort.has(inp.id)) inputsByPort.set(inp.id, { inp, tracks: [], clock: false, keyboard: false });
     inputsByPort.get(inp.id).tracks.push(t);
   }
   // Clock source — possibly on the same port as a track, share the handler.
   if (state.midiClockEnabled && state.midiClockPortId) {
     const inp = state.midiAccess.inputs.get(state.midiClockPortId);
     if (inp) {
-      if (!inputsByPort.has(inp.id)) inputsByPort.set(inp.id, { inp, tracks: [], clock: true });
+      if (!inputsByPort.has(inp.id)) inputsByPort.set(inp.id, { inp, tracks: [], clock: true, keyboard: false });
       else inputsByPort.get(inp.id).clock = true;
     }
   }
-  inputsByPort.forEach(({ inp, tracks, clock }) => {
+  // Keyboard input — routes external MIDI through the chord-pad
+  // keyboard (plays it audibly, highlights keys, feeds the analyzer).
+  // If the same port is already claimed by a track, the track wins
+  // and the keyboard handler is skipped — otherwise the note would
+  // sound twice (track instrument + state.instrument). Clock can
+  // safely share a port since it filters on SysRealtime status bytes.
+  if (state.keyboardMidiPortId) {
+    const inp = state.midiAccess.inputs.get(state.keyboardMidiPortId);
+    if (inp) {
+      const entry = inputsByPort.get(inp.id);
+      if (!entry) {
+        inputsByPort.set(inp.id, { inp, tracks: [], clock: false, keyboard: true });
+      } else if (entry.tracks.length === 0) {
+        entry.keyboard = true;
+      }
+      // else: track already claims this port → no `keyboard: true`,
+      //       handler below won't dispatch to onMidiMessage.
+    }
+  }
+  inputsByPort.forEach(({ inp, tracks, clock, keyboard }) => {
     inp.onmidimessage = (msg) => {
       const status = msg.data[0];
       if (clock && (status === 0xF8 || status === 0xFA || status === 0xFB || status === 0xFC)) {
         onMidiClockMessage(status, msg.timeStamp);
         return;
       }
+      if (keyboard) onMidiMessage(msg);              // play via kbNoteOn/Off
       if (tracks.length) onTrackMidiMessage(msg, tracks);
     };
   });

@@ -2292,6 +2292,29 @@ function seqRenderRuler() {
   });
 })();
 
+// Keyboard MIDI input — global port that plays through the chord-pad
+// keyboard (audibly via state.instrument), highlights the visual
+// keys, and feeds the chord analyzer. If the same port is already
+// assigned to a track, attachMidiInput skips the keyboard route on
+// that port so notes don't sound twice.
+(function _initKeyboardMidiPort() {
+  const sel = document.getElementById('keyboard-midi-port');
+  if (!sel) return;
+  const rebuild = () => {
+    const inputs = state.midiAccess ? Array.from(state.midiAccess.inputs.values()) : [];
+    sel.innerHTML = '<option value="">— none —</option>'
+      + inputs.map(p => `<option value="${p.id}"${p.id === (state.keyboardMidiPortId || '') ? ' selected' : ''}>${p.name}</option>`).join('');
+    sel.value = state.keyboardMidiPortId || '';
+  };
+  rebuild();
+  document.addEventListener('chordpad:midi-ports-changed', rebuild);
+  sel.addEventListener('change', () => {
+    state.keyboardMidiPortId = sel.value;
+    attachMidiInput();
+    seqSave();
+  });
+})();
+
 (function _initTempoWheel() {
   const ids = ['ctrl-tempo', 'seq-tempo-val'];
   for (const id of ids) {
