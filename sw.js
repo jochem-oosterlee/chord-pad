@@ -5,7 +5,7 @@
 //   ASSET_CACHE — only bumps when the actual binary assets change.
 //                 Keeps the ~148 MB SF2 across app updates so users
 //                 don't redownload it every time we ship a CSS tweak.
-const APP_CACHE   = 'chord-pad-app-v82';
+const APP_CACHE   = 'chord-pad-app-v83';
 const ASSET_CACHE = 'chord-pad-assets-v1';
 
 const OFFLINE_ASSETS = [
@@ -52,15 +52,20 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const cacheFirst = CACHE_FIRST_PATTERNS.some(re => re.test(url.pathname));
   if (cacheFirst) {
-    e.respondWith(
-      caches.open(ASSET_CACHE).then(c => c.match(e.request).then(cached => {
-        if (cached) return cached;
-        return fetch(e.request).then(resp => {
-          if (resp.ok) c.put(e.request, resp.clone()).catch(() => {});
-          return resp;
-        });
-      }))
-    );
+    e.respondWith((async () => {
+      const c = await caches.open(ASSET_CACHE);
+      const cached = await c.match(e.request);
+      if (cached) return cached;
+      const resp = await fetch(e.request);
+      if (!resp.ok) return resp;
+      // Await the cache write before serving so the entry is persisted
+      // by the time the page starts reading the body. Previous version
+      // fire-and-forgot the put — if the user refreshed mid-stream the
+      // cache stayed empty and the next load re-downloaded.
+      try { await c.put(e.request, resp.clone()); } catch (_) {}
+      const fromCache = await c.match(e.request);
+      return fromCache || resp;
+    })());
     return;
   }
   // Network-first for everything else: fresh content on refresh, cache
