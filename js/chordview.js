@@ -81,11 +81,14 @@ function renderChordView() {
   if (!trk) return;
   for (const item of trk.items) {
     const card = document.createElement('div');
-    card.className = 'chordview-card future';
+    const cardW = Math.max(CHORDVIEW_MIN_CARD_W, item.beats * CHORDVIEW_PX_PER_BEAT);
+    // Mark cards above ~2 beats wide as 'wide' so the CSS bumps their
+    // font size — gives the long sustained chords more visual weight.
+    card.className = 'chordview-card future' + (item.beats >= 2 ? ' wide' : '');
     card.dataset.start = item.start;
     card.dataset.beats = item.beats;
     card.style.minWidth = CHORDVIEW_MIN_CARD_W + 'px';
-    card.style.width = Math.max(CHORDVIEW_MIN_CARD_W, item.beats * CHORDVIEW_PX_PER_BEAT) + 'px';
+    card.style.width = cardW + 'px';
     const name = document.createElement('div');
     name.className = 'chordview-name';
     name.innerHTML = item.label || '?';

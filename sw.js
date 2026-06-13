@@ -1,4 +1,4 @@
-const CACHE = 'chord-pad-v57';
+const CACHE = 'chord-pad-v58';
 const OFFLINE_ASSETS = [
   './chord-pad.html',
   './chord-pad.css',

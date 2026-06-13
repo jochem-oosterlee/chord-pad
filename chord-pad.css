@@ -2181,17 +2181,30 @@ body.hide-chordview .seq-chordview { display: none !important; }
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: 6px;
-  color: var(--text-dim);
-  font-family: 'Cormorant Garamond', 'JetBrains Mono', serif;
+  color: rgba(255,255,255,0.65);
   white-space: nowrap;
   transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.15s, opacity 0.2s;
   opacity: 0.55;
 }
 .chordview-card .chordview-name {
-  font-size: 28px;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 36px;
   line-height: 1;
   letter-spacing: 0.02em;
+  color: white;
+}
+/* Quality / ext glyphs inside the chord label (sup/sub) are styled the
+   same way the .pad-quality wrapper does so the visual matches the
+   chord-pads grid. */
+.chordview-card .chordview-name sub,
+.chordview-card .chordview-name sup {
+  font-size: 0.55em;
+  font-weight: 500;
+  color: rgba(255,255,255,0.65);
 }
 .chordview-card .chordview-beats {
   margin-top: 4px;
@@ -2204,12 +2217,16 @@ body.hide-chordview .seq-chordview { display: none !important; }
 .chordview-card.future  { opacity: 0.7; }
 .chordview-card.current {
   opacity: 1;
-  color: var(--accent);
   border-color: rgba(255,170,51,0.45);
   background: rgba(255,170,51,0.10);
-  transform: scale(1.08);
+  transform: scale(1.1);
 }
-.chordview-card.current .chordview-name { font-size: 36px; }
+.chordview-card.current .chordview-name { color: var(--accent); font-size: 44px; }
+/* Wider cards get a bigger base type — fluid scaling between 36px and
+   56px depending on card width. Capped via clamp() so very wide cards
+   don't blow out. */
+.chordview-card.wide .chordview-name         { font-size: clamp(36px, 4.2vw, 52px); }
+.chordview-card.wide.current .chordview-name { font-size: clamp(44px, 5vw, 60px); }
 /* Vertical playhead line down the centre — the chord cards scroll
    behind it during playback. */
 .seq-chordview-playhead {
