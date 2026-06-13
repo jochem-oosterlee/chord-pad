@@ -2018,9 +2018,19 @@ function metroRun(startAudioTime, startMusicBeat) {
 function metroRunSynced() {
   if (!METRO.enabled || METRO.timer) return;
   const ctx = getAudioCtx();
-  // SEQ.animBeat tracks the current music-time position; perfect for sync.
-  const startBeat = (typeof SEQ.animBeat === 'number') ? SEQ.animBeat : SEQ.loopStart;
-  metroRun(ctx.currentTime, startBeat);
+  // SEQ.animBeat is the latency-compensated VISUAL playhead — using it
+  // as the music-beat reference at ctx.currentTime makes the first
+  // click fire ~30-50 ms (one outputLatency) off the actual beat grid.
+  // Use the scheduler's playStartTime anchor instead so the metro lines
+  // up with the scheduled note events.
+  const bd = seqBeatDur();
+  const tRef = (typeof SEQ.playStartTime === 'number') ? SEQ.playStartTime + 0.05 : ctx.currentTime;
+  let beat = (ctx.currentTime - tRef) / bd + SEQ.loopStart;
+  if (SEQ.loop) {
+    const len = Math.max(0.001, SEQ.loopEnd - SEQ.loopStart);
+    beat = SEQ.loopStart + ((beat - SEQ.loopStart) % len + len) % len;
+  }
+  metroRun(ctx.currentTime, beat);
 }
 
 function metroHalt() {
