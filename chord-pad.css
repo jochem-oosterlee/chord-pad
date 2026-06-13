@@ -2189,15 +2189,14 @@ body.hide-chordview .seq-chordview { display: none !important; }
   opacity: 0.55;
 }
 .chordview-card .chordview-name {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
+  display: inline-block;
   font-family: 'JetBrains Mono', monospace;
   font-weight: 700;
-  font-size: 36px;
+  font-size: 28px;
   line-height: 1;
   letter-spacing: 0.02em;
   color: white;
+  white-space: nowrap;
 }
 /* Quality / ext glyphs inside the chord label (sup/sub) are styled the
    same way the .pad-quality wrapper does so the visual matches the
@@ -2207,6 +2206,16 @@ body.hide-chordview .seq-chordview { display: none !important; }
   font-size: 0.55em;
   font-weight: 500;
   color: rgba(255,255,255,0.65);
+}
+/* dim / half-dim / aug SVG glyphs inside chord labels — lift them so
+   they sit as a proper superscript next to the chord root (matches
+   the .pad-quality / chord-pad rendering pattern). */
+.chordview-card .chordview-name .q-dim,
+.chordview-card .chordview-name .q-halfdim,
+.chordview-card .chordview-name .q-aug {
+  width: 0.55em;
+  height: 0.55em;
+  vertical-align: 0.55em;
 }
 .chordview-card .chordview-beats {
   margin-top: 4px;
@@ -2223,12 +2232,11 @@ body.hide-chordview .seq-chordview { display: none !important; }
   background: rgba(255,170,51,0.10);
   transform: scale(1.1);
 }
-.chordview-card.current .chordview-name { color: var(--accent); font-size: 44px; }
-/* Wider cards get a bigger base type — fluid scaling between 36px and
-   56px depending on card width. Capped via clamp() so very wide cards
-   don't blow out. */
-.chordview-card.wide .chordview-name         { font-size: clamp(36px, 4.2vw, 52px); }
-.chordview-card.wide.current .chordview-name { font-size: clamp(44px, 5vw, 60px); }
+.chordview-card.current .chordview-name { color: var(--accent); font-size: 34px; }
+/* Wider cards (≥ 2 beats) get a slightly bigger base type. JS
+   auto-shrinks the font further if a long label still overflows. */
+.chordview-card.wide .chordview-name         { font-size: 32px; }
+.chordview-card.wide.current .chordview-name { font-size: 40px; }
 /* Vertical playhead line down the centre — the chord cards scroll
    behind it during playback. */
 .seq-chordview-playhead {

@@ -103,7 +103,32 @@ function renderChordView() {
     });
     trackEl.appendChild(card);
   }
+  // Auto-fit each label to its card — shrink font if it overflows.
+  // Defer to next frame so layout has applied widths before measuring.
+  requestAnimationFrame(() => _fitChordViewCards(trackEl));
   updateChordViewPlayhead();
+}
+
+// Shrink each chord label's font until it fits the card. Caps at 50%
+// of the original size as a sanity floor; if a chord name is wider
+// than that, the label clips — better than a 6-px-tall blob.
+function _fitChordViewCards(trackEl) {
+  if (!trackEl) return;
+  trackEl.querySelectorAll('.chordview-card').forEach(card => {
+    const name = card.querySelector('.chordview-name');
+    if (!name) return;
+    const cs = getComputedStyle(card);
+    const avail = card.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    if (avail <= 0) return;
+    name.style.fontSize = ''; // reset
+    let size = parseFloat(getComputedStyle(name).fontSize);
+    const floor = size * 0.5;
+    let guard = 30;
+    while (name.scrollWidth > avail && size > floor && guard-- > 0) {
+      size -= 2;
+      name.style.fontSize = size + 'px';
+    }
+  });
 }
 
 // Walk the cards and apply past / current / future classes, then
