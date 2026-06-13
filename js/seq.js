@@ -2056,6 +2056,7 @@ function seqJumpToBeat(beat) {
   const b = Math.max(0, beat);
   SEQ.startBeat = b;
   SEQ.animBeat  = b;
+  if (typeof resetChordViewLoopIter === 'function') resetChordViewLoopIter();
   // Arrangement playheads (full-height ones + per-lane ones).
   document.querySelectorAll('.seq-playhead-global, .seq-lane .seq-playhead').forEach(ph => {
     ph.style.display = 'block';
@@ -2150,6 +2151,7 @@ function seqStop() {
   // Reset every track's active highlight so on next play the playhead
   // starts from a clean state.
   for (const tr of SEQ.tracksList) tr.activeIdx = -1;
+  if (typeof resetChordViewLoopIter === 'function') resetChordViewLoopIter();
   SEQ.nowChord = '';
   SEQ.nowNote  = '';
   SEQ.pendingTimers.forEach(id => clearTimeout(id));

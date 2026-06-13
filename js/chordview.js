@@ -19,6 +19,13 @@ SEQ.chordViewOpen = SEQ.chordViewOpen ?? false;
 
 const CHORDVIEW_PX_PER_BEAT = 90;
 const CHORDVIEW_MIN_CARD_W  = 140;
+// While the loop is on, render N copies of the chord row back-to-back
+// so the cursor can flow rightward across "the next iteration" instead
+// of snapping back to the start. _cvLoopIter rotates 0..N-1 and bumps
+// each time we detect SEQ.animBeat wrapping backwards.
+const CHORDVIEW_COPIES = 3;
+let _cvLoopIter = 0;
+let _cvLastAnimBeat = -1;
 
 function focusedChordTrack() {
   return trackById(SEQ.focusedChordTrackId) || firstTrackOfKind('chord');
@@ -79,30 +86,34 @@ function renderChordView() {
   const trk = focusedChordTrack();
   refreshChordViewTitle();
   if (!trk) return;
-  for (const item of trk.items) {
-    const card = document.createElement('div');
-    const cardW = Math.max(CHORDVIEW_MIN_CARD_W, item.beats * CHORDVIEW_PX_PER_BEAT);
-    // Mark cards above ~2 beats wide as 'wide' so the CSS bumps their
-    // font size — gives the long sustained chords more visual weight.
-    card.className = 'chordview-card future' + (item.beats >= 2 ? ' wide' : '');
-    card.dataset.start = item.start;
-    card.dataset.beats = item.beats;
-    card.style.minWidth = CHORDVIEW_MIN_CARD_W + 'px';
-    card.style.width = cardW + 'px';
-    const name = document.createElement('div');
-    name.className = 'chordview-name';
-    name.innerHTML = item.label || '?';
-    const beats = document.createElement('div');
-    beats.className = 'chordview-beats';
-    beats.textContent = item.beats + 'b';
-    card.appendChild(name);
-    card.appendChild(beats);
-    card.addEventListener('click', () => {
-      // Click on a card jumps the play-cursor to that chord's start.
-      if (typeof seqJumpToBeat === 'function') seqJumpToBeat(item.start);
-    });
-    trackEl.appendChild(card);
+  for (let iter = 0; iter < CHORDVIEW_COPIES; iter++) {
+    for (let i = 0; i < trk.items.length; i++) {
+      const item = trk.items[i];
+      const card = document.createElement('div');
+      const cardW = Math.max(CHORDVIEW_MIN_CARD_W, item.beats * CHORDVIEW_PX_PER_BEAT);
+      card.className = 'chordview-card future' + (item.beats >= 2 ? ' wide' : '');
+      card.dataset.iter = iter;
+      card.dataset.localIdx = i;
+      card.dataset.start = item.start;
+      card.dataset.beats = item.beats;
+      card.style.minWidth = CHORDVIEW_MIN_CARD_W + 'px';
+      card.style.width = cardW + 'px';
+      const name = document.createElement('div');
+      name.className = 'chordview-name';
+      name.innerHTML = item.label || '?';
+      const beats = document.createElement('div');
+      beats.className = 'chordview-beats';
+      beats.textContent = item.beats + 'b';
+      card.appendChild(name);
+      card.appendChild(beats);
+      card.addEventListener('click', () => {
+        if (typeof seqJumpToBeat === 'function') seqJumpToBeat(item.start);
+      });
+      trackEl.appendChild(card);
+    }
   }
+  _cvLoopIter = 0;
+  _cvLastAnimBeat = -1;
   // Auto-fit each label to its card — shrink font if it overflows.
   // Defer to next frame so layout has applied widths before measuring.
   requestAnimationFrame(() => _fitChordViewCards(trackEl));
@@ -144,46 +155,56 @@ function updateChordViewPlayhead() {
     return;
   }
   const t = SEQ.animBeat ?? SEQ.startBeat ?? 0;
-  const cards = trackEl.querySelectorAll('.chordview-card');
-  // Find the chord that contains `t`. If `t` is past the last chord,
-  // mark all as past. If `t` is before the first chord, mark all as
-  // future and pin the first card at the playhead.
-  let currentIdx = -1;
+  // Loop-wrap detection: when animBeat jumps backwards by more than
+  // half a beat while looping, we've crossed the loop boundary — bump
+  // the iter so the cursor continues into the next rendered copy
+  // instead of snapping left.
+  if (SEQ.loop && SEQ.playing && _cvLastAnimBeat >= 0
+      && t < _cvLastAnimBeat - 0.5) {
+    _cvLoopIter = (_cvLoopIter + 1) % CHORDVIEW_COPIES;
+  }
+  _cvLastAnimBeat = t;
+
+  // Which chord in trk.items contains `t`?
+  let localIdx = -1;
   for (let i = 0; i < trk.items.length; i++) {
     const it = trk.items[i];
-    if (t >= it.start && t < it.start + it.beats) { currentIdx = i; break; }
+    if (t >= it.start && t < it.start + it.beats) { localIdx = i; break; }
   }
-  // Update class state.
+  // Effective index across the rendered (copies × items) row.
+  const effectiveIdx = (localIdx >= 0)
+    ? trk.items.length * _cvLoopIter + localIdx
+    : -1;
+
+  const cards = trackEl.querySelectorAll('.chordview-card');
   cards.forEach((el, i) => {
-    el.classList.toggle('past',    i < currentIdx || (currentIdx === -1 && t >= trk.items[trk.items.length - 1].start + trk.items[trk.items.length - 1].beats));
-    el.classList.toggle('current', i === currentIdx);
-    el.classList.toggle('future',  i > currentIdx);
+    el.classList.toggle('past',    effectiveIdx >= 0 && i < effectiveIdx);
+    el.classList.toggle('current', i === effectiveIdx);
+    el.classList.toggle('future',  effectiveIdx === -1 ? false : i > effectiveIdx);
   });
-  // Compute the x of the playhead inside the track-row. Sum widths of
-  // previous cards + gap, then add the within-card offset of the
-  // current chord based on beat progress.
+
+  // Walk the rendered row to compute the x of the playhead.
   const gap = 6; // matches .seq-chordview-track gap
   let xWithinRow = 0;
   for (let i = 0; i < cards.length; i++) {
     const el = cards[i];
     const w = el.offsetWidth;
-    if (i === currentIdx) {
-      const it = trk.items[i];
+    if (i === effectiveIdx) {
+      const it = trk.items[+el.dataset.localIdx];
       const frac = Math.max(0, Math.min(1, (t - it.start) / Math.max(0.0001, it.beats)));
       xWithinRow += frac * w;
       break;
     }
     xWithinRow += w + gap;
-    // If past the last chord, end of last card is fine.
-    if (currentIdx === -1 && i === cards.length - 1) {
-      xWithinRow += w; // align past-the-end position
-    }
   }
-  // The track has 50% left padding so the first chord can sit at the
-  // centre on start. translateX = -(distanceFromTrackLeft - bodyHalf).
-  const bodyHalf = body.clientWidth / 2;
-  const tx = bodyHalf - (bodyHalf + xWithinRow); // -xWithinRow but written explicitly
-  trackEl.style.transform = `translateX(${tx}px)`;
+  trackEl.style.transform = `translateX(${-xWithinRow}px)`;
+}
+
+// Called from seqStop / seqJumpToBeat so the iter resets to 0 on the
+// next render and the first copy of the row is "the current one".
+function resetChordViewLoopIter() {
+  _cvLoopIter = 0;
+  _cvLastAnimBeat = -1;
 }
 
 // The generic _initSectionToggles handler in chord-pad.js already

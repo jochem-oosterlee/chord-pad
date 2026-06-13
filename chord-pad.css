@@ -2228,9 +2228,11 @@ body.hide-chordview .seq-chordview { display: none !important; }
 .chordview-card.future  { opacity: 0.7; }
 .chordview-card.current {
   opacity: 1;
-  border-color: rgba(255,170,51,0.45);
+  border-color: rgba(255,170,51,0.55);
   background: rgba(255,170,51,0.10);
-  transform: scale(1.1);
+  /* No transform: scale — the tinted background must line up exactly
+     with the chord's time span so the playhead corresponds to the
+     visual region. */
 }
 .chordview-card.current .chordview-name { color: var(--accent); font-size: 34px; }
 /* Wider cards (≥ 2 beats) get a slightly bigger base type. JS
