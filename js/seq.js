@@ -2238,6 +2238,10 @@ function seqPlay(leadSec) {
 }
 
 function seqStop() {
+  // Snap the play-cursor (SEQ.startBeat) to wherever playback currently
+  // is, so Stop "freezes in place" rather than rewinding to the spot
+  // where Play was last pressed. Next Play resumes from here.
+  if (typeof SEQ.animBeat === 'number') SEQ.startBeat = SEQ.animBeat;
   SEQ.playing = false;
   // Reset every track's active highlight so on next play the playhead
   // starts from a clean state. Also drop any in-flight scheduled-event
@@ -2278,8 +2282,8 @@ function seqStop() {
   const _freeItems  = firstTrackOfKind('free')?.items  || [];
   if (_cL) _cL.style.minWidth = _chordItems.length > 0 ? seqLaneWidth(_chordItems) + 'px' : '';
   if (_mL) _mL.style.minWidth = _freeItems.length  > 0 ? seqLaneWidth(_freeItems) + 'px' : '';
-  const _wrap = document.getElementById('seq-lane-wrap');
-  if (_wrap) _wrap.scrollLeft = 0;
+  // Keep the current horizontal scroll — stop freezes in place rather
+  // than rewinding, so jumping the viewport back to 0 would be jarring.
   document.querySelectorAll('.seq-drop-hint').forEach(h => { h.style.left = ''; });
   if (SEQ.timer) { clearInterval(SEQ.timer); SEQ.timer = null; }
   if (REC.active) recStop();
