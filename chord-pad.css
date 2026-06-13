@@ -1562,8 +1562,13 @@ input[type="range"]::-moz-range-thumb {
   font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
   color: var(--text-dim);
-  min-height: 18px;
+  /* Locked height — the 15-px main label + flat/sharp glyphs would
+     otherwise grow the row by a few pixels when a chord is detected,
+     pushing the keyboard down each time. */
+  height: 26px;
+  line-height: 26px;
 }
+.chord-analyzer > * { line-height: 1; }
 .chord-analyzer-notes {
   color: rgba(255,255,255,0.45);
   font-size: 11px;
