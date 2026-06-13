@@ -2160,6 +2160,14 @@ function seqJumpToBeat(beat) {
   const b = Math.max(0, beat);
   SEQ.startBeat = b;
   SEQ.animBeat  = b;
+  // While playing, also kill any audio currently in flight — otherwise
+  // the just-cancelled notes keep ringing through and overlap with the
+  // freshly-scheduled ones from the new position.
+  if (SEQ.playing) {
+    SEQ.activeNodes?.forEach(n => { try { stopAudioNote(n); } catch (_) {} });
+    SEQ.activeNodes?.clear?.();
+    for (const tr of SEQ.tracksList) tr._scheduled = null;
+  }
   if (typeof resetChordViewLoopIter === 'function') resetChordViewLoopIter();
   // Arrangement playheads (full-height ones + per-lane ones).
   document.querySelectorAll('.seq-playhead-global, .seq-lane .seq-playhead').forEach(ph => {
@@ -2179,7 +2187,12 @@ function seqJumpToBeat(beat) {
       prPh.style.display = 'none';
     }
   }
-  if (SEQ.playing) seqReanchorPlayStart();
+  // Full re-anchor + every-track resync, otherwise per-track pendingIdx
+  // and pendingTime still reference the OLD anchor — visual jumps but
+  // audio keeps ticking from where it was. seqLoopBaseChangedResync
+  // does the reanchor, clears pending timers, and reschedules each
+  // track from the new beat.
+  if (SEQ.playing) seqLoopBaseChangedResync();
 }
 
 // Maximum song-end beat across all tracks. Empty project → 0.
