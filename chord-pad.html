@@ -32,6 +32,7 @@
       <button class="header-section-toggle active" data-section="keyboard"   title="Keyboard"><i data-lucide="keyboard-music"></i></button>
       <button class="header-section-toggle active" data-section="sequencer"  title="Tracks"><i data-lucide="panel-top-bottom-dashed"></i></button>
       <button class="header-section-toggle active" data-section="pianoroll"  title="Piano Roll"><i data-lucide="square-chart-gantt"></i></button>
+      <button class="header-section-toggle"        data-section="chordview"  title="Chord View"><i data-lucide="captions"></i></button>
       <button class="header-section-toggle active" data-section="settings"   title="Settings"><i data-lucide="settings"></i></button>
       <div class="led" id="midi-led" title="MIDI activity" style="display:none"></div>
     </div>
@@ -428,6 +429,17 @@
     <div class="seq-pianoroll-resize" id="seq-pianoroll-resize" title="Drag to resize piano roll"></div>
   </div>
 
+  <div class="seq-chordview" id="seq-chordview">
+    <div class="seq-chordview-header">
+      <div class="synth-header">Chord View</div>
+      <span class="seq-chordview-title" id="seq-chordview-title"></span>
+    </div>
+    <div class="seq-chordview-body" id="seq-chordview-body">
+      <div class="seq-chordview-track" id="seq-chordview-track"></div>
+      <div class="seq-chordview-playhead"></div>
+    </div>
+  </div>
+
   <footer class="footer">
     <div class="now-playing">
       <span class="sf2-progress" id="sf2-progress" style="display:none"></span>
@@ -559,5 +571,6 @@
 <script src="js/kbinput.js"></script>
 <script src="js/chord-pad.js"></script>
 <script src="js/pianoroll.js"></script>
+<script src="js/chordview.js"></script>
 </body>
 </html>

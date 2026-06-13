@@ -747,6 +747,9 @@ function seqAnimatePlayhead() {
       });
     }
   }
+  // Chord view (if open) gets its playhead position + current-card
+  // highlight updated on every frame.
+  if (typeof updateChordViewPlayhead === 'function') updateChordViewPlayhead();
   SEQ.rafId = requestAnimationFrame(seqAnimatePlayhead);
 }
 
@@ -1068,6 +1071,19 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
     block.addEventListener('pointermove', onMove);
     block.addEventListener('pointerup', onUp);
   });
+
+  // Double-click a CHORD block (not note/midi) → open the chord view
+  // for the owning track.
+  if (!isNote && !isMidi) {
+    block.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const laneEl = block.parentElement;
+      const owner = (laneEl && laneEl.dataset && laneEl.dataset.trackId)
+        ? trackById(laneEl.dataset.trackId)
+        : firstTrackOfKind('chord');
+      if (owner && typeof openChordView === 'function') openChordView(owner);
+    });
+  }
 
   return block;
 }

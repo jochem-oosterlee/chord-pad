@@ -3584,6 +3584,13 @@ function seqRenderTrack(track) {
   if (track.kind === 'free') invalidateFreeTrackFlat(track);
   // If the focused clip belongs to this track, keep the piano-roll in sync
   if (track.kind === 'free' && SEQ.focusedClip?.trackId === track.id) renderPianoRoll();
+  // If this is the chord track currently focused by the chord-view,
+  // refresh its card row so adds / deletes / resizes appear there too.
+  if (track.kind === 'chord' && SEQ.chordViewOpen
+      && (track.id === SEQ.focusedChordTrackId || (!SEQ.focusedChordTrackId && track === firstTrackOfKind('chord')))
+      && typeof renderChordView === 'function') {
+    renderChordView();
+  }
   // Default tracks delegate to their legacy renderers — but only while
   // they still match their original kind.
   if (track.id === 'tr-default-chord' && track.kind === 'chord') return seqRender();

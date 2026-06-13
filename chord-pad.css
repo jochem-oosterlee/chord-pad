@@ -2129,6 +2129,106 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   height: 100%;
   box-sizing: border-box;
 }
+/* ====================================================================
+   CHORD VIEW — lyrics-style horizontal display of a chord track's
+   progression. Cards flow left-to-right; a fixed playhead line in the
+   centre marks "now" and the row scrolls behind it during playback.
+   ==================================================================== */
+.seq-chordview {
+  position: relative;
+  background: rgba(0,0,0,0.35);
+  border-top: 1px solid var(--panel-edge);
+  padding: 10px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+body.hide-chordview .seq-chordview { display: none !important; }
+.seq-chordview-header {
+  display: flex; align-items: baseline; gap: 12px;
+}
+.seq-chordview-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+}
+.seq-chordview-body {
+  position: relative;
+  height: 120px;
+  overflow: hidden;
+  background: rgba(0,0,0,0.4);
+  border-radius: 4px;
+}
+.seq-chordview-track {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  padding: 0 50% 0 50%;     /* allows centre-scrolling — first chord can sit at centre, last can scroll past */
+  will-change: transform;
+  transition: transform 0.12s linear;
+}
+.chordview-card {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-family: 'Cormorant Garamond', 'JetBrains Mono', serif;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.15s, opacity 0.2s;
+  opacity: 0.55;
+}
+.chordview-card .chordview-name {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+.chordview-card .chordview-beats {
+  margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: rgba(255,255,255,0.4);
+  letter-spacing: 0.08em;
+}
+.chordview-card.past    { opacity: 0.25; }
+.chordview-card.future  { opacity: 0.7; }
+.chordview-card.current {
+  opacity: 1;
+  color: var(--accent);
+  border-color: rgba(255,170,51,0.45);
+  background: rgba(255,170,51,0.10);
+  transform: scale(1.08);
+}
+.chordview-card.current .chordview-name { font-size: 36px; }
+/* Vertical playhead line down the centre — the chord cards scroll
+   behind it during playback. */
+.seq-chordview-playhead {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(255,170,51,0.55);
+  pointer-events: none;
+}
+.seq-chordview-playhead::before {
+  content: '';
+  position: absolute;
+  top: -2px; left: -4px;
+  width: 9px; height: 5px;
+  background: var(--accent);
+  border-radius: 0 0 4px 4px;
+}
+
 .pr-vel-bar {
   position: absolute;
   bottom: 0;
