@@ -464,6 +464,12 @@ function chordToMidiNotes(keyRoot, octave, interval, q) {
     return ivs.map(iv => root + iv);
   }
 
+  // auto1/auto2 = auto mode with a preference for a specific inversion.
+  // Implemented as a distance discount in the loop below so the chosen
+  // inversion still respects the key center, just biased.
+  const preferMatch = /^auto(\d+)$/.exec(state.voicing);
+  const preferInv = preferMatch ? (parseInt(preferMatch[1], 10) % n) : -1;
+
   // For high/low, shift the target center; auto uses the original center
   const target = state.voicing === 'high' ? center + 7
                : state.voicing === 'low'  ? center - 7
@@ -484,7 +490,8 @@ function chordToMidiNotes(keyRoot, octave, interval, q) {
         notes.push(note);
       }
       const avg = notes.reduce((a, b) => a + b, 0) / n;
-      const dist = Math.abs(avg - target);
+      let dist = Math.abs(avg - target);
+      if (inv === preferInv) dist -= 6;
       if (dist < bestDist) { bestDist = dist; best = notes; }
     }
   }
@@ -1261,7 +1268,7 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
     // Show waveform picker only for the synth voice.
     const wfRow = document.getElementById('cp-modal-waveform-row');
     const wfSel = document.getElementById('cp-modal-waveform');
-    if (wfRow) wfRow.hidden = !isSynth;
+    if (wfRow) wfRow.style.display = isSynth ? '' : 'none';
     if (wfSel && isSynth) {
       wfSel.value = state.synth.waveform || 'sine';
       if (!wfSel.dataset.bound) {
@@ -1296,7 +1303,7 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
     if (soundRow) soundRow.style.display = midi ? 'none' : '';
     const wfRow    = document.getElementById('cp-modal-waveform-row');
     const resetRow = document.getElementById('cp-modal-reset-row');
-    if (wfRow)    wfRow.style.display    = midi ? 'none' : '';
+    if (wfRow)    wfRow.style.display    = (midi || state.instrument !== 'synth') ? 'none' : '';
     if (resetRow) resetRow.style.display = midi ? 'none' : '';
   }
   outToggle?.querySelectorAll('.track-fx-out-btn').forEach(b => {
@@ -1485,15 +1492,14 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
   });
   setTimeout(sync, 0);
 })();
-const VOICINGS = ['auto', 'high', 'low', 'spread', 'root'];
-const VOICING_LABELS = { auto: 'Auto', high: 'High', low: 'Low', spread: 'Spread', root: 'Root' };
-const voicingToggleBtn = document.getElementById('voicing-toggle');
-voicingToggleBtn.addEventListener('click', () => {
-  const idx = VOICINGS.indexOf(state.voicing);
-  state.voicing = VOICINGS[(idx + 1) % VOICINGS.length];
-  voicingToggleBtn.textContent = VOICING_LABELS[state.voicing];
-  voicingToggleBtn.classList.toggle('active', state.voicing !== 'root');
-});
+const voicingSelect = document.getElementById('voicing-select');
+if (voicingSelect) {
+  voicingSelect.value = state.voicing;
+  voicingSelect.addEventListener('change', () => {
+    state.voicing = voicingSelect.value;
+    if (typeof seqSave === 'function') seqSave();
+  });
+}
 const sustainBtn = document.getElementById('sustain-toggle');
 sustainBtn.addEventListener('click', () => {
   state.sustain = !state.sustain;
@@ -4530,24 +4536,6 @@ document.getElementById('pr-zoom-in') ?.addEventListener('click', () => prApplyZ
 document.getElementById('pr-zoom-out')?.addEventListener('click', () => prApplyZoom(PR_BEAT_PX / 1.25));
 // Ctrl + wheel zooms wherever the cursor is over the track-arrangement or
 // piano-roll body. preventDefault stops the browser-level page zoom.
-(function _initHeaderZoom() {
-  const inBtn  = document.getElementById('header-zoom-in');
-  const outBtn = document.getElementById('header-zoom-out');
-  const valEl  = document.getElementById('header-zoom-val');
-  if (!inBtn || !outBtn) return;
-  const STEP = 10, MIN = 50, MAX = 200;
-  let pct = parseInt(localStorage.getItem('cp-ui-zoom') || '100', 10);
-  if (isNaN(pct)) pct = 100;
-  const apply = () => {
-    pct = Math.max(MIN, Math.min(MAX, pct));
-    document.body.style.zoom = (pct / 100);
-    if (valEl) valEl.textContent = pct + '%';
-    localStorage.setItem('cp-ui-zoom', String(pct));
-  };
-  apply();
-  inBtn .addEventListener('click', () => { pct += STEP; apply(); });
-  outBtn.addEventListener('click', () => { pct -= STEP; apply(); });
-})();
 (function _initZoomWheel() {
   const wrap = document.getElementById('seq-lane-wrap');
   const body = document.getElementById('seq-pianoroll-body');

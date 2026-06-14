@@ -24,12 +24,6 @@
   <header class="header">
     <span class="brand" id="brand-logo" title="Triple-click to reset">chord pad</span>
     <div class="header-right">
-      <div class="header-zoom" title="UI zoom (same as Ctrl +/-)">
-        <button class="header-project-btn" id="header-zoom-out" title="Zoom out"><i data-lucide="minus"></i></button>
-        <span class="header-zoom-val" id="header-zoom-val">100%</span>
-        <button class="header-project-btn" id="header-zoom-in" title="Zoom in"><i data-lucide="plus"></i></button>
-      </div>
-      <div class="header-sep"></div>
       <button class="header-project-btn" id="seq-project-export" title="Export project to JSON file"><i data-lucide="download"></i></button>
       <button class="header-project-btn" id="seq-project-import" title="Import project from JSON file"><i data-lucide="upload"></i></button>
       <input type="file" id="seq-project-import-input" accept="application/json,.json" style="display:none">
@@ -479,7 +473,15 @@
       <div class="cp-modal-funcs">
         <div class="cp-modal-func">
           <span class="cp-modal-func-label">Voicing</span>
-          <button class="btn active" id="voicing-toggle">Auto</button>
+          <select class="cp-modal-select" id="voicing-select">
+            <option value="auto">Auto</option>
+            <option value="auto1">Auto 1st</option>
+            <option value="auto2">Auto 2nd</option>
+            <option value="high">High</option>
+            <option value="low">Low</option>
+            <option value="spread">Spread</option>
+            <option value="root">Root</option>
+          </select>
         </div>
         <div class="cp-modal-func">
           <span class="cp-modal-func-label">Octave</span>

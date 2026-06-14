@@ -155,17 +155,6 @@ body::before {
   background: rgba(255,255,255,0.10);
   margin: 0 4px;
 }
-.header-zoom {
-  display: inline-flex; align-items: center; gap: 2px;
-  color: rgba(255,255,255,0.40);
-}
-.header-zoom-val {
-  font-size: 11px;
-  min-width: 36px;
-  text-align: center;
-  color: rgba(255,255,255,0.50);
-  font-variant-numeric: tabular-nums;
-}
 body.hide-chord-pad .tabs-header,
 body.hide-chord-pad .tabs,
 body.hide-chord-pad .page          { display: none !important; }
@@ -2823,7 +2812,8 @@ body.hide-chordview .seq-chordview { display: none !important; }
 .track-fx-inst-chev { color: rgba(255,255,255,0.5); font-size: 9px; }
 .track-fx-inst-menu {
   position: absolute; top: calc(100% + 2px); left: 0;
-  min-width: 100%;
+  width: max-content;
+  min-width: 140px;
   background: var(--bg, #1a1b1e);
   border: 1px solid rgba(255,255,255,0.15);
   border-radius: 4px;
@@ -3020,6 +3010,11 @@ body.hide-chordview .seq-chordview { display: none !important; }
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: rgba(255,255,255,0.5);
+}
+.cp-modal-select {
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 11px;
 }
 
 /* Sound knob grid — same sizing as the per-track FX modal. */
