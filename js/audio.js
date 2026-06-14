@@ -781,7 +781,7 @@ function prewarmSf2Preset(sf2, presetNumber) {
   let midi = 21;
   const tick = () => {
     let count = 0;
-    while (midi <= 108 && count < 6) {
+    while (midi <= 108 && count < 22) {
       try {
         const kd = sf2.getKeyData(midi, 0, presetNumber);
         if (kd?.sample) sf2BufferFromSample(ctx, kd.sample);

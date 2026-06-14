@@ -5,7 +5,7 @@
 //   ASSET_CACHE — only bumps when the actual binary assets change.
 //                 Keeps the ~148 MB SF2 across app updates so users
 //                 don't redownload it every time we ship a CSS tweak.
-const APP_CACHE   = 'chord-pad-app-v92';
+const APP_CACHE   = 'chord-pad-app-v96';
 const ASSET_CACHE = 'chord-pad-assets-v1';
 
 const OFFLINE_ASSETS = [

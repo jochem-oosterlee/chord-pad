@@ -155,6 +155,17 @@ body::before {
   background: rgba(255,255,255,0.10);
   margin: 0 4px;
 }
+.header-zoom {
+  display: inline-flex; align-items: center; gap: 2px;
+  color: rgba(255,255,255,0.40);
+}
+.header-zoom-val {
+  font-size: 11px;
+  min-width: 36px;
+  text-align: center;
+  color: rgba(255,255,255,0.50);
+  font-variant-numeric: tabular-nums;
+}
 body.hide-chord-pad .tabs-header,
 body.hide-chord-pad .tabs,
 body.hide-chord-pad .page          { display: none !important; }
@@ -1689,7 +1700,8 @@ input[type="range"]::-moz-range-thumb {
   touch-action: none;
 }
 .kb-white:hover  { background: #fffbe8; }
-.kb-white.active { background: var(--accent); }
+.kb-white.active,
+.kb-white.pad-active { background: var(--accent); }
 .kb-black {
   position: absolute;
   top: 0;
@@ -1701,7 +1713,8 @@ input[type="range"]::-moz-range-thumb {
   touch-action: none;
 }
 .kb-black:hover  { background: #2e2e32; }
-.kb-black.active { background: #b87010; }
+.kb-black.active,
+.kb-black.pad-active { background: #b87010; }
 .kb-note-label {
   font-size: 7px;
   color: #999;

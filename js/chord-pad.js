@@ -608,6 +608,23 @@ function bassNoteForChord(interval) {
   return (state.bassOctave + 1) * 12 + (keyRoot + interval) % 12;
 }
 
+const _padKeyRef = new Map();
+function _markPadKeys(midis, on) {
+  if (!midis || !midis.length) return;
+  for (const m of midis) {
+    const cur = _padKeyRef.get(m) || 0;
+    const next = cur + (on ? 1 : -1);
+    const el = document.querySelector('.kb-key[data-midi="' + m + '"]');
+    if (next <= 0) {
+      _padKeyRef.delete(m);
+      el?.classList.remove('pad-active');
+    } else {
+      _padKeyRef.set(m, next);
+      el?.classList.add('pad-active');
+    }
+  }
+}
+
 function playChord(padId, interval, quality, bassInterval) {
   if (state.activeChords.has(padId)) {
     if (state.sustain) {
@@ -619,6 +636,7 @@ function playChord(padId, interval, quality, bassInterval) {
         if (state.padOutput === 'midi') sendNoteOff(chord.bassNote, state.padChannel, portR);
         stopAudioNote(chord.bassAudioNode);
       }
+      _markPadKeys(chord.kbHighlight, false);
       state.activeChords.delete(padId);
       document.getElementById(padId)?.classList.remove('active');
       updateNowPlaying();
@@ -631,6 +649,7 @@ function playChord(padId, interval, quality, bassInterval) {
       chord.notes.forEach(n => sendNoteOff(n));
       chord.audioNodes.forEach(stopAudioNote);
       if (chord.bassNote !== null) { sendNoteOff(chord.bassNote); stopAudioNote(chord.bassAudioNode); }
+      _markPadKeys(chord.kbHighlight, false);
       document.getElementById(pid)?.classList.remove('active');
     });
     state.activeChords.clear();
@@ -661,7 +680,9 @@ function playChord(padId, interval, quality, bassInterval) {
     if (useInst && state.audioEnabled) bassAudioNode = startBassNote(bassNote);
   }
 
-  state.activeChords.set(padId, { notes, label, audioNodes, bassNote, bassAudioNode });
+  const kbHighlight = bassNote !== null ? notes.concat([bassNote]) : notes.slice();
+  _markPadKeys(kbHighlight, true);
+  state.activeChords.set(padId, { notes, label, audioNodes, bassNote, bassAudioNode, kbHighlight });
   document.getElementById(padId)?.classList.add('active');
   updateNowPlaying();
   updateSuggestions();
@@ -685,6 +706,7 @@ function releaseChord(padId) {
     if (state.padOutput === 'midi') sendNoteOff(chord.bassNote, state.padChannel, portR);
     stopAudioNote(chord.bassAudioNode);
   }
+  _markPadKeys(chord.kbHighlight, false);
   state.activeChords.delete(padId);
   document.getElementById(padId)?.classList.remove('active');
   updateNowPlaying();
@@ -4508,6 +4530,24 @@ document.getElementById('pr-zoom-in') ?.addEventListener('click', () => prApplyZ
 document.getElementById('pr-zoom-out')?.addEventListener('click', () => prApplyZoom(PR_BEAT_PX / 1.25));
 // Ctrl + wheel zooms wherever the cursor is over the track-arrangement or
 // piano-roll body. preventDefault stops the browser-level page zoom.
+(function _initHeaderZoom() {
+  const inBtn  = document.getElementById('header-zoom-in');
+  const outBtn = document.getElementById('header-zoom-out');
+  const valEl  = document.getElementById('header-zoom-val');
+  if (!inBtn || !outBtn) return;
+  const STEP = 10, MIN = 50, MAX = 200;
+  let pct = parseInt(localStorage.getItem('cp-ui-zoom') || '100', 10);
+  if (isNaN(pct)) pct = 100;
+  const apply = () => {
+    pct = Math.max(MIN, Math.min(MAX, pct));
+    document.body.style.zoom = (pct / 100);
+    if (valEl) valEl.textContent = pct + '%';
+    localStorage.setItem('cp-ui-zoom', String(pct));
+  };
+  apply();
+  inBtn .addEventListener('click', () => { pct += STEP; apply(); });
+  outBtn.addEventListener('click', () => { pct -= STEP; apply(); });
+})();
 (function _initZoomWheel() {
   const wrap = document.getElementById('seq-lane-wrap');
   const body = document.getElementById('seq-pianoroll-body');
