@@ -842,18 +842,17 @@ function startSf2Voice(midiNote, velocity, at, autoRelease, sf2, presetNumber) {
   const semitones  = ((midiNote - rootPitch) * scaleTune) / 100 + coarseTune + fineTune / 100;
 
   // --- Filter --------------------------------------------------------
-  // Per-track filter only overrides when the user actually moved it off
-  // the preset default. Otherwise honour the SF2 generator so the preset
-  // sounds as designed.
-  const FP = INSTRUMENT_PRESETS?.epiano;
+  // Override only fires when the user explicitly touched the slider on
+  // this synth (s._override[key] = true). Otherwise honour the SF2
+  // generator so the preset sounds as designed.
   let filterFreq, filterQ;
-  if (FP && Math.abs((s.filterFreq ?? FP.filterFreq) - FP.filterFreq) > 1) {
+  if (s._override?.filterFreq) {
     filterFreq = Math.min(20000, Math.max(20, s.filterFreq));
   } else {
     const filterCents = g(SF2G.InitialFilterFc) ?? 13500;
     filterFreq = Math.min(20000, Math.max(20, absoluteCentsToHz(filterCents)));
   }
-  if (FP && Math.abs((s.filterQ ?? FP.filterQ) - FP.filterQ) > 0.01) {
+  if (s._override?.filterQ) {
     filterQ = s.filterQ;
   } else {
     const filterQCB = g(SF2G.InitialFilterQ) ?? 0;
@@ -868,19 +867,19 @@ function startSf2Voice(midiNote, velocity, at, autoRelease, sf2, presetNumber) {
   // some GM categories (bass especially) are recorded much softer.
   const peak = (velocity / 127) * state.audioVolume * sf2CategoryGain(presetNumber);
 
-  // --- Volume envelope: per-track ADSR overrides the SF2 generators when
-  // it deviates noticeably from the e-piano preset defaults (= the user
-  // moved a slider). Otherwise fall back to SF2 generators with caps.
-  const PRESET = INSTRUMENT_PRESETS?.epiano;
-  const aT = (PRESET && Math.abs(s.attack  - PRESET.attack)  > 0.002) ? Math.min(s.attack, 4)
+  // --- Volume envelope: ADSR slider overrides the SF2 generator only
+  // when the user explicitly touched it (s._override[key] = true).
+  // Otherwise fall back to SF2 generators with caps so per-zone variation
+  // is preserved.
+  const aT = s._override?.attack  ? Math.min(s.attack,  4)
            : Math.min(g(SF2G.AttackVolEnv)  != null ? timecentsToSec(g(SF2G.AttackVolEnv))  : s.attack,  4);
-  const dT = (PRESET && Math.abs(s.decay   - PRESET.decay)   > 0.01)  ? Math.min(s.decay, 8)
+  const dT = s._override?.decay   ? Math.min(s.decay,   8)
            : Math.min(g(SF2G.DecayVolEnv)   != null ? timecentsToSec(g(SF2G.DecayVolEnv))   : s.decay,   8);
-  const sL = (PRESET && Math.abs(s.sustain - PRESET.sustain) > 0.01)  ? s.sustain
+  const sL = s._override?.sustain ? s.sustain
            : (g(SF2G.SustainVolEnv) != null
                 ? Math.max(0, 1 - Math.min(g(SF2G.SustainVolEnv), 1000) / 1000)
                 : s.sustain);
-  const rT = (PRESET && Math.abs(s.release - PRESET.release) > 0.02)  ? Math.min(s.release, 6)
+  const rT = s._override?.release ? Math.min(s.release, 6)
            : Math.min(g(SF2G.ReleaseVolEnv) != null ? timecentsToSec(g(SF2G.ReleaseVolEnv)) : s.release, 6);
 
   // --- Build graph ---------------------------------------------------
@@ -891,15 +890,35 @@ function startSf2Voice(midiNote, velocity, at, autoRelease, sf2, presetNumber) {
   env.gain.setValueAtTime(peak * sL, t + aT + dT);
   env.connect(ctx._out);
 
-  // Tremolo: a gain stage just before the envelope, modulated by an LFO.
-  // Routes filter → tremGain → env so the LFO is applied to the dry signal
-  // before the envelope/output.
+  // Tremolo: two LFOs can modulate the voice gain — the SF2's own
+  // ModLFOToVolume (for presets like Rhodes that ship with a wobble) and
+  // our user slider on top. They sum, so the slider is purely additive.
   const tremGain = ctx.createGain();
   tremGain.gain.value = 1;
   tremGain.connect(env);
+  const lfoNodes = [];
+  // SF2 native tremolo (centibels of volume modulation).
+  const modLfoToVol = g(SF2G.ModLFOToVolume);
+  if (modLfoToVol && Math.abs(modLfoToVol) > 0.01) {
+    const lfoFreq  = absoluteCentsToHz(g(SF2G.FreqModLFO) ?? -4500);
+    const lfoDelay = timecentsToSec(g(SF2G.DelayModLFO) ?? -7200);
+    // Centibels → gain depth (~0.115/100cB ≈ dB/8.686). Cap at 0.5 so it
+    // doesn't go negative when summed with the slider.
+    const depth = Math.min(0.5, Math.abs(modLfoToVol) / 200);
+    const sf2Lfo = ctx.createOscillator(); sf2Lfo.frequency.value = lfoFreq;
+    const sf2Amp = ctx.createGain(); sf2Amp.gain.value = 0;
+    sf2Lfo.connect(sf2Amp); sf2Amp.connect(tremGain.gain);
+    sf2Amp.gain.setValueAtTime(0, t);
+    sf2Amp.gain.setValueAtTime(0, t + lfoDelay);
+    sf2Amp.gain.linearRampToValueAtTime(depth, t + lfoDelay + 0.05);
+    sf2Lfo.start(t);
+    lfoNodes.push(sf2Lfo);
+    tremGain.gain.value = 1 - depth;
+  }
+  // User slider tremolo — adds on top of whatever the SF2 already does.
   let tLfo = null;
   if (s.tremoloDepth > 0) {
-    tremGain.gain.value = 1 - s.tremoloDepth * 0.5;
+    tremGain.gain.value -= s.tremoloDepth * 0.5;
     tLfo = ctx.createOscillator();
     tLfo.frequency.value = s.tremoloRate;
     const tLfoGain = ctx.createGain();
@@ -938,9 +957,11 @@ function startSf2Voice(midiNote, velocity, at, autoRelease, sf2, presetNumber) {
     return src;
   })()];
 
-  // --- Vibrato LFO → pitch (subtle, just enough for character) -------
-  const vibLfoToPitch = g(SF2G.VibLFOToPitch);
+  // --- Vibrato LFOs → pitch -----------------------------------------
+  // SF2 native vibrato runs always (presets like solo violin ship with
+  // their own). User slider adds an extra LFO on top — pure additive.
   let vibLfo = null;
+  const vibLfoToPitch = g(SF2G.VibLFOToPitch);
   if (vibLfoToPitch && Math.abs(vibLfoToPitch) > 0.01) {
     const lfoFreq  = absoluteCentsToHz(g(SF2G.FreqVibLFO) ?? -2400);
     const lfoDelay = timecentsToSec(g(SF2G.DelayVibLFO) ?? -7200);
@@ -952,6 +973,17 @@ function startSf2Voice(midiNote, velocity, at, autoRelease, sf2, presetNumber) {
     gAmp.gain.setValueAtTime(0, t + lfoDelay);
     gAmp.gain.linearRampToValueAtTime(vibLfoToPitch, t + lfoDelay + 0.05);
     vibLfo.start(t);
+    lfoNodes.push(vibLfo);
+  }
+  let userVibLfo = null;
+  if (s.vibratoDepth > 0) {
+    userVibLfo = ctx.createOscillator();
+    userVibLfo.frequency.value = s.vibratoRate;
+    const gAmp = ctx.createGain();
+    gAmp.gain.value = s.vibratoDepth;
+    userVibLfo.connect(gAmp);
+    sources.forEach(src => gAmp.connect(src.detune));
+    userVibLfo.start(t);
   }
 
   // --- Reverb / delay sends (use the global FX bus) ------------------
@@ -972,9 +1004,9 @@ function startSf2Voice(midiNote, velocity, at, autoRelease, sf2, presetNumber) {
   }
   sources.forEach(src => src.start(t));
 
-  const oscs = [...sources];
-  if (vibLfo) oscs.push(vibLfo);
-  if (tLfo)   oscs.push(tLfo);
+  const oscs = [...sources, ...lfoNodes];
+  if (userVibLfo) oscs.push(userVibLfo);
+  if (tLfo)       oscs.push(tLfo);
   const node = { oscs, env, startTime: t, peak };
   node.sustainLevel = sL;
   node.releaseTime  = rT;

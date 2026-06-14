@@ -963,6 +963,9 @@ document.getElementById('synth-instrument').addEventListener('change', async (e)
   const next = e.target.value;
   savedPresets[prev] = { ...editTargetSynth() };
   setEditTargetInstrument(next);
+  // Drop any ADSR/Filter overrides when switching instrument so the new
+  // preset shows up unmodified until the user touches a slider again.
+  editTargetSynth()._override = {};
   updateSynthOnlyVisibility();
   // Chord-pad voice == chords track. Keep the track header dropdown in sync.
   if (state.synthEditTarget === 'pad') {
@@ -973,7 +976,7 @@ document.getElementById('synth-instrument').addEventListener('change', async (e)
     // Most GM presets (gm<N>) don't have an entry in INSTRUMENT_PRESETS;
     // fall back to a generic SF2-friendly default so the synth-params
     // sliders aren't fed `undefined`.
-    const preset = savedPresets[next] || INSTRUMENT_PRESETS[next] || INSTRUMENT_PRESETS.epiano;
+    const preset = savedPresets[next] || INSTRUMENT_PRESETS[next] || INSTRUMENT_PRESETS.default;
     if (preset) applySynthPreset(preset);
     if (INSTRUMENT_TO_SF2[next] != null) {
       await loadSf2('fluid');
@@ -1206,9 +1209,11 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
     const cur = (state.synth[key] !== undefined) ? state.synth[key] : min;
     const cell = document.createElement('div');
     cell.className = 'track-fx-knob-cell';
+    const overridable = OVERRIDE_KEYS.has(key);
+    const knobTitle = overridable ? 'Double-click to clear override' : '';
     cell.innerHTML = `
       <span class="track-fx-knob-val">${fmt(cur)}</span>
-      <span class="track-fx-knob"><span class="track-fx-knob-ind"></span></span>
+      <span class="track-fx-knob"${knobTitle ? ` title="${knobTitle}"` : ''}><span class="track-fx-knob-ind"></span></span>
       <span class="track-fx-knob-label">${label.replace(/ /g, '<br>')}${sync ? '<button class="track-fx-sync" title="Snap to tempo"><i data-lucide="refresh-cw"></i></button>' : ''}</span>
     `;
     const knob  = cell.querySelector('.track-fx-knob');
@@ -1219,6 +1224,16 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
       valEl.textContent = fmt(v);
       const norm = Math.pow((v - min) / (max - min || 1), 1 / curve);
       knob.style.setProperty('--ang', (-135 + norm * 270) + 'deg');
+      if (overridable) {
+        const isSf2 = INSTRUMENT_TO_SF2?.[state.instrument] != null;
+        cell.classList.toggle('is-override', !!(isSf2 && state.synth._override?.[key]));
+      }
+    };
+    const setOverride = (on) => {
+      if (!overridable) return;
+      if (!state.synth._override) state.synth._override = {};
+      if (on) state.synth._override[key] = true;
+      else delete state.synth._override[key];
     };
     apply(cur);
     knob.addEventListener('pointerdown', (e) => {
@@ -1226,6 +1241,7 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
       knob.setPointerCapture(e.pointerId);
       const startX = e.clientX, startY = e.clientY;
       const startNorm = Math.pow((state.synth[key] - min) / (max - min || 1), 1 / curve);
+      setOverride(true);
       const onMove = (ev) => {
         const speed = ev.shiftKey ? 4 : 1;
         const delta = ((startY - ev.clientY) + (ev.clientX - startX)) / speed;
@@ -1241,12 +1257,14 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
     });
     knob.addEventListener('dblclick', (e) => {
       e.preventDefault(); e.stopPropagation();
+      setOverride(false);
       const preset = INSTRUMENT_PRESETS?.[state.instrument];
       if (preset?.[key] === undefined) return;
       apply(preset[key]);
     });
     knob.addEventListener('wheel', (e) => {
       e.preventDefault();
+      setOverride(true);
       const norm = Math.pow((state.synth[key] - min) / (max - min || 1), 1 / curve);
       const step = e.shiftKey ? 0.005 : 0.02;
       const next = Math.max(0, Math.min(1, norm - Math.sign(e.deltaY) * step));
@@ -1281,10 +1299,20 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
         });
       }
     }
+    let _fxHdrInserted = false;
     for (const [key, , , , , , synthOnly] of TRACK_FX_FIELDS) {
       if (synthOnly && !isSynth) continue;
+      if (!_fxHdrInserted && (key === 'delayWet' || key === 'reverb')) {
+        const hdr = document.createElement('div');
+        hdr.className = 'cp-modal-fx-divider';
+        hdr.textContent = 'Send FX';
+        knobsEl.appendChild(hdr);
+        _fxHdrInserted = true;
+      }
       knobsEl.appendChild(makeCpKnob(key).cell);
     }
+    const rb = document.getElementById('cp-modal-reset');
+    if (rb) rb.textContent = `Reset to ${instrumentDisplayName(state.instrument)} defaults`;
     refreshLucide();
   }
   function syncOutput() {
@@ -1329,8 +1357,9 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
   if (resetBtn && !resetBtn.dataset.bound) {
     resetBtn.dataset.bound = '1';
     resetBtn.addEventListener('click', () => {
-      const preset = INSTRUMENT_PRESETS?.[state.instrument] || INSTRUMENT_PRESETS?.epiano;
+      const preset = INSTRUMENT_PRESETS?.[state.instrument] || INSTRUMENT_PRESETS?.default;
       if (!preset) return;
+      state.synth._override = {};
       // Reset state.synth params; mirror through the existing
       // applySynthPreset which also updates the hidden synth-* inputs.
       applySynthPreset(preset);
@@ -1628,6 +1657,10 @@ function invDlyWet(v)    { return Math.round(v * 100); }
 function invFlfo(v)      { return Math.round(v / 8); }
 
 const INSTRUMENT_PRESETS = {
+  // Neutral fallback for GM presets that don't ship with their own entry.
+  // All app-level effects (tremolo, vibrato, delay, filter-LFO) are zero so
+  // we don't accidentally smother an instrument in a Rhodes-style wobble.
+  default: { attack:0.01,  decay:0.4,  sustain:0.7,  release:0.4,  filterFreq:8000, filterQ:0.5, overtones:0.2, reverb:0.3,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   piano:   { attack:0.005, decay:0.8,  sustain:0.2,  release:2.0,  filterFreq:5000, filterQ:0.5, overtones:0.2, reverb:0.4,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   epiano:  { attack:0.004, decay:1.8,  sustain:0.28, release:0.9,  filterFreq:3800, filterQ:0.9, overtones:0.2, reverb:0.30, detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0.35, delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
   epiano2: { attack:0.008, decay:0.4,  sustain:0.4,  release:1.2,  filterFreq:3500, filterQ:1.0, overtones:0.2, reverb:0.3,  detune:0, vibratoRate:5, vibratoDepth:0, tremoloRate:4, tremoloDepth:0,    delayTime:0.3, delayFeedback:0.3, delayWet:0, filterLfoDepth:0, waveform:'sine' },
@@ -2483,6 +2516,10 @@ requestAnimationFrame(seqUpdateHints);
 // curve: 1 = linear; >1 = log-like (most of slider = short, top = long)
 // synthOnly: only show this slider when track.instrument === 'synth'
 // sync: 'rate' (Hz, snaps to tempo subdivision) | 'time' (seconds) | undefined
+// Params where the user's slider OVERRIDES the SF2 generator value (ADSR
+// + filter). When the slider differs from the instrument-preset default
+// the knob shows an override indicator; double-click clears it.
+const OVERRIDE_KEYS = new Set(['attack','decay','sustain','release','filterFreq','filterQ']);
 const TRACK_FX_FIELDS = [
   // [key, label, min, max, curve, format, synthOnly, sync]
   ['attack',         'Attack',          0,    15,    3,   v => v < 1 ? Math.round(v * 1000) + 'ms' : v.toFixed(2) + 's'],
@@ -2498,9 +2535,9 @@ const TRACK_FX_FIELDS = [
   ['vibratoDepth',   'Vibrato depth',   0,    100,   1,   v => Math.round(v) + 'c'],
   ['tremoloRate',    'Tremolo rate',    0.1, 12,     1,   v => v.toFixed(1) + 'Hz',                            false, 'rate'],
   ['tremoloDepth',   'Tremolo depth',   0,    1,     1,   v => Math.round(v * 100) + '%'],
+  ['delayWet',       'Delay mix',       0,    1,     1,   v => Math.round(v * 100) + '%'],
   ['delayTime',      'Delay time',      0,    1.5,   1,   v => v.toFixed(2) + 's',                             false, 'time'],
   ['delayFeedback',  'Delay feedback',  0,    0.95,  1,   v => Math.round(v * 100) + '%'],
-  ['delayWet',       'Delay mix',       0,    1,     1,   v => Math.round(v * 100) + '%'],
   ['reverb',         'Reverb',          0,    1,     1,   v => Math.round(v * 100) + '%'],
 ];
 
@@ -2548,7 +2585,7 @@ function openTrackFxModal(track) {
   if (!track.synth) track.synth = { ...state.synth };
   title.textContent = track.name + ' · settings';
   body.innerHTML = '';
-  const preset = INSTRUMENT_PRESETS?.[track.instrument] || INSTRUMENT_PRESETS?.epiano;
+  const preset = INSTRUMENT_PRESETS?.[track.instrument] || INSTRUMENT_PRESETS?.default;
   const sliderEls = {};
   // Tiny ADSR diagram in the modal header — recalculated on every A/D/S/R
   // change so the curve mirrors the slider state.
@@ -2908,9 +2945,11 @@ function openTrackFxModal(track) {
     const cur = (track.synth[key] !== undefined) ? track.synth[key] : (preset?.[key] ?? min);
     const cell = document.createElement('div');
     cell.className = 'track-fx-knob-cell';
+    const overridable = OVERRIDE_KEYS.has(key);
+    const knobTitle = overridable ? 'Double-click to clear override' : '';
     cell.innerHTML = `
       <span class="track-fx-knob-val">${fmt(cur)}</span>
-      <span class="track-fx-knob"><span class="track-fx-knob-ind"></span></span>
+      <span class="track-fx-knob"${knobTitle ? ` title="${knobTitle}"` : ''}><span class="track-fx-knob-ind"></span></span>
       <span class="track-fx-knob-label">${label.replace(/ /g, '<br>')}${sync ? '<button class="track-fx-sync" title="Snap to tempo"><i data-lucide="refresh-cw"></i></button>' : ''}</span>
     `;
     const knob   = cell.querySelector('.track-fx-knob');
@@ -2922,12 +2961,23 @@ function openTrackFxModal(track) {
       const norm = Math.pow((v - min) / (max - min || 1), 1 / curve);
       knob.style.setProperty('--ang', (-135 + norm * 270) + 'deg');
       if (key === 'attack' || key === 'decay' || key === 'sustain' || key === 'release') updateAdsr();
+      if (overridable) {
+        const isSf2 = INSTRUMENT_TO_SF2?.[track.instrument] != null;
+        cell.classList.toggle('is-override', !!(isSf2 && track.synth._override?.[key]));
+      }
+    };
+    const setOverride = (on) => {
+      if (!overridable) return;
+      if (!track.synth._override) track.synth._override = {};
+      if (on) track.synth._override[key] = true;
+      else delete track.synth._override[key];
     };
     apply(cur);
     knob.addEventListener('pointerdown', (e) => {
       e.preventDefault(); e.stopPropagation();
       knob.setPointerCapture(e.pointerId);
       seqCheckpoint();
+      setOverride(true);
       const startX = e.clientX, startY = e.clientY;
       const startNorm = Math.pow((track.synth[key] - min) / (max - min || 1), 1 / curve);
       const onMove = (ev) => {
@@ -2948,6 +2998,7 @@ function openTrackFxModal(track) {
       e.preventDefault(); e.stopPropagation();
       if (preset?.[key] === undefined) return;
       seqCheckpoint();
+      setOverride(false);
       apply(preset[key]);
       seqSave();
     });
@@ -2957,6 +3008,7 @@ function openTrackFxModal(track) {
       const step = e.shiftKey ? 0.005 : 0.02;
       const next = Math.max(0, Math.min(1, norm - Math.sign(e.deltaY) * step));
       seqCheckpoint();
+      setOverride(true);
       apply(min + (max - min) * Math.pow(next, curve));
       seqSave();
     }, { passive: false });
@@ -2975,8 +3027,16 @@ function openTrackFxModal(track) {
   // Flat grid of all applicable knobs — no grouping.
   const knobGrid = document.createElement('div');
   knobGrid.className = 'track-fx-knobs';
+  let _fxHdrInserted = false;
   for (const [key, , , , , , synthOnly] of TRACK_FX_FIELDS) {
     if (synthOnly && !isSynth) continue;
+    if (!_fxHdrInserted && (key === 'delayWet' || key === 'reverb')) {
+      const hdr = document.createElement('div');
+      hdr.className = 'cp-modal-fx-divider';
+      hdr.textContent = 'Send FX';
+      knobGrid.appendChild(hdr);
+      _fxHdrInserted = true;
+    }
     knobGrid.appendChild(makeFxKnob(key));
   }
   body.appendChild(knobGrid);
@@ -2985,10 +3045,11 @@ function openTrackFxModal(track) {
   // Reset-to-preset button row
   const resetRow = document.createElement('div');
   resetRow.className = 'track-fx-reset-row';
-  resetRow.innerHTML = `<button class="track-fx-reset" type="button">Reset to ${track.instrument || 'preset'} defaults</button>`;
+  resetRow.innerHTML = `<button class="track-fx-reset" type="button">Reset to ${instrumentDisplayName(track.instrument) || 'preset'} defaults</button>`;
   resetRow.querySelector('button').addEventListener('click', () => {
     if (!preset) return;
     seqCheckpoint();
+    track.synth._override = {};
     for (const [key, , , , , , synthOnly] of TRACK_FX_FIELDS) {
       if (synthOnly && !isSynth) continue;
       if (preset[key] === undefined) continue;
