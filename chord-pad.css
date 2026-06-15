@@ -2230,6 +2230,37 @@ body.roll-tool-pen #seq-midi-lane.roll-mode { cursor: crosshair; }
   flex-direction: column;
   gap: 8px;
 }
+/* Edge ticks — one per note that's currently scrolled outside the
+   visible pitch range. Pinned to the top or bottom of the viewport
+   at the note's time-position so the user knows there's something
+   above/below. The soft glow flares INTO the viewport (away from the
+   note), suggesting "scroll this way to see it". */
+.pr-overflow-edge-tick {
+  position: absolute;
+  height: 2px;
+  background: rgba(74,140,255,0.4);
+  pointer-events: none;
+  z-index: 5;
+}
+/* Soft directional glow that fades smoothly from the line into the
+   viewport. A pseudo-element gradient gives a cleaner falloff than
+   box-shadow (which would create a visible secondary band). */
+.pr-overflow-edge-tick.is-above::after,
+.pr-overflow-edge-tick.is-below::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 2px;
+  pointer-events: none;
+}
+.pr-overflow-edge-tick.is-above::after {
+  top: 100%;
+  background: linear-gradient(to bottom, rgba(74,140,255,0.25), transparent);
+}
+.pr-overflow-edge-tick.is-below::after {
+  bottom: 100%;
+  background: linear-gradient(to top, rgba(74,140,255,0.25), transparent);
+}
 /* Velocity-lane strip below the piano-roll body. One bar per note in
    the focused clip; vertical drag adjusts that note's velocity. */
 .seq-pr-vel-lane {
@@ -2321,7 +2352,7 @@ body.hide-chordview .seq-chordview { display: none !important; }
 .chordview-card .chordview-name {
   position: absolute;
   left: 50%;
-  bottom: 36%;
+  bottom: 44%;
   /* Scale-up for the current chord is set directly in the transform
      property so CSS transitions interpolate it reliably. The autofit
      code keeps using font-size for fitting; the class change here
@@ -2434,14 +2465,11 @@ body.hide-chordview .seq-chordview { display: none !important; }
 }
 .chordview-card.current .chordview-name {
   color: var(--accent);
-  transform: translateX(-50%) scale(1.215); /* ≈ 34/28 */
+  /* No scale-up on .current — only the colour changes. */
 }
 /* Wider cards (≥ 2 beats) get a slightly bigger base type. JS
    auto-shrinks the font further if a long label still overflows. */
-.chordview-card.wide .chordview-name         { font-size: 32px; }
-.chordview-card.wide.current .chordview-name {
-  transform: translateX(-50%) scale(1.25); /* ≈ 40/32 */
-}
+.chordview-card.wide .chordview-name { font-size: 32px; }
 /* Vertical playhead line down the centre — the chord cards scroll
    behind it during playback. */
 .seq-chordview-playhead {

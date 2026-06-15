@@ -238,11 +238,13 @@ function renderPianoRoll() {
     body.dataset.rulerSyncBound = '1';
     body.addEventListener('scroll', () => {
       const wrap = document.getElementById('seq-pianoroll-rulerwrap');
-      if (!wrap) return;
-      // wrap width is synced to body.clientWidth in renderPianoRoll, so a
-      // straight 1:1 scrollLeft match keeps the bar markers aligned with
-      // the grid over the entire scroll range.
-      wrap.scrollLeft = body.scrollLeft;
+      if (wrap) {
+        // wrap width is synced to body.clientWidth in renderPianoRoll, so a
+        // straight 1:1 scrollLeft match keeps the bar markers aligned with
+        // the grid over the entire scroll range.
+        wrap.scrollLeft = body.scrollLeft;
+      }
+      _prUpdateOverflowEdges();
     });
   }
   // Click-to-set play cursor on the piano-roll ruler. Drag-detection so
@@ -333,6 +335,7 @@ function renderPianoRoll() {
   }
 
   _prAppendOverlays(body);
+  _prRebuildOverflowEdges();
   if (!wasInitialized) {
     // Center on the clip's notes if it has any; otherwise fall back to C4.
     let centerMidi = 60;
@@ -343,8 +346,61 @@ function renderPianoRoll() {
     const centerTop = (hi - centerMidi) * PR_ROW_H;
     body.scrollTop = Math.max(0, centerTop - body.clientHeight / 2 + PR_ROW_H / 2);
     body.dataset.initialized = '1';
+    // After auto-scrolling on first open, re-evaluate edges.
+    _prUpdateOverflowEdges();
   }
   renderVelocityLane();
+}
+
+// (Re)build one off-screen edge-tick per note in the focused clip.
+// Position + width are fixed once at render time; display + vertical
+// position are updated on scroll by _prUpdateOverflowEdges below.
+function _prRebuildOverflowEdges() {
+  const body = document.getElementById('seq-pianoroll-body');
+  if (!body) return;
+  body.querySelectorAll('.pr-overflow-edge-tick').forEach(el => el.remove());
+  if (typeof focusedClipObjects !== 'function') return;
+  const { clip } = focusedClipObjects();
+  if (!clip || !Array.isArray(clip.notes)) return;
+  for (const n of clip.notes) {
+    const el = document.createElement('div');
+    el.className = 'pr-overflow-edge-tick';
+    el.dataset.midi = n.midi;
+    el.style.left   = (n.start * PR_BEAT_PX + prKbW()) + 'px';
+    el.style.width  = (n.beats * PR_BEAT_PX) + 'px';
+    el.style.display = 'none';
+    body.appendChild(el);
+  }
+  _prUpdateOverflowEdges();
+}
+
+// Show / position each tick depending on whether its note sits above
+// or below the currently visible pitch range, pinned to the top or
+// bottom of the body viewport at the note's time-position.
+function _prUpdateOverflowEdges() {
+  const body = document.getElementById('seq-pianoroll-body');
+  if (!body || body._prHi == null) return;
+  const top = body.scrollTop;
+  const bot = top + body.clientHeight;
+  body.querySelectorAll('.pr-overflow-edge-tick').forEach(el => {
+    const midi = +el.dataset.midi;
+    const nTop = (body._prHi - midi) * PR_ROW_H;
+    const nBot = nTop + PR_ROW_H;
+    if (nBot <= top + 0.5) {
+      el.style.display = 'block';
+      el.style.top = top + 'px';
+      el.classList.add('is-above');
+      el.classList.remove('is-below');
+    } else if (nTop >= bot - 0.5) {
+      el.style.display = 'block';
+      el.style.top = (bot - 2) + 'px';
+      el.classList.add('is-below');
+      el.classList.remove('is-above');
+    } else {
+      el.style.display = 'none';
+      el.classList.remove('is-above', 'is-below');
+    }
+  });
 }
 
 // Strip below the piano-roll body showing one vertical bar per note in

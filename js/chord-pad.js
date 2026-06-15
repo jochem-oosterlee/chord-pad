@@ -3953,7 +3953,9 @@ function seqMakeClipBlock(track, clip, idx) {
       const n = document.createElement('div');
       n.className = 'seq-clip-mini-note';
       n.style.left   = (note.start / clip.beats * 100) + '%';
-      n.style.width  = Math.max(2, (note.beats / clip.beats * 100)) + '%';
+      // Real percentage — CSS `min-width: 2px` already keeps very
+      // short notes visible without inflating their visible duration.
+      n.style.width  = (note.beats / clip.beats * 100) + '%';
       n.style.bottom = (((note.midi - lo) / span) * 100) + '%';
       mini.appendChild(n);
     }

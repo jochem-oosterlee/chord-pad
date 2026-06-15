@@ -345,7 +345,7 @@ function updateChordViewPlayhead() {
   //    beat arrives — soft swell-in / fade-out across the boundary.
   //  - cursorIdx: which chord the playhead-line currently sits in.
   //    Uses the real beat so the line stays synced with audio.
-  const CV_LOOKAHEAD_BEATS = 1;
+  const CV_LOOKAHEAD_BEATS = 0.25;
   const findIdx = (time) => {
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
