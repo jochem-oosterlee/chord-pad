@@ -842,6 +842,7 @@ function seqUpdateLoopEnd() {
   if (mLane && freeItems.length  > 0) mLane.style.minWidth = seqLaneWidth(freeItems) + 'px';
   _syncRulerLoopBar();
   seqUpdateLoopVisible();
+  if (SEQ.chordViewOpen && typeof renderChordView === 'function') renderChordView();
 }
 
 function seqUpdateLoopStart() {
@@ -850,6 +851,7 @@ function seqUpdateLoopStart() {
   document.querySelectorAll('.seq-loop-start-line').forEach(l => { l.style.left = px + 'px'; });
   _syncRulerLoopBar();
   seqUpdateLoopVisible();
+  if (SEQ.chordViewOpen && typeof renderChordView === 'function') renderChordView();
 }
 
 // Re-sync the orange loop-range bar on the ruler with the current
@@ -1458,6 +1460,22 @@ function seqInitTrackSynths() {
   for (const tr of SEQ.tracksList) {
     const m = /^tr-(\d+)$/.exec(tr.id || '');
     if (m) _trackIdCounter = Math.max(_trackIdCounter, parseInt(m[1], 10));
+  }
+  // Migrate stored chord labels: items dropped before a QUALITY_GLYPH
+  // rename (e.g. `Maj7` → `maj7`) keep their old label string in
+  // localStorage. Regenerate from q + keyRoot + interval on every load
+  // so the visible chord names always track the current spelling.
+  if (typeof QUALITY_GLYPH !== 'undefined' && typeof chordRootName === 'function'
+      && typeof formatChordRoot === 'function' && typeof qualityToHTML === 'function') {
+    for (const tr of SEQ.tracksList) {
+      if (tr.kind !== 'chord') continue;
+      for (const it of tr.items) {
+        if (it.q == null || it.interval == null) continue;
+        const root = chordRootName(it.keyRoot ?? state.keys[state.currentTemplate], it.interval);
+        const glyph = QUALITY_GLYPH[it.q] ?? '';
+        it.label = formatChordRoot(root) + qualityToHTML(glyph);
+      }
+    }
   }
 }
 
@@ -3061,7 +3079,9 @@ function initSeqLoopEnd() {
     const onMove = (ev) => {
       const laneRect = lane.getBoundingClientRect();
       const beat = Math.max(1, Math.round((ev.clientX - laneRect.left) / BEAT_PX));
-      SEQ.loopEnd = Math.max(beat, SEQ.loopStart + 1);
+      // Enforce a minimum loop length of one bar.
+      const minLen = state.beatsPerBar || 4;
+      SEQ.loopEnd = Math.max(beat, SEQ.loopStart + minLen);
       seqUpdateLoopEnd();
       if (SEQ.loop) seqResyncAllThrottled();
     };
@@ -3087,7 +3107,9 @@ function initSeqLoopStart() {
     const onMove = (ev) => {
       const laneRect = lane.getBoundingClientRect();
       const beat = Math.max(0, Math.round((ev.clientX - laneRect.left) / BEAT_PX));
-      SEQ.loopStart = Math.min(beat, SEQ.loopEnd - 1);
+      // Enforce a minimum loop length of one bar.
+      const minLen = state.beatsPerBar || 4;
+      SEQ.loopStart = Math.min(beat, SEQ.loopEnd - minLen);
       seqUpdateLoopStart();
       if (SEQ.loop) seqResyncAllThrottled();
     };

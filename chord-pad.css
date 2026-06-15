@@ -2342,7 +2342,7 @@ body.hide-chordview .seq-chordview { display: none !important; }
    chord-pads grid. */
 .chordview-card .chordview-name sub,
 .chordview-card .chordview-name sup {
-  font-size: 0.3em;
+  font-size: 0.4em;
   font-weight: 500;
   color: rgba(255,255,255,0.65);
 }
@@ -2352,11 +2352,11 @@ body.hide-chordview .seq-chordview { display: none !important; }
 .chordview-card .chordview-name .q-dim,
 .chordview-card .chordview-name .q-halfdim,
 .chordview-card .chordview-name .q-aug {
-  width: 0.3em;
-  height: 0.3em;
+  width: 0.4em;
+  height: 0.4em;
   vertical-align: 0.55em;
 }
-/* Quality suffix (m / Maj7 / sus4 / etc) — plain text following the
+/* Quality suffix (m / maj7 / sus4 / etc) — plain text following the
    chord root. Shrunk to 75% so the root dominates the card. The
    wrapper span is added in _makeChordviewCard at render time. */
 .chordview-card .chordview-name .cv-suffix {
@@ -2389,6 +2389,18 @@ body.hide-chordview .seq-chordview { display: none !important; }
   font-size: 9px;
   color: rgba(255,255,255,0.4);
   letter-spacing: 0.08em;
+}
+/* Loop-boundary marker: a thin vertical accent line sitting in the
+   6 px gap between iterations. No extra spacing — line lives outside
+   the card box via a negative offset. */
+.chordview-card.cv-loop-start::before {
+  content: '';
+  position: absolute;
+  top: 6%; bottom: 6%;
+  left: -4px;
+  width: 2px;
+  background: var(--accent);
+  pointer-events: none;
 }
 /* Inner beat-divider lines — vertical hairlines at every whole-beat
    boundary inside a card. Drawn below the label, above the background. */

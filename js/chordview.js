@@ -25,7 +25,8 @@ const CHORDVIEW_PX_MAX = 300;
 // so the cursor can flow rightward across "the next iteration" instead
 // of snapping back to the start. _cvLoopIter rotates 0..N-1 and bumps
 // each time we detect SEQ.animBeat wrapping backwards.
-const CHORDVIEW_COPIES = 3;
+const CHORDVIEW_MIN_COPIES = 3;
+let _cvCopies = 3;
 let _cvLoopIter = 0;
 let _cvLastAnimBeat = -1;
 
@@ -125,6 +126,10 @@ function _makeChordviewCard(item, localIdx, iter = 0) {
   const card = document.createElement('div');
   const cardW = Math.max(CHORDVIEW_MIN_CARD_W, item.beats * CHORDVIEW_PX_PER_BEAT);
   card.className = 'chordview-card future' + (item.beats >= 2 ? ' wide' : '');
+  // Mark the first chord of every loop iteration after the first so we
+  // can visually flag where the loop wraps when the user is zoomed out
+  // far enough to see multiple copies side-by-side.
+  if (iter > 0 && localIdx === 0) card.classList.add('cv-loop-start');
   card.dataset.iter = iter;
   card.dataset.localIdx = localIdx;
   card.dataset.start = item.start;
@@ -169,16 +174,70 @@ function renderChordView() {
   const trk = focusedChordTrack();
   refreshChordViewTitle();
   if (!trk) return;
-  for (let iter = 0; iter < CHORDVIEW_COPIES; iter++) {
-    for (let i = 0; i < trk.items.length; i++) {
-      trackEl.appendChild(_makeChordviewCard(trk.items[i], i, iter));
+  // With loop on, only show chords inside [loopStart, loopEnd] — and
+  // CLIP chords that straddle the loop boundary so the visible part
+  // matches the actual played portion. Without loop, show the whole
+  // track as a single pass.
+  const looping = !!SEQ.loop;
+  const items = looping
+    ? trk.items
+        .filter(it => it.start < SEQ.loopEnd && (it.start + it.beats) > SEQ.loopStart)
+        .map(it => {
+          const s = Math.max(it.start, SEQ.loopStart);
+          const e = Math.min(it.start + it.beats, SEQ.loopEnd);
+          if (s === it.start && e === it.start + it.beats) return it;
+          // Synthetic clipped chord — keeps the original visual proportions
+          // but only spans the loop-overlapping part.
+          return { ...it, start: s, beats: e - s };
+        })
+    : trk.items;
+  trackEl._cvItems = items;
+  if (items.length === 0) {
+    _cvCopies = 0;
+    updateChordViewPlayhead();
+    return;
+  }
+  const minCopies = looping ? CHORDVIEW_MIN_COPIES : 1;
+  // For tiny loops (e.g. 1-beat) the row needs many more copies to
+  // fill a wide viewport — bump the cap aggressively when each pass
+  // is short. Hard limit 200 to prevent runaway.
+  const maxCopies = looping ? 200 : 1;
+  for (let iter = 0; iter < minCopies; iter++) {
+    for (let i = 0; i < items.length; i++) {
+      trackEl.appendChild(_makeChordviewCard(items[i], i, iter));
     }
+  }
+  _cvCopies = minCopies;
+  if (looping) {
+    requestAnimationFrame(() => {
+      const body = document.getElementById('seq-chordview-body');
+      const viewport = body ? body.clientWidth : 0;
+      // Compute the row-width contributed by one iteration of items, then
+      // figure out how many iterations are needed to span ~3 × viewport
+      // (one viewport to the left, one centred, one to the right). Direct
+      // math is more reliable than polling scrollWidth in a sync loop —
+      // scrollWidth doesn't update predictably between rapid appends and
+      // the loop can exit too early on long card widths.
+      let oneIterWidth = 0;
+      for (const it of items) {
+        const w = Math.max(CHORDVIEW_MIN_CARD_W, it.beats * CHORDVIEW_PX_PER_BEAT);
+        oneIterWidth += w + 6 /* gap */;
+      }
+      const targetIter = Math.ceil((viewport * 3) / Math.max(oneIterWidth, 1));
+      const wantCopies = Math.min(maxCopies, Math.max(minCopies, targetIter));
+      while (_cvCopies < wantCopies) {
+        for (let i = 0; i < items.length; i++) {
+          trackEl.appendChild(_makeChordviewCard(items[i], i, _cvCopies));
+        }
+        _cvCopies += 1;
+      }
+      _fitChordViewCards(trackEl);
+    });
+  } else {
+    requestAnimationFrame(() => _fitChordViewCards(trackEl));
   }
   _cvLoopIter = 0;
   _cvLastAnimBeat = -1;
-  // Auto-fit each label to its card — shrink font if it overflows.
-  // Defer to next frame so layout has applied widths before measuring.
-  requestAnimationFrame(() => _fitChordViewCards(trackEl));
   updateChordViewPlayhead();
 }
 
@@ -189,13 +248,19 @@ function renderChordView() {
 // compensates for, so the user sees no change. Lets the cursor keep
 // flowing rightward forever without ever snapping back.
 function _cvTreadmill(trackEl, trk) {
-  const N = trk.items.length;
+  // Use the same filtered item set the initial render used so the
+  // treadmill stays consistent with what's on screen (loop range only
+  // when looping; full track otherwise).
+  const items = trackEl._cvItems || trk.items;
+  const N = items.length;
   for (let i = 0; i < N; i++) {
     const first = trackEl.firstElementChild;
     if (first) first.remove();
   }
+  // New cards represent the "next" iteration after whatever's already
+  // rendered — use iter=1 so the first card still gets .cv-loop-start.
   for (let i = 0; i < N; i++) {
-    trackEl.appendChild(_makeChordviewCard(trk.items[i], i));
+    trackEl.appendChild(_makeChordviewCard(items[i], i, 1));
   }
   requestAnimationFrame(() => _fitChordViewCards(trackEl));
 }
@@ -247,6 +312,13 @@ function updateChordViewPlayhead() {
     if (trackEl) trackEl.style.transform = 'translateX(0)';
     return;
   }
+  // Use the same item set the render used (filtered to loop range when
+  // looping, full track otherwise).
+  const items = trackEl._cvItems || trk.items;
+  if (items.length === 0) {
+    trackEl.style.transform = 'translateX(0)';
+    return;
+  }
   const t = SEQ.animBeat ?? SEQ.startBeat ?? 0;
   // Loop-wrap detection: when animBeat jumps backwards by more than
   // half a beat while looping, we've crossed the loop boundary — bump
@@ -260,7 +332,7 @@ function updateChordViewPlayhead() {
     // append a fresh one at the end — every card's DOM position shifts
     // left by loopWidth, so when the iter-based transform shifts right
     // by loopWidth the net visible change is zero.
-    if (_cvLoopIter > CHORDVIEW_COPIES - 2) {
+    if (_cvLoopIter > _cvCopies - 2) {
       _cvTreadmill(trackEl, trk);
       _cvLoopIter -= 1;
     }
@@ -273,18 +345,18 @@ function updateChordViewPlayhead() {
   //    beat arrives — soft swell-in / fade-out across the boundary.
   //  - cursorIdx: which chord the playhead-line currently sits in.
   //    Uses the real beat so the line stays synced with audio.
-  const CV_LOOKAHEAD_BEATS = 0.4;
+  const CV_LOOKAHEAD_BEATS = 1;
   const findIdx = (time) => {
-    for (let i = 0; i < trk.items.length; i++) {
-      const it = trk.items[i];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
       if (time >= it.start && time < it.start + it.beats) return i;
     }
     return -1;
   };
   const colourIdx = findIdx(t + CV_LOOKAHEAD_BEATS);
   const cursorIdx = findIdx(t);
-  const colourEff = (colourIdx >= 0) ? trk.items.length * _cvLoopIter + colourIdx : -1;
-  const cursorEff = (cursorIdx >= 0) ? trk.items.length * _cvLoopIter + cursorIdx : -1;
+  const colourEff = (colourIdx >= 0) ? items.length * _cvLoopIter + colourIdx : -1;
+  const cursorEff = (cursorIdx >= 0) ? items.length * _cvLoopIter + cursorIdx : -1;
 
   const cards = trackEl.querySelectorAll('.chordview-card');
   cards.forEach((el, i) => {

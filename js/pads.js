@@ -36,9 +36,9 @@
 // ============================================================
 function extQuality(baseQ, ext) {
   if (!ext) return null;
-  if (ext === 'Maj7')  return baseQ === 'min' ? 'mmaj7' : baseQ === 'aug' ? 'augmaj7' : 'maj7';
-  if (ext === 'Maj7+') return 'augmaj7';
-  if (ext === 'mMaj7') return 'mmaj7';
+  if (ext === 'maj7')  return baseQ === 'min' ? 'mmaj7' : baseQ === 'aug' ? 'augmaj7' : 'maj7';
+  if (ext === 'maj7+') return 'augmaj7';
+  if (ext === 'mmaj7') return 'mmaj7';
   if (ext === '°7')    return 'dim7';
   if (ext === 'ø')     return 'm7b5';
   if (ext === '7')     return baseQ === 'min' ? 'min7' : baseQ === 'dim' ? 'dim7' : 'dom7';
@@ -423,10 +423,10 @@ function buildChordLibraryBoard() {
     'maj7':    ['maj7', 'M7', 'Δ7', 'Δ', 'ma7', 'j7'],
     'dom7':    ['7', 'dom7'],
     'min7':    ['m7', 'min7', 'mi7', '−7'],
-    'mmaj7':   ['mMaj7', 'm(maj7)', 'minMaj7', 'm♯7', '−Δ7'],
+    'mmaj7':   ['mmaj7', 'm(maj7)', 'minmaj7', 'm♯7', '−Δ7'],
     'm7b5':    ['m7♭5', 'ø', 'ø7', '½dim7'],
     'dim7':    ['dim7', '°7'],
-    'augmaj7': ['+Maj7', 'maj7♯5', 'Maj7(+5)', 'Δ7♯5'],
+    'augmaj7': ['+maj7', 'maj7♯5', 'maj7(+5)', 'Δ7♯5'],
     'aug7':    ['+7', '7♯5', '7(+5)', 'aug7'],
     '7sus2':   ['7sus2'],
     '7sus4':   ['7sus4', '7sus'],

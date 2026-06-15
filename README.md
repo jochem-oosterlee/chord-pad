@@ -66,7 +66,7 @@ In Scale Chords the strip also adapts the note spelling depending on whether you
 
 - **Click** a pad to play it.
 - **Click and drag across pads** to play several in sequence.
-- Each pad shows the chord name, an optional small **extension badge** (e.g. "Maj7", "7"). Clicking the badge plays the extended version.
+- Each pad shows the chord name, an optional small **extension badge** (e.g. "maj7", "7"). Clicking the badge plays the extended version.
 - A small **piano tooltip** appears above the pad showing exactly which notes are sounding, with the note names labelled above the keys. Turn this on/off in Settings under **Tooltip**.
 
 If audio is on you'll hear it through the built-in synth. If MIDI is on you'll also send the chord to your MIDI output.

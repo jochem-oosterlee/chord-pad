@@ -114,7 +114,7 @@ const CHORD_AVG_IV = Object.fromEntries(
 const CHORD_SUFFIX = {
   'maj': '', 'min': 'm', 'dim': '°', 'aug': '+',
   'sus2': 'sus2', 'sus4': 'sus4',
-  'dom7': '7', 'maj7': 'maj7', 'min7': 'm7', 'mmaj7': 'mMaj7',
+  'dom7': '7', 'maj7': 'maj7', 'min7': 'm7', 'mmaj7': 'mmaj7',
   'm7b5': 'ø', 'dim7': '°7', 'augmaj7': 'maj7+', 'aug7': '7+',
   'power': '5', 'sus24': 'sus24',
   'maj6': '6', 'min6': 'm6',
@@ -131,7 +131,7 @@ const CHORD_SUFFIX = {
 const QUALITY_GLYPH = {
   'maj': '', 'min': 'm', 'dim': '°', 'aug': '+',
   'sus2': 'sus2', 'sus4': 'sus4',
-  'dom7': '7', 'maj7': 'maj7', 'min7': 'm7', 'mmaj7': 'mMaj7',
+  'dom7': '7', 'maj7': 'maj7', 'min7': 'm7', 'mmaj7': 'mmaj7',
   'm7b5': 'ø', 'dim7': '°7', 'augmaj7': 'maj7+', 'aug7': '7+',
   'power': '5', 'sus24': 'sus24',
   'maj6': '6', 'min6': 'm6',
@@ -295,9 +295,9 @@ const V2_SECTIONS = {
     {
       id: 'main', flowIcon: ICON_DOWN, flowText: 'START HERE · MIX CHORDS', label: 'Main Chords',
       chords: [
-        {roman:'I',    interval:0,  q:'maj', ext:'Maj7'},
+        {roman:'I',    interval:0,  q:'maj', ext:'maj7'},
         {roman:'vi',   interval:9,  q:'min', ext:'7'},
-        {roman:'IV',   interval:5,  q:'maj', ext:'Maj7'},
+        {roman:'IV',   interval:5,  q:'maj', ext:'maj7'},
         {roman:'ii',   interval:2,  q:'min', ext:'7'},
         {roman:'V',    interval:7,  q:'maj', ext:'7'},
         {roman:'iii',  interval:4,  q:'min', ext:'7'},
@@ -307,8 +307,8 @@ const V2_SECTIONS = {
     {
       id: 'modal', flowIcon: ICON_LOOP, flowText: 'MIX CHORDS', label: 'Modal Interchange',
       chords: [
-        {roman:'bIII', interval:3,  q:'maj', ext:'Maj7', pianoScale:[0,2,4,5,7,9,11]},
-        {roman:'bVI',  interval:8,  q:'maj', ext:'Maj7', pianoScale:[0,2,4,6,7,9,11]},
+        {roman:'bIII', interval:3,  q:'maj', ext:'maj7', pianoScale:[0,2,4,5,7,9,11]},
+        {roman:'bVI',  interval:8,  q:'maj', ext:'maj7', pianoScale:[0,2,4,6,7,9,11]},
         {roman:'iv',   interval:5,  q:'min', ext:'7',    pianoScale:[0,2,3,5,7,9,10]},
         {roman:'bVII', interval:10, q:'maj', ext:'7',    pianoScale:[0,2,4,5,7,9,10]},
         {roman:'ii°',  interval:2,  q:'dim', ext:'ø',    pianoScale:[0,1,3,5,6,8,10]},
@@ -324,15 +324,15 @@ const V2_SECTIONS = {
         {roman:'vii°<sub>V</sub>', interval:0, q:'dim', ext:'7'},
         {roman:'vii°<sub>V</sub>', interval:3, q:'dim', ext:'7'},
       ],
-      neapolitan: {roman:'bII', interval:1, q:'maj', bassInterval:5, ext:'Maj7', pianoScale:[0,2,4,6,7,9,11]}
+      neapolitan: {roman:'bII', interval:1, q:'maj', bassInterval:5, ext:'maj7', pianoScale:[0,2,4,6,7,9,11]}
     },
     {
       id: 'main', flowIcon: ICON_DOWN, flowText: 'MIX CHORDS', label: 'Main Chords',
       chords: [
-        {roman:'i',     interval:0,  q:'min', ext:'Maj7'},
-        {roman:'bIII+', interval:3,  q:'aug', ext:'Maj7'},
+        {roman:'i',     interval:0,  q:'min', ext:'maj7'},
+        {roman:'bIII+', interval:3,  q:'aug', ext:'maj7'},
         {roman:'iv',    interval:5,  q:'min', ext:'7'},
-        {roman:'bVI',   interval:8,  q:'maj', ext:'Maj7'},
+        {roman:'bVI',   interval:8,  q:'maj', ext:'maj7'},
         {roman:'V',     interval:7,  q:'dom7'},
         {roman:'#vii°', interval:11, q:'dim', ext:'7'},
         {roman:'ii°',   interval:2,  q:'dim', ext:'ø'},
@@ -2490,6 +2490,7 @@ document.getElementById('seq-loop-btn').addEventListener('click', () => {
   SEQ.loop = !SEQ.loop;
   document.getElementById('seq-loop-btn').classList.toggle('active', SEQ.loop);
   seqUpdateLoopVisible();
+  if (SEQ.chordViewOpen && typeof renderChordView === 'function') renderChordView();
   seqSave();
 
   // Refresh per-track scheduling so playback either picks up the loop right
@@ -3769,12 +3770,13 @@ function _bindLoopBar(bar) {
     const initStart = SEQ.loopStart, initEnd = SEQ.loopEnd;
     const onMove = (ev) => {
       const rect = ruler.getBoundingClientRect();
+      const minLen = state.beatsPerBar || 4;
       if (mode === 'left') {
         const beat = Math.max(0, Math.round((ev.clientX - rect.left) / BEAT_PX));
-        SEQ.loopStart = Math.min(beat, SEQ.loopEnd - 1);
+        SEQ.loopStart = Math.min(beat, SEQ.loopEnd - minLen);
       } else if (mode === 'right') {
         const beat = Math.max(0, Math.round((ev.clientX - rect.left) / BEAT_PX));
-        SEQ.loopEnd = Math.max(beat, SEQ.loopStart + 1);
+        SEQ.loopEnd = Math.max(beat, SEQ.loopStart + minLen);
       } else {
         const dxBeats = Math.round((ev.clientX - startX) / BEAT_PX);
         const len = initEnd - initStart;
@@ -3808,11 +3810,12 @@ function _bindLaneLoopHandle(handle, lane, which) {
     const onMove = (ev) => {
       const rect = lane.getBoundingClientRect();
       const beat = Math.max(0, Math.round((ev.clientX - rect.left) / BEAT_PX));
+      const minLen = state.beatsPerBar || 4;
       if (which === 'start') {
-        SEQ.loopStart = Math.min(beat, SEQ.loopEnd - 1);
+        SEQ.loopStart = Math.min(beat, SEQ.loopEnd - minLen);
         seqUpdateLoopStart();
       } else {
-        SEQ.loopEnd = Math.max(beat, SEQ.loopStart + 1);
+        SEQ.loopEnd = Math.max(beat, SEQ.loopStart + minLen);
         seqUpdateLoopEnd();
       }
       if (SEQ.loop) seqResyncAllThrottled();
