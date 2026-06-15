@@ -798,6 +798,7 @@ function setKey(tplId, keyIdx) {
   state.keys[tplId] = keyIdx;
   updateKeySelectors();
   if (state.currentTemplate === tplId) rebuildBoard();
+  if (typeof uiPrefsSave === 'function') uiPrefsSave();
 }
 
 // ============================================================
@@ -809,6 +810,7 @@ function setActiveTab(tabId) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.dataset.page === tabId));
   rebuildBoard();
+  if (typeof uiPrefsSave === 'function') uiPrefsSave();
 }
 document.querySelectorAll('.tab').forEach(tab => {
   // Skip tabs without a data-tab (e.g. the gear-icon settings button — it
@@ -1461,6 +1463,53 @@ document.querySelectorAll('.synth-target-btn').forEach(btn => {
       if (sec === 'settings' && !hidden.settings) ev.stopPropagation();
     });
   });
+  // Compact floating toolbar — mirrors the header section toggles so the
+  // user can flip panels without scrolling back up. Built once from the
+  // existing buttons; active-state is synced via apply() below.
+  (function _initSectionMiniToolbar() {
+    const mini = document.getElementById('section-mini-toolbar');
+    const header = document.querySelector('header.header');
+    if (!mini || !header) return;
+    document.querySelectorAll('.header-section-toggle[data-section]').forEach(src => {
+      const clone = src.cloneNode(true);
+      clone.removeAttribute('id');
+      clone.classList.remove('header-section-toggle');
+      clone.addEventListener('mousedown', (e) => e.preventDefault());
+      clone.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        src.click();
+      });
+      mini.appendChild(clone);
+    });
+    const syncActive = () => {
+      document.querySelectorAll('.header-section-toggle[data-section]').forEach((src, i) => {
+        const tgt = mini.children[i];
+        if (tgt) tgt.classList.toggle('active', src.classList.contains('active'));
+      });
+    };
+    // The header toggle handler above swaps `.active` synchronously, so a
+    // MutationObserver keeps the mirror in sync without polling.
+    const obs = new MutationObserver(syncActive);
+    document.querySelectorAll('.header-section-toggle[data-section]').forEach(src =>
+      obs.observe(src, { attributes: true, attributeFilter: ['class'] })
+    );
+    syncActive();
+    // Visibility — show once the header scrolls past the top of the
+    // viewport. Use rAF throttling so the scroll handler is cheap.
+    let scheduled = false;
+    const update = () => {
+      scheduled = false;
+      const r = header.getBoundingClientRect();
+      mini.classList.toggle('visible', r.bottom <= 4);
+    };
+    window.addEventListener('scroll', () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(update);
+    }, { passive: true });
+    update();
+    if (typeof refreshLucide === 'function') refreshLucide();
+  })();
   // Click outside the settings popover closes it (only when open).
   document.addEventListener('mousedown', (ev) => {
     if (hidden.settings) return;
@@ -2319,12 +2368,26 @@ function seqRenderRuler() {
   const sel    = document.getElementById('seq-clock-port');
   if (!toggle || !sel) return;
   const sync = () => {
-    toggle.classList.toggle('active', !!state.midiClockEnabled);
-    toggle.textContent = 'Sync';
+    const active = !!state.midiClockEnabled;
+    const present = typeof midiClockIsActive === 'function' && midiClockIsActive();
+    toggle.classList.toggle('clock-locked', active);
+    toggle.classList.toggle('clock-present', present && !active);
     const tempoInputs = document.querySelectorAll('#ctrl-tempo, #seq-tempo-val');
-    tempoInputs.forEach(el => el.disabled = !!state.midiClockEnabled);
+    tempoInputs.forEach(el => el.disabled = active);
     sel.value = state.midiClockPortId || '';
   };
+  // 5 Hz watchdog: drops "clock present" after the F8 stream stops, and
+  // keeps the lock-state in sync if the user changes follow elsewhere.
+  setInterval(sync, 200);
+  // Beat heartbeat: flash the icon to accent on every detected beat,
+  // whether or not the user is following — so they can see "there's a
+  // pulse coming in" before deciding to sync.
+  if (typeof onMidiClockBeat === 'function') {
+    onMidiClockBeat(() => {
+      toggle.classList.add('beat');
+      setTimeout(() => toggle.classList.remove('beat'), 110);
+    });
+  }
   const rebuild = () => {
     const inputs = state.midiAccess ? Array.from(state.midiAccess.inputs.values()) : [];
     sel.innerHTML = '<option value="">— none —</option>'
@@ -2340,8 +2403,23 @@ function seqRenderRuler() {
       const first = state.midiAccess ? state.midiAccess.inputs.values().next().value : null;
       if (first) state.midiClockPortId = first.id;
     }
-    _midiClock.intervals.length = 0; _midiClock.lastTickAt = 0;
     attachMidiInput();
+    // If we just enabled follow and clock is already streaming, apply
+    // the current rolling-average BPM immediately — otherwise the user
+    // has to wait for the next significant tempo change on the source
+    // before the displayed BPM catches up.
+    if (state.midiClockEnabled && _midiClock.intervals.length >= 3) {
+      const avg = _midiClock.intervals.reduce((s, v) => s + v, 0) / _midiClock.intervals.length;
+      const bpm = Math.round(60000 / (avg * 24));
+      if (bpm >= 40 && bpm <= 240) {
+        _midiClock.lastAppliedBpm = bpm;
+        state.tempo = bpm;
+        const tEl1 = document.getElementById('seq-tempo-val');
+        const tEl2 = document.getElementById('ctrl-tempo');
+        if (tEl1) tEl1.value = bpm;
+        if (tEl2) tEl2.value = bpm;
+      }
+    }
     sync();
     seqSave();
   });
@@ -2487,6 +2565,16 @@ initMidiLaneResize();
 initSeqLanePan();
 initSeqPinchZoom();
 seqLoad();
+uiPrefsLoad();
+// Apply restored template + key. setActiveTab also calls rebuildBoard;
+// for the default template we still need to refresh pads with the loaded
+// key.
+if (state.currentTemplate && state.currentTemplate !== 'major-harmony') {
+  setActiveTab(state.currentTemplate);
+} else if (typeof rebuildBoard === 'function') {
+  rebuildBoard();
+}
+if (typeof updateKeySelectors === 'function') updateKeySelectors();
 // Tracks may have midiInPortId configured; re-attach now that they exist.
 if (state.midiAccess) attachMidiInput();
 // Push initial CC#7 to every MIDI-routed track so receivers start at the
@@ -3098,6 +3186,59 @@ function ensureTrackLane(track) {
   return lane;
 }
 
+// HTML5 drag-and-drop on the track sidebar to reorder SEQ.tracksList.
+// Pointerdown on a button/input cancels the drag so editing controls keep
+// working. A small accent line above/below the hovered label indicates
+// drop-position.
+function _wireTrackDrag(label) {
+  label.dataset.dragWired = '1';
+  label.addEventListener('dragstart', (e) => {
+    if (e.target.closest('button, input, select, .seq-th-knob')) {
+      e.preventDefault(); return;
+    }
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/x-track-id', label.dataset.trackId);
+    label.classList.add('dragging');
+  });
+  label.addEventListener('dragend', () => {
+    label.classList.remove('dragging');
+    document.querySelectorAll('.seq-track-label.drop-before, .seq-track-label.drop-after')
+      .forEach(el => el.classList.remove('drop-before', 'drop-after'));
+  });
+  label.addEventListener('dragover', (e) => {
+    const draggingId = document.querySelector('.seq-track-label.dragging')?.dataset.trackId;
+    if (!draggingId || draggingId === label.dataset.trackId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = label.getBoundingClientRect();
+    const before = (e.clientY - rect.top) < rect.height / 2;
+    label.classList.toggle('drop-before', before);
+    label.classList.toggle('drop-after', !before);
+  });
+  label.addEventListener('dragleave', () => {
+    label.classList.remove('drop-before', 'drop-after');
+  });
+  label.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const srcId = e.dataTransfer.getData('text/x-track-id');
+    const tgtId = label.dataset.trackId;
+    const before = label.classList.contains('drop-before');
+    label.classList.remove('drop-before', 'drop-after');
+    if (!srcId || srcId === tgtId) return;
+    const list = SEQ.tracksList;
+    const srcIdx = list.findIndex(t => t.id === srcId);
+    const tgtIdx = list.findIndex(t => t.id === tgtId);
+    if (srcIdx < 0 || tgtIdx < 0) return;
+    seqCheckpoint();
+    const [moved] = list.splice(srcIdx, 1);
+    let insertAt = list.findIndex(t => t.id === tgtId);
+    if (!before) insertAt += 1;
+    list.splice(insertAt, 0, moved);
+    rebuildTracksUI();
+    seqSave();
+  });
+}
+
 // Find or create the sidebar header for a track.
 function ensureTrackHeader(track) {
   let label = document.querySelector(`.seq-track-label[data-track-id="${track.id}"]`);
@@ -3105,8 +3246,13 @@ function ensureTrackHeader(track) {
     label = document.createElement('div');
     label.className = 'seq-track-label';
     label.dataset.trackId = track.id;
+    label.draggable = true;
+    _wireTrackDrag(label);
     const addBtn = document.getElementById('seq-add-track-btn');
     document.getElementById('seq-track-sidebar').insertBefore(label, addBtn);
+  } else if (!label.dataset.dragWired) {
+    label.draggable = true;
+    _wireTrackDrag(label);
   }
   populateTrackHeader(label, track);
   return label;
@@ -4595,6 +4741,24 @@ document.getElementById('seq-arr-zoom-in') ?.addEventListener('click', () => seq
 document.getElementById('seq-arr-zoom-out')?.addEventListener('click', () => seqApplyZoom(BEAT_PX / 1.25));
 document.getElementById('pr-zoom-in') ?.addEventListener('click', () => prApplyZoom(PR_BEAT_PX * 1.25));
 document.getElementById('pr-zoom-out')?.addEventListener('click', () => prApplyZoom(PR_BEAT_PX / 1.25));
+// Follow-cursor toggles for arrangement + piano roll. State lives on
+// SEQ so the playhead-frame loop in seq.js can read it without a DOM
+// query each tick. Persisted in the UI-prefs blob (which already
+// reaches into SEQ.* via uiPrefsLoad/Save).
+(function _initFollowToggles() {
+  const bind = (btnId, flag) => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.classList.toggle('active', !!SEQ[flag]);
+    btn.addEventListener('click', () => {
+      SEQ[flag] = !SEQ[flag];
+      btn.classList.toggle('active', !!SEQ[flag]);
+      if (typeof uiPrefsSave === 'function') uiPrefsSave();
+    });
+  };
+  bind('seq-arr-follow', 'followArr');
+  bind('pr-follow',      'followPr');
+})();
 // Ctrl + wheel zooms wherever the cursor is over the track-arrangement or
 // piano-roll body. preventDefault stops the browser-level page zoom.
 (function _initZoomWheel() {
@@ -4726,6 +4890,10 @@ arrSetTool(SEQ.arrTool);
       const innerRect = inner.getBoundingClientRect();
       const startX = e.clientX - innerRect.left;
       const startY = e.clientY - innerRect.top;
+      // Snapshot the selection so shift-marquee adds to it; without
+      // shift, we start fresh. Each move rebuilds from the snapshot so
+      // items that have left the marquee rect get unselected again.
+      const baseSel = e.shiftKey ? SEQ.selection.slice() : [];
       if (!e.shiftKey) seqClearSelection();
       const marquee = document.createElement('div');
       marquee.className = 'seq-marquee';
@@ -4739,7 +4907,8 @@ arrSetTool(SEQ.arrTool);
         marquee.style.top  = top + 'px';
         marquee.style.width  = (right - left) + 'px';
         marquee.style.height = (bottom - top) + 'px';
-        // Test every clip-block in every lane for intersection with marquee.
+        // Rebuild selection: snapshot + everything currently inside rect.
+        SEQ.selection = baseSel.slice();
         document.querySelectorAll('#seq-tracks-inner .seq-lane .seq-block').forEach(block => {
           const bRect = block.getBoundingClientRect();
           const bLeft = bRect.left - innerRect.left, bTop = bRect.top - innerRect.top;

@@ -37,6 +37,7 @@
       <div class="led" id="midi-led" title="MIDI activity" style="display:none"></div>
     </div>
   </header>
+  <div class="section-mini-toolbar" id="section-mini-toolbar" aria-hidden="true"></div>
 
   <div class="error-banner" id="error-banner"></div>
 
@@ -330,8 +331,8 @@
       <button class="btn seq-tool-btn" id="seq-arr-edit-paste"     title="Paste (Ctrl+V)"><i data-lucide="clipboard-paste"></i></button>
       <button class="btn seq-tool-btn" id="seq-arr-edit-duplicate" title="Duplicate (Ctrl+D)"><i data-lucide="copy-plus"></i></button>
       <button class="btn seq-tool-btn" id="seq-arr-edit-delete"    title="Delete (Del)"><i data-lucide="trash-2"></i></button>
-      <button class="btn seq-tool-btn" id="seq-arr-edit-quantize"  title="Quantize selection to snap grid"><span class="seq-tool-letter">Q</span></button>
       <div class="seq-tool-sep"></div>
+      <button class="btn seq-tool-btn" id="seq-arr-edit-quantize"  title="Quantize selection to snap grid"><i data-lucide="align-start-vertical"></i></button>
       <span class="seq-snap-wrap">
         <button class="btn seq-tool-btn seq-snap-toggle" id="seq-arr-tool-snap" title="Snap"><i data-lucide="magnet"></i></button>
         <select class="seq-snap-select" id="seq-arr-snap-val" title="Snap unit"></select>
@@ -341,6 +342,7 @@
         <select class="seq-snap-select seq-chordlen-select" id="seq-arr-chordlen"></select>
       </label>
       <div class="seq-tool-sep"></div>
+      <button class="btn seq-tool-btn" id="seq-arr-follow" title="Follow play cursor"><i data-lucide="locate"></i></button>
       <button class="btn seq-tool-btn" id="seq-arr-zoom-out" title="Zoom out (more bars in view)"><i data-lucide="zoom-out"></i></button>
       <button class="btn seq-tool-btn" id="seq-arr-zoom-in"  title="Zoom in (fewer bars in view)"><i data-lucide="zoom-in"></i></button>
     </div>
@@ -366,15 +368,18 @@
         <button class="btn seq-nav-btn" id="seq-nav-loop-start"  title="Jump to start of loop"><i data-lucide="corner-left-down"></i></button>
         <button class="btn seq-nav-btn" id="seq-nav-cursor-left" title="Move play-cursor left (hold to repeat)"><i data-lucide="arrow-left"></i></button>
       </div>
+      <div class="seq-tool-sep"></div>
       <button class="seq-loop-btn" id="seq-loop-btn" title="Loop"><i data-lucide="repeat"></i></button>
       <button class="seq-stop-btn" id="seq-stop-btn" title="Stop"><i data-lucide="square"></i></button>
       <button class="seq-play-btn" id="seq-play-btn" title="Play"><i data-lucide="play"></i></button>
       <button class="seq-rec-btn"  id="seq-rec-btn"  title="Record"><i data-lucide="circle"></i></button>
+      <div class="seq-tool-sep"></div>
       <div class="seq-nav-group">
         <button class="btn seq-nav-btn" id="seq-nav-cursor-right" title="Move play-cursor right (hold to repeat)"><i data-lucide="arrow-right"></i></button>
         <button class="btn seq-nav-btn" id="seq-nav-loop-end"    title="Jump to end of loop"><i data-lucide="corner-right-down"></i></button>
         <button class="btn seq-nav-btn" id="seq-nav-track-end"   title="Jump to end of project"><i data-lucide="arrow-right-to-line"></i></button>
       </div>
+      <div class="seq-tool-sep"></div>
       <button class="seq-metro-btn" id="seq-metro-btn" title="Metronome"><i data-lucide="metronome"></i></button>
       <div class="seq-timesig-tempo">
         <select class="seq-timesig" id="seq-timesig">
@@ -392,7 +397,7 @@
           </div>
         </div>
         <div class="seq-clock-sync" title="MIDI Clock sync — slave tempo + start/stop to an external source">
-          <button class="seq-clock-toggle" id="seq-clock-toggle">Sync</button>
+          <button class="seq-clock-toggle" id="seq-clock-toggle" title="MIDI Clock — click to follow / unfollow"><i data-lucide="radio"></i></button>
           <select class="seq-clock-port" id="seq-clock-port">
             <option value="">— none —</option>
           </select>
@@ -416,8 +421,8 @@
         <button class="btn seq-tool-btn" id="seq-pr-edit-paste"     title="Paste (Ctrl+V)"><i data-lucide="clipboard-paste"></i></button>
         <button class="btn seq-tool-btn" id="seq-pr-edit-duplicate" title="Duplicate (Ctrl+D)"><i data-lucide="copy-plus"></i></button>
         <button class="btn seq-tool-btn" id="seq-pr-edit-delete"    title="Delete (Del)"><i data-lucide="trash-2"></i></button>
-        <button class="btn seq-tool-btn" id="seq-pr-edit-quantize"  title="Quantize selection to snap grid"><span class="seq-tool-letter">Q</span></button>
         <div class="seq-tool-sep"></div>
+        <button class="btn seq-tool-btn" id="seq-pr-edit-quantize"  title="Quantize selection to snap grid"><i data-lucide="align-horizontal-distribute-start"></i></button>
         <span class="seq-snap-wrap">
           <button class="btn seq-tool-btn seq-snap-toggle" id="seq-tool-snap" title="Snap"><i data-lucide="magnet"></i></button>
           <select class="seq-snap-select" id="seq-snap-val" title="Snap unit"></select>
@@ -427,6 +432,7 @@
           <select class="seq-snap-select seq-chordlen-select" id="seq-pr-chordlen"></select>
         </label>
         <div class="seq-tool-sep"></div>
+        <button class="btn seq-tool-btn" id="pr-follow" title="Follow play cursor"><i data-lucide="locate"></i></button>
         <button class="btn seq-tool-btn" id="pr-zoom-out" title="Zoom out (more bars in view)"><i data-lucide="zoom-out"></i></button>
         <button class="btn seq-tool-btn" id="pr-zoom-in"  title="Zoom in (fewer bars in view)"><i data-lucide="zoom-in"></i></button>
       </div>
@@ -443,7 +449,7 @@
   <div class="seq-chordview" id="seq-chordview">
     <div class="seq-chordview-header">
       <div class="synth-header">Chord View</div>
-      <span class="seq-chordview-title" id="seq-chordview-title"></span>
+      <select class="seq-chordview-track-select" id="seq-chordview-track-select"></select>
     </div>
     <div class="seq-chordview-body" id="seq-chordview-body">
       <div class="seq-chordview-track" id="seq-chordview-track"></div>

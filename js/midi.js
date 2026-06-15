@@ -87,8 +87,11 @@ function attachMidiInput() {
     if (!inputsByPort.has(inp.id)) inputsByPort.set(inp.id, { inp, tracks: [], clock: false, keyboard: false });
     inputsByPort.get(inp.id).tracks.push(t);
   }
-  // Clock source — possibly on the same port as a track, share the handler.
-  if (state.midiClockEnabled && state.midiClockPortId) {
+  // Clock source — always attach the parser if a port is selected so we
+  // can show "clock present" even when follow is off. Whether to APPLY
+  // the BPM / start / stop is gated separately on state.midiClockEnabled
+  // inside onMidiClockMessage.
+  if (state.midiClockPortId) {
     const inp = state.midiAccess.inputs.get(state.midiClockPortId);
     if (inp) {
       if (!inputsByPort.has(inp.id)) inputsByPort.set(inp.id, { inp, tracks: [], clock: true, keyboard: false });
@@ -132,9 +135,20 @@ function attachMidiInput() {
 // rendering jitter doesn't bleed into the BPM estimate. Updates the master
 // tempo lazily (only on significant change) so we're not re-anchoring the
 // scheduler 24 times per quarter note.
-const _midiClock = { intervals: [], lastTickAt: 0, lastAppliedBpm: 0 };
+const _midiClock = {
+  intervals: [], lastTickAt: 0, lastAppliedBpm: 0,
+  // Wall-clock time of the last F8 — used by the UI watchdog to drop
+  // the "clock present" indicator after ~1 s of silence.
+  lastF8WallMs: 0,
+  // F8 counter; every 24 pulses = one quarter-note → trigger a beat
+  // pulse on the indicator regardless of whether follow is on.
+  pulseCount: 0,
+  // Listeners notified on each detected beat.
+  beatListeners: [],
+};
 function onMidiClockMessage(status, ts) {
   if (status === 0xF8) {
+    _midiClock.lastF8WallMs = (typeof performance !== 'undefined') ? performance.now() : Date.now();
     if (_midiClock.lastTickAt) {
       const dt = ts - _midiClock.lastTickAt;
       if (dt > 0 && dt < 200) {                  // ignore obvious outliers
@@ -145,38 +159,48 @@ function onMidiClockMessage(status, ts) {
           const bpm = Math.round(60000 / (avg * 24));
           if (bpm >= 40 && bpm <= 240 && Math.abs(bpm - _midiClock.lastAppliedBpm) >= 3) {
             _midiClock.lastAppliedBpm = bpm;
-            state.tempo = bpm;
-            // Light-touch update: refresh the display only. We deliberately
-            // skip applyTempoChange here because it clears pendingTimers /
-            // re-anchors playStartTime — when triggered ~10× during initial
-            // clock detection that cancels the just-scheduled first beat
-            // every time, producing a ~500 ms silence after FA. Letting
-            // seqBeatDur() be read fresh on each scheduling tick lets the
-            // tempo update propagate naturally without yanking timing.
-            const tEl1 = document.getElementById('seq-tempo-val');
-            const tEl2 = document.getElementById('ctrl-tempo');
-            if (tEl1) tEl1.value = bpm;
-            if (tEl2) tEl2.value = bpm;
+            // Only adopt the incoming BPM when follow is enabled — but
+            // ALWAYS keep parsing so the UI can pulse + show "present".
+            if (state.midiClockEnabled) {
+              state.tempo = bpm;
+              const tEl1 = document.getElementById('seq-tempo-val');
+              const tEl2 = document.getElementById('ctrl-tempo');
+              if (tEl1) tEl1.value = bpm;
+              if (tEl2) tEl2.value = bpm;
+            }
           }
         }
       }
     }
     _midiClock.lastTickAt = ts;
+    _midiClock.pulseCount = (_midiClock.pulseCount + 1) % 24;
+    if (_midiClock.pulseCount === 0) {
+      for (const fn of _midiClock.beatListeners) {
+        try { fn(); } catch (_) {}
+      }
+    }
   } else if (status === 0xFA || status === 0xFB) {
     // Fresh start: clear sample window so we don't carry stale intervals.
     _midiClock.intervals.length = 0;
     _midiClock.lastTickAt = 0;
     _midiClock.lastAppliedBpm = 0;
-    // Tight start: ~1 ms lead so the scheduler's `t > now` check passes
-    // but we don't sit 50 ms behind the clock master on every beat.
-    if (!SEQ.playing) seqPlay(0.001);
+    _midiClock.pulseCount = 0;
+    // Only drive transport when the user has actually opted in.
+    if (state.midiClockEnabled && !SEQ.playing) seqPlay(0.001);
   } else if (status === 0xFC) {
-    if (SEQ.playing) seqStop();
+    if (state.midiClockEnabled && SEQ.playing) seqStop();
     _midiClock.intervals.length = 0;
     _midiClock.lastTickAt = 0;
     _midiClock.lastAppliedBpm = 0;
+    _midiClock.pulseCount = 0;
   }
 }
+function midiClockIsActive() {
+  if (!_midiClock.lastF8WallMs) return false;
+  const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+  return (now - _midiClock.lastF8WallMs) < 1000;
+}
+function onMidiClockBeat(fn) { _midiClock.beatListeners.push(fn); }
 
 // Per-track live MIDI input handler. Plays note-on / note-off through the
 // matching track's instrument (or forwards as MIDI out if the track is in

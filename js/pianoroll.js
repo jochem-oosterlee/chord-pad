@@ -714,7 +714,12 @@ function _prMakeNote(track, clip, note, idx, hi) {
         else effDx = 0;
       }
       const dBeat = effDx / PR_BEAT_PX;
-      const dRow  = Math.round(effDy / PR_ROW_H);
+      // Ctrl/Cmd snaps the vertical step to whole octaves — so dragging
+      // (or alt-cloning) a note up/down jumps in 12-semitone increments.
+      const octaveSnap = ev.ctrlKey || ev.metaKey;
+      const dRow  = octaveSnap
+        ? Math.round(effDy / PR_ROW_H / 12) * 12
+        : Math.round(effDy / PR_ROW_H);
       // Clamp the group so no member goes below start=0 or out of pitch range.
       let beatShift = dBeat;
       let rowShift = dRow;
@@ -817,6 +822,10 @@ function _prMakeNote(track, clip, note, idx, hi) {
     if (SEQ.prTool === 'select') {
       e.preventDefault();
       body.setPointerCapture(e.pointerId);
+      // Snapshot so shift-marquee adds to existing selection; without
+      // shift we start fresh. Each move rebuilds from the snapshot so
+      // notes that leave the rect become unselected again.
+      const baseSel = e.shiftKey ? new Set(SEQ.prSelection) : new Set();
       if (!e.shiftKey) SEQ.prSelection.clear();
       const startX = e.clientX, startY = e.clientY;
       const startSL = body.scrollLeft, startST = body.scrollTop;
@@ -834,6 +843,8 @@ function _prMakeNote(track, clip, note, idx, hi) {
         marquee.style.top  = top + 'px';
         marquee.style.width  = (right - left) + 'px';
         marquee.style.height = (bottom - top) + 'px';
+        SEQ.prSelection.clear();
+        baseSel.forEach(n => SEQ.prSelection.add(n));
         clip.notes.forEach((n) => {
           const nLeft = n.start * PR_BEAT_PX + prKbW();
           const nRight = nLeft + n.beats * PR_BEAT_PX;

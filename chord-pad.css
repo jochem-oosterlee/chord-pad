@@ -51,6 +51,11 @@ html, body {
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
 }
+/* Form controls don't inherit font-family by default — without this
+   any <button>/<input>/<select> without an explicit font-family falls
+   back to the browser's system font (Arial on Windows) and breaks the
+   monospace look. */
+button, input, select, textarea { font-family: inherit; }
 
 html {
   touch-action: manipulation;
@@ -155,6 +160,43 @@ body::before {
   background: rgba(255,255,255,0.10);
   margin: 0 4px;
 }
+/* Compact floating mirror of the section toggles. Fades in once the
+   user scrolls past the original header so they can still flip panels
+   without scrolling back up. */
+.section-mini-toolbar {
+  position: fixed; top: 8px; right: 12px;
+  display: none;
+  align-items: center; gap: 2px;
+  padding: 3px 5px;
+  background: rgba(20,20,22,0.92);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  backdrop-filter: blur(8px);
+  z-index: 150;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.15s, transform 0.15s;
+  pointer-events: none;
+}
+.section-mini-toolbar.visible {
+  display: flex;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.section-mini-toolbar button {
+  background: transparent; border: 1px solid transparent;
+  color: rgba(255,255,255,0.30);
+  border-radius: 3px;
+  padding: 2px 4px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color 0.12s, border-color 0.12s;
+}
+.section-mini-toolbar button:hover { color: rgba(255,255,255,0.65); border-color: rgba(255,255,255,0.10); }
+.section-mini-toolbar button.active { color: var(--accent); border-color: rgba(255,170,51,0.30); }
+.section-mini-toolbar button [data-lucide] { width: 14px; height: 14px; }
 body.hide-chord-pad .tabs-header,
 body.hide-chord-pad .tabs,
 body.hide-chord-pad .page          { display: none !important; }
@@ -1394,7 +1436,7 @@ input[type="range"]::-moz-range-thumb {
 .seq-controls {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 /* Transport navigation — three nav buttons on each side of the
@@ -1403,9 +1445,12 @@ input[type="range"]::-moz-range-thumb {
 .seq-nav-group {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
-/* .seq-nav-btn inherits .btn (28px min-width, 24px height, padding 0 10px). */
+/* .seq-nav-btn inherits .btn (28px min-width, 24px height) but with
+   tighter horizontal padding — they only hold a small lucide icon, no
+   text, so the default 10px feels stretched. */
+.seq-nav-btn { padding: 0 4px; min-width: 0; }
 .seq-nav-btn .lucide { width: 12px; height: 12px; }
 .seq-play-btn, .seq-stop-btn, .seq-rec-btn, .seq-metro-btn, .seq-loop-btn {
   background: none;
@@ -1435,7 +1480,7 @@ input[type="range"]::-moz-range-thumb {
 .seq-timesig-tempo {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 .seq-rec-beat:empty { display: none; }
 
@@ -1460,27 +1505,41 @@ input[type="range"]::-moz-range-thumb {
 .seq-timesig:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
 .seq-timesig option { background: #1a1b1e; color: var(--text); }
 .seq-clock-sync {
-  display: inline-flex; align-items: center; gap: 8px;
+  display: inline-flex; align-items: center; gap: 4px;
 }
+/* MIDI-clock indicator. Three brightness states convey "no clock / clock
+   present / locked" at a glance; the .beat class is briefly added every
+   quarter-note pulse for a subtle heartbeat. */
 .seq-clock-toggle {
   background: none;
-  border: 1px solid rgba(255,255,255,0.25);
+  border: 1px solid rgba(255,255,255,0.18);
   border-radius: 4px;
-  color: var(--text-dim);
-  font-family: inherit; font-size: 10px;
+  color: rgba(255,255,255,0.30);
+  font-family: inherit;
   padding: 0 6px;
   cursor: pointer;
-  height: 24px;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
+  height: 24px; width: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
   box-sizing: border-box;
+  opacity: 0.55;
+  transition: color 0.2s, opacity 0.2s, transform 0.18s, box-shadow 0.18s;
 }
-.seq-clock-toggle:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
-.seq-clock-toggle.active {
+.seq-clock-toggle [data-lucide],
+.seq-clock-toggle svg { width: 14px; height: 14px; }
+.seq-clock-toggle:hover { border-color: rgba(255,255,255,0.35); color: var(--text); opacity: 1; }
+.seq-clock-toggle.clock-present { color: rgba(255,255,255,0.75); opacity: 0.9; }
+.seq-clock-toggle.clock-locked {
   color: var(--accent);
-  border-color: rgba(255,170,51,0.5);
+  border-color: rgba(255,170,51,0.55);
   background: rgba(255,170,51,0.10);
+  opacity: 0.6;
 }
+/* Beat heartbeat: keep the button frame/size/border identical; flip the
+   icon to full-bright accent for ~110 ms. Lucide icons inherit colour
+   via stroke=currentColor, so changing `color` on the button recolors
+   the SVG; opacity bump makes the blink visible against the dimmer
+   locked steady-state. */
+.seq-clock-toggle.beat { color: var(--accent); opacity: 1; }
 .seq-clock-port {
   background: none;
   border: 1px solid rgba(255,255,255,0.25);
@@ -2212,9 +2271,20 @@ body.hide-chordview .seq-chordview { display: none !important; }
   color: var(--text-dim);
   letter-spacing: 0.08em;
 }
+.seq-chordview-track-select {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--panel-edge);
+  color: var(--text-dim);
+  font: inherit; font-size: 10px;
+  border-radius: 4px;
+  padding: 2px 6px;
+  min-width: 0;
+  cursor: pointer;
+}
+.seq-chordview-track-select:hover { border-color: var(--accent); }
 .seq-chordview-body {
   position: relative;
-  height: 120px;
+  height: 90px;
   overflow: hidden;
   background: rgba(0,0,0,0.4);
   border-radius: 4px;
@@ -2234,21 +2304,30 @@ body.hide-chordview .seq-chordview { display: none !important; }
 }
 .chordview-card {
   flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 14px;
+  position: relative;
+  padding: 6px 14px 14px;
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: 6px;
   color: rgba(255,255,255,0.65);
   white-space: nowrap;
-  transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.15s, opacity 0.2s;
-  opacity: 0.55;
+  transition: color 0.7s ease, border-color 0.7s ease, background 0.7s ease, transform 0.7s ease, opacity 0.7s ease;
+  opacity: 0.7;
 }
+/* Chord name is absolutely positioned so its bottom edge (≈ baseline)
+   sits at a fixed Y from the card bottom — regardless of font-size
+   changes between idle/current/etc. states. Keeps every chord label
+   visually aligned to the same baseline across the row. */
 .chordview-card .chordview-name {
-  display: inline-block;
+  position: absolute;
+  left: 50%;
+  bottom: 36%;
+  /* Scale-up for the current chord is set directly in the transform
+     property so CSS transitions interpolate it reliably. The autofit
+     code keeps using font-size for fitting; the class change here
+     only swaps the scale factor, leaving font-size alone. */
+  transform: translateX(-50%) scale(1);
+  transform-origin: bottom center;
   font-family: 'JetBrains Mono', monospace;
   font-weight: 700;
   font-size: 28px;
@@ -2256,13 +2335,14 @@ body.hide-chordview .seq-chordview { display: none !important; }
   letter-spacing: 0.02em;
   color: white;
   white-space: nowrap;
+  transition: color 0.7s ease, transform 0.7s ease;
 }
 /* Quality / ext glyphs inside the chord label (sup/sub) are styled the
    same way the .pad-quality wrapper does so the visual matches the
    chord-pads grid. */
 .chordview-card .chordview-name sub,
 .chordview-card .chordview-name sup {
-  font-size: 0.55em;
+  font-size: 0.3em;
   font-weight: 500;
   color: rgba(255,255,255,0.65);
 }
@@ -2272,12 +2352,39 @@ body.hide-chordview .seq-chordview { display: none !important; }
 .chordview-card .chordview-name .q-dim,
 .chordview-card .chordview-name .q-halfdim,
 .chordview-card .chordview-name .q-aug {
-  width: 0.55em;
-  height: 0.55em;
+  width: 0.3em;
+  height: 0.3em;
   vertical-align: 0.55em;
 }
+/* Quality suffix (m / Maj7 / sus4 / etc) — plain text following the
+   chord root. Shrunk to 75% so the root dominates the card. The
+   wrapper span is added in _makeChordviewCard at render time. */
+.chordview-card .chordview-name .cv-suffix {
+  font-size: 0.75em;
+  font-weight: 500;
+  /* No own colour — inherits from .chordview-name so it tints to accent
+     together with the root when the card becomes .current. */
+}
+/* Stacked layout: when the inline label is too wide for the card, the
+   autofit code adds .cv-stacked so the suffix hangs BELOW the root's
+   baseline as a small annotation. The root stays at its usual baseline
+   position so all cards (stacked + non-stacked) line up. */
+.chordview-card .chordview-name.cv-stacked .cv-suffix {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 2px;
+  font-size: 0.4em;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
 .chordview-card .chordview-beats {
-  margin-top: 4px;
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  transform: translateX(-50%);
   font-family: 'JetBrains Mono', monospace;
   font-size: 9px;
   color: rgba(255,255,255,0.4);
@@ -2296,9 +2403,14 @@ body.hide-chordview .seq-chordview { display: none !important; }
   top: 12%; bottom: 12%;
   width: 1px;
   background: rgba(255,255,255,0.08);
+  transition: background 0.7s ease;
 }
 .chordview-card.current .chordview-tick { background: rgba(255,170,51,0.20); }
-.chordview-card.past    { opacity: 0.25; }
+/* Past and future look identical — only the CURRENT card stands out
+   (accent border + brighter label). Smoother fades and font-size
+   transitions so neighbouring cards ease in/out of focus rather than
+   snapping. */
+.chordview-card.past,
 .chordview-card.future  { opacity: 0.7; }
 .chordview-card.current {
   opacity: 1;
@@ -2308,11 +2420,16 @@ body.hide-chordview .seq-chordview { display: none !important; }
      with the chord's time span so the playhead corresponds to the
      visual region. */
 }
-.chordview-card.current .chordview-name { color: var(--accent); font-size: 34px; }
+.chordview-card.current .chordview-name {
+  color: var(--accent);
+  transform: translateX(-50%) scale(1.215); /* ≈ 34/28 */
+}
 /* Wider cards (≥ 2 beats) get a slightly bigger base type. JS
    auto-shrinks the font further if a long label still overflows. */
 .chordview-card.wide .chordview-name         { font-size: 32px; }
-.chordview-card.wide.current .chordview-name { font-size: 40px; }
+.chordview-card.wide.current .chordview-name {
+  transform: translateX(-50%) scale(1.25); /* ≈ 40/32 */
+}
 /* Vertical playhead line down the centre — the chord cards scroll
    behind it during playback. */
 .seq-chordview-playhead {
@@ -2677,7 +2794,7 @@ body.hide-chordview .seq-chordview { display: none !important; }
 
 /* Add-track dropdown menu */
 .seq-add-track-menu {
-  position: absolute;
+  position: fixed;
   background: #16181d;
   border: 1px solid rgba(255,255,255,0.12);
   border-radius: 4px;
@@ -2708,6 +2825,9 @@ body.hide-chordview .seq-chordview { display: none !important; }
   font-weight: 600;
 }
 .seq-track-label:hover { color: var(--text); }
+.seq-track-label.dragging { opacity: 0.4; }
+.seq-track-label.drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
+.seq-track-label.drop-after  { box-shadow: 0  2px 0 0 var(--accent); }
 .seq-track-label.track-collapsed {
   min-height: 16px; height: 16px !important; padding: 0 6px;
   flex-direction: row; align-items: center; gap: 6px;

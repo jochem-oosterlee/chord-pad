@@ -709,6 +709,19 @@ function seqAnimatePlayhead() {
       wrap.scrollLeft = Math.max(0, px - wrap.clientWidth * 0.75);
     }
   }
+  // Follow-mode: let the playhead move freely through the left half
+  // of the viewport; once it would cross the midpoint, pin it there
+  // and scroll the lanes underneath. When the loop wraps the cursor
+  // jumps backward, so also snap when it falls off the left edge.
+  if (SEQ.followArr && SEQ.playing) {
+    const wrap = document.getElementById('seq-lane-wrap');
+    if (wrap) {
+      const mid = wrap.clientWidth * 0.5;
+      const cursorX = px - wrap.scrollLeft;
+      if (cursorX > mid)       wrap.scrollLeft = px - mid;
+      else if (cursorX < 0)    wrap.scrollLeft = Math.max(0, px);
+    }
+  }
   document.querySelectorAll('.seq-playhead').forEach(ph => { ph.style.left = px + 'px'; });
 
   // Piano-roll playhead is clip-relative: only shown when the playhead is
@@ -720,10 +733,17 @@ function seqAnimatePlayhead() {
       const { clip } = focusedClipObjects();
       if (clip && SEQ.animBeat >= clip.start && SEQ.animBeat < clip.start + clip.beats) {
         prPh.style.display = 'block';
-        prPh.style.left    = ((SEQ.animBeat - clip.start) * PR_BEAT_PX + prKbW()) + 'px';
+        const phX = (SEQ.animBeat - clip.start) * PR_BEAT_PX + prKbW();
+        prPh.style.left    = phX + 'px';
         prPh.style.top     = prBody.scrollTop + 'px';
         prPh.style.height  = prBody.clientHeight + 'px';
         prPh.style.bottom  = 'auto';
+        if (SEQ.followPr && SEQ.playing) {
+          const mid = prBody.clientWidth * 0.5;
+          const cursorX = phX - prBody.scrollLeft;
+          if (cursorX > mid)       prBody.scrollLeft = phX - mid;
+          else if (cursorX < 0)    prBody.scrollLeft = Math.max(0, phX);
+        }
       } else {
         prPh.style.display = 'none';
       }
@@ -969,6 +989,17 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
     const startX = e.clientX, startBeat = item.start;
     const snap = SEQ.arrSnap ? SEQ.arrSnapVal : (1 / BEAT_PX);
     const sourceLane  = block.parentElement;
+    // Group-move: if this block is part of a multi-selection of chord
+    // items, drag/drop affects all of them together.
+    const isChordItem = !isMidi && !isNote;
+    const groupItems  = (isChordItem && SEQ.selection.some(s => s.item === item))
+      ? SEQ.selection
+          .filter(s => {
+            const tr = trackById(s.trackId);
+            return tr && tr.kind === 'chord' && !Array.isArray(s.item.notes);
+          })
+          .map(s => ({ track: trackById(s.trackId), item: s.item, startBeat: s.item.start }))
+      : null;
     // Derive the owning track from the parent lane's data-track-id, falling
     // back to the legacy kind mapping for the hardcoded default lanes.
     const ownerTrack =
@@ -1008,29 +1039,66 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
     }
     const items = ownerTrack ? ownerTrack.items : (firstTrackOfKind((isMidi || isNote) ? 'free' : 'chord')?.items || []);
     let cloneCreated = false;
+    let cloneRefs    = []; // [{ track, item }] for the alt-drag duplicates
     let moved = false;
     let ghost = null;
+    let groupGhosts = []; // [{ el, gItem }] — one per follower in groupItems
+    let groupGhostLane = null;
     let targetLane = sourceLane;
     let targetTrack = ownerTrack;
+    let currentSnapped = startBeat;
+    const clearGroupGhosts = () => {
+      for (const g of groupGhosts) g.el.remove();
+      groupGhosts = [];
+      groupGhostLane = null;
+    };
     const onMove = (ev) => {
       _edgeAutoScroll(document.getElementById('seq-lane-wrap'), ev.clientX);
       const dx = ev.clientX - startX;
       if (!moved && Math.abs(dx) < 2) return;
-      const altCopy = e.altKey || ev.altKey;
+      // Use the live pointermove altKey only — `e.altKey` (pointerdown)
+      // would stick "true" after the user lets go of Alt mid-drag and
+      // prevent the clones from being removed.
+      const altCopy = ev.altKey;
       if (altCopy && !cloneCreated) {
-        const cloneItem = JSON.parse(JSON.stringify(item));
-        cloneItem.start = startBeat;
-        items.push(cloneItem);
-        items.sort((a, b) => a.start - b.start);
+        // Don't re-render during the drag — that would tear the dragged
+        // block out of the DOM and break pointer capture. Just push the
+        // clones into the arrays; onUp re-renders affected tracks.
+        if (groupItems) {
+          for (const g of groupItems) {
+            const cloneItem = JSON.parse(JSON.stringify(g.item));
+            cloneItem.start = g.startBeat;
+            g.track.items.push(cloneItem);
+            g.track.items.sort((a, b) => a.start - b.start);
+            cloneRefs.push({ track: g.track, item: cloneItem });
+          }
+        } else {
+          const cloneItem = JSON.parse(JSON.stringify(item));
+          cloneItem.start = startBeat;
+          items.push(cloneItem);
+          items.sort((a, b) => a.start - b.start);
+          cloneRefs.push({ track: ownerTrack, item: cloneItem });
+        }
         cloneCreated = true;
+      } else if (!altCopy && cloneCreated) {
+        // Alt released mid-drag — drop back to move-only by removing
+        // the clones we created. Originals keep moving with the cursor.
+        for (const r of cloneRefs) {
+          const idx = r.track.items.indexOf(r.item);
+          if (idx >= 0) r.track.items.splice(idx, 1);
+        }
+        cloneRefs = [];
+        cloneCreated = false;
+        block.classList.remove('copy-drag');
       }
       moved = true;
       block.classList.add('moving');
       if (altCopy) block.classList.add('copy-drag');
-      item.start = Math.max(0, startBeat + dx / BEAT_PX);
-      block.style.left = (item.start * BEAT_PX) + 'px';
-      if (sourceLane) sourceLane.style.minWidth = seqLaneWidth(items) + 'px';
-      const snapped = Math.max(0, Math.round(item.start / snap) * snap);
+      // Block stays put; only the ghost moves. item.start is committed
+      // from the ghost position on pointerup.
+      const liveStart = Math.max(0, startBeat + dx / BEAT_PX);
+      const snapped = Math.max(0, Math.round(liveStart / snap) * snap);
+      currentSnapped = snapped;
       // Cross-track drop targets — chord-blocks can go to other chord lanes
       // or to free lanes (converted to a clip on drop). Note-blocks and
       // free-clip blocks aren't routed through this seqMakeBlock path.
@@ -1052,15 +1120,78 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
         targetLane?.appendChild(ghost);
       }
       ghost.style.left = (snapped * BEAT_PX) + 'px';
+      // Multi-select ghosts — one per other selected chord item, all in
+      // the target lane at their group-relative position.
+      if (groupItems) {
+        const deltaBeats = snapped - startBeat;
+        if (groupGhostLane !== targetLane) {
+          clearGroupGhosts();
+          for (const gi of groupItems) {
+            if (gi.item === item) continue; // lead has its own ghost
+            const el = document.createElement('div');
+            el.className = 'seq-ghost';
+            el.style.width = (gi.item.beats * BEAT_PX) + 'px';
+            targetLane?.appendChild(el);
+            groupGhosts.push({ el, gItem: gi });
+          }
+          groupGhostLane = targetLane;
+        }
+        for (const g of groupGhosts) {
+          const ns = Math.max(0, g.gItem.startBeat + deltaBeats);
+          g.el.style.left = (ns * BEAT_PX) + 'px';
+        }
+      }
     };
     const onUp = (ev) => {
       block.removeEventListener('pointermove', onMove);
       block.removeEventListener('pointerup', onUp);
       block.classList.remove('moving');
       if (ghost) { ghost.remove(); ghost = null; }
+      clearGroupGhosts();
       if (moved) {
-        item.start = Math.max(0, Math.round(item.start / snap) * snap);
-        if (targetTrack && targetTrack !== ownerTrack) {
+        item.start = currentSnapped;
+        const groupTargetChord = groupItems && targetTrack && targetTrack.kind === 'chord';
+        const groupTargetFree  = groupItems && targetTrack && targetTrack.kind === 'free';
+        if (groupItems && (groupTargetChord || groupTargetFree || targetTrack === ownerTrack)) {
+          // Multi-move: apply lead item's beat-delta to every selected
+          // chord item, and (if target track changed) move/convert them
+          // all to the new track. Free target → bake notes into a clip;
+          // chord target → just move the chord item.
+          const deltaBeats = item.start - startBeat;
+          const affected = new Set();
+          for (const g of groupItems) {
+            const newStart = Math.max(0, Math.round((g.startBeat + deltaBeats) / snap) * snap);
+            g.item.start = newStart;
+            affected.add(g.track);
+            if (targetTrack && targetTrack !== g.track && (groupTargetChord || groupTargetFree)) {
+              const idx = g.track.items.indexOf(g.item);
+              if (idx >= 0) g.track.items.splice(idx, 1);
+              let placed = g.item;
+              if (groupTargetFree) {
+                const kr  = g.item.keyRoot !== undefined ? g.item.keyRoot : state.keys[state.currentTemplate];
+                const oct = g.item.octave  !== undefined ? g.item.octave  : state.octave;
+                const midis = chordToMidiNotes(kr, oct, g.item.interval, g.item.q);
+                placed = makeClip({
+                  start: newStart, beats: g.item.beats,
+                  label: g.item.label || '',
+                  notes: midis.map(m => ({ midi: m, label: midiNoteLabel(m), start: 0, beats: g.item.beats })),
+                });
+              }
+              targetTrack.items.push(placed);
+              // Update the selection's trackId so subsequent ops know
+              // the item's new home.
+              const sel = SEQ.selection.find(s => s.item === g.item);
+              if (sel) { sel.trackId = targetTrack.id; if (placed !== g.item) sel.item = placed; }
+              affected.add(targetTrack);
+            }
+          }
+          affected.forEach(t => {
+            if (!t) return;
+            t.items.sort((a, b) => a.start - b.start);
+            seqRenderTrack(t);
+            seqResyncTrack(t);
+          });
+        } else if (targetTrack && targetTrack !== ownerTrack) {
           const idx = items.indexOf(item);
           if (idx >= 0) items.splice(idx, 1);
           if (targetTrack.kind === 'free' && !isMidi && !isNote) {
@@ -1082,11 +1213,12 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
           seqRenderTrack(targetTrack);
           if (ownerTrack) seqResyncTrack(ownerTrack);
           seqResyncTrack(targetTrack);
+          seqAutoExtendLoop(item.start + item.beats);
         } else {
           items.sort((a, b) => a.start - b.start);
           if (ownerTrack) seqRenderTrack(ownerTrack);
+          seqAutoExtendLoop(item.start + item.beats);
         }
-        seqAutoExtendLoop(item.start + item.beats);
       } else if (ownerTrack) {
         seqSelectionToggle(ownerTrack, item, ev.ctrlKey || ev.metaKey || ev.shiftKey);
       }
@@ -1112,6 +1244,45 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
 }
 
 const SEQ_KEY = 'chord-pad-seq-v1';
+// Local-only UI preferences, kept separate from project content so
+// importing a project doesn't clobber your view-state (current key,
+// voicing, octave, …). Only goes to localStorage — never to JSON export.
+const UI_PREFS_KEY = 'chord-pad-ui-v1';
+function uiPrefsSave() {
+  try {
+    const blob = {
+      padKeys: { ...state.keys },
+      padTemplate: state.currentTemplate,
+      followArr: !!SEQ.followArr,
+      followPr:  !!SEQ.followPr,
+      chordviewTrackId: SEQ.focusedChordTrackId || null,
+      arrBeatPx: BEAT_PX,
+      prBeatPx:  PR_BEAT_PX,
+      chordviewPxPerBeat: (typeof CHORDVIEW_PX_PER_BEAT !== 'undefined') ? CHORDVIEW_PX_PER_BEAT : null,
+    };
+    localStorage.setItem(UI_PREFS_KEY, JSON.stringify(blob));
+  } catch (_) {}
+}
+function uiPrefsLoad() {
+  try {
+    const raw = localStorage.getItem(UI_PREFS_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    if (d.padKeys && typeof d.padKeys === 'object') {
+      for (const k in d.padKeys) {
+        if (k in state.keys && typeof d.padKeys[k] === 'number') state.keys[k] = d.padKeys[k];
+      }
+    }
+    if (typeof d.padTemplate === 'string' && d.padTemplate in state.keys) state.currentTemplate = d.padTemplate;
+    if (typeof d.followArr === 'boolean') SEQ.followArr = d.followArr;
+    if (typeof d.followPr  === 'boolean') SEQ.followPr  = d.followPr;
+    if (typeof d.chordviewTrackId === 'string') SEQ.focusedChordTrackId = d.chordviewTrackId;
+    if (typeof d.arrBeatPx === 'number' && d.arrBeatPx >= 8 && d.arrBeatPx <= 160) BEAT_PX = d.arrBeatPx;
+    if (typeof d.prBeatPx  === 'number' && d.prBeatPx  >= 8 && d.prBeatPx  <= 200) PR_BEAT_PX  = d.prBeatPx;
+    // chordview zoom is restored by chordview.js itself once it has
+    // declared its own CHORDVIEW_PX_PER_BEAT (loads after this file).
+  } catch (_) {}
+}
 
 // Produce the JSON-serializable snapshot of the whole project. Same shape
 // used by seqSave() (→ localStorage) and seqExportProject() (→ download).
@@ -2217,6 +2388,25 @@ function seqJumpToBeat(beat) {
   // does the reanchor, clears pending timers, and reschedules each
   // track from the new beat.
   if (SEQ.playing) seqLoopBaseChangedResync();
+  // Bring the new play position into view. Always (independent of the
+  // follow-cursor toggle) so clicking a nav button feels responsive —
+  // if the target is already on-screen we leave the scroll alone.
+  const wrap = document.getElementById('seq-lane-wrap');
+  if (wrap) {
+    const px = b * BEAT_PX;
+    if (px < wrap.scrollLeft + 20 || px > wrap.scrollLeft + wrap.clientWidth - 20) {
+      wrap.scrollLeft = Math.max(0, px - wrap.clientWidth * 0.25);
+    }
+  }
+  if (prBody) {
+    const { clip } = (typeof focusedClipObjects === 'function') ? focusedClipObjects() : {};
+    if (clip && b >= clip.start && b <= clip.start + clip.beats) {
+      const phX = (b - clip.start) * PR_BEAT_PX + prKbW();
+      if (phX < prBody.scrollLeft + 20 || phX > prBody.scrollLeft + prBody.clientWidth - 20) {
+        prBody.scrollLeft = Math.max(0, phX - prBody.clientWidth * 0.25);
+      }
+    }
+  }
 }
 
 // Maximum song-end beat across all tracks. Empty project → 0.
@@ -2647,7 +2837,21 @@ function seqApplyZoom(newBeatPx, anchorClientX) {
   const anchorBeat = wrap ? (wrap.scrollLeft + anchorX) / prevBeatPx : 0;
   seqUpdateBarLine();
   seqRenderAll();
-  if (wrap) wrap.scrollLeft = Math.max(0, anchorBeat * BEAT_PX - anchorX);
+  if (wrap) {
+    // Keep the LEFTMOST visible beat anchored so the user keeps seeing
+    // whatever was at the start of the view (incl. beat 0 when scrolled
+    // all the way left). Content under the cursor may shift right as
+    // the zoom widens it — that's the trade-off for "see more on the
+    // left". Optional cursor pull: 0 = pure leftmost anchor, 1 = pure
+    // cursor anchor. Currently zero.
+    const CURSOR_PULL = 0;
+    const leftmostScroll = wrap.scrollLeft * (BEAT_PX / prevBeatPx);
+    const cursorScroll   = anchorBeat * BEAT_PX - anchorX;
+    wrap.scrollLeft = Math.max(0,
+      leftmostScroll * (1 - CURSOR_PULL) + cursorScroll * CURSOR_PULL
+    );
+  }
+  if (typeof uiPrefsSave === 'function') uiPrefsSave();
 }
 
 // Piano-roll horizontal zoom — separate from arrangement zoom. Anchors on
@@ -2665,7 +2869,18 @@ function prApplyZoom(newBeatPx, anchorClientX) {
                 : (body ? body.clientWidth / 2 : 0);
   const anchorBeat = body ? (body.scrollLeft + anchorX - kb) / prev : 0;
   renderPianoRoll();
-  if (body) body.scrollLeft = Math.max(0, anchorBeat * PR_BEAT_PX + kb - anchorX);
+  if (body) {
+    // Same anchor strategy as the arrangement zoom: keep the LEFTMOST
+    // visible beat anchored so leftward content stays in view.
+    // CURSOR_PULL = 0 → pure leftmost anchor; 1 → pure cursor anchor.
+    const CURSOR_PULL = 0;
+    const leftmostScroll = body.scrollLeft * (PR_BEAT_PX / prev);
+    const cursorScroll   = anchorBeat * PR_BEAT_PX + kb - anchorX;
+    body.scrollLeft = Math.max(0,
+      leftmostScroll * (1 - CURSOR_PULL) + cursorScroll * CURSOR_PULL
+    );
+  }
+  if (typeof uiPrefsSave === 'function') uiPrefsSave();
 }
 function prUpdateGridVars() {
   document.documentElement.style.setProperty('--pr-bar-px',  (state.beatsPerBar * PR_BEAT_PX) + 'px');
