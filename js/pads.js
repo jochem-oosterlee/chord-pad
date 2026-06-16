@@ -131,7 +131,13 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
     badge.addEventListener('dragstart', (e) => {
       e.stopPropagation();
       if (!seqIsOpen()) { e.preventDefault(); return; }
-      const extLabel = `${formatChordRoot(root)}${qualityToHTML(chordSpec.ext)}`;
+      // Derive the label from the RESOLVED quality (extQ), not the badge's
+      // display glyph (chordSpec.ext). They can differ — e.g. the vi badge
+      // shows "7" but resolves to min7 — and using the glyph gave wrong
+      // labels like "A7" for an Am7. Falls in line with how seqLoad
+      // regenerates labels from `q` on every load.
+      const extGlyph = QUALITY_GLYPH[extQ] ?? chordSpec.ext;
+      const extLabel = `${formatChordRoot(root)}${qualityToHTML(extGlyph)}`;
       e.dataTransfer.effectAllowed = 'copy';
       const _extPayload = JSON.stringify({
         interval: chordSpec.interval,
@@ -159,7 +165,7 @@ function createPad(id, chordSpec, keyLabel, isStartHere) {
       playChord(id, chordSpec.interval, extQ);
       if (seqIsOpen()) seqStartTouchDrag(e.changedTouches[0], 'seq-lane', () => ({
         interval: chordSpec.interval, q: extQ, bassInterval: chordSpec.bassInterval,
-        label: `${formatChordRoot(root)}${qualityToHTML(chordSpec.ext)}`,
+        label: `${formatChordRoot(root)}${qualityToHTML(QUALITY_GLYPH[extQ] ?? chordSpec.ext)}`,
       }), () => releaseChord(id));
     }, { passive: false });
     badge.addEventListener('touchend', (e) => { e.stopPropagation(); releaseChord(id); });
