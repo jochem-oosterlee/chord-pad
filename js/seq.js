@@ -386,6 +386,14 @@ function dropChord(track, beat, data) {
       interval: data.interval, q: data.q, bassInterval: data.bassInterval, label: data.label,
       beats, start: beat,
       keyRoot: state.keys[state.currentTemplate], template: state.currentTemplate,
+      // Lock per-clip overrides at drop time so changing the global
+      // voicing / octave / bass knobs later doesn't retroactively
+      // rearrange sequenced chords. User can re-edit per clip via
+      // right-click → menu.
+      voicing:     state.voicing,
+      octave:      state.octave,
+      bassEnabled: state.bassEnabled,
+      bassOctave:  state.bassOctave,
     });
   } else {
     const midis = chordToMidiNotes(state.keys[state.currentTemplate], state.octave, data.interval, data.q);
@@ -729,9 +737,10 @@ function seqAnimatePlayhead() {
   const prBody = document.getElementById('seq-pianoroll-body');
   if (prBody && SEQ.pianoRollOpen) {
     const prPh = prBody.querySelector('.seq-playhead');
+    const { clip } = focusedClipObjects();
+    const insideClip = clip && SEQ.animBeat >= clip.start && SEQ.animBeat < clip.start + clip.beats;
     if (prPh) {
-      const { clip } = focusedClipObjects();
-      if (clip && SEQ.animBeat >= clip.start && SEQ.animBeat < clip.start + clip.beats) {
+      if (insideClip) {
         prPh.style.display = 'block';
         const phX = (SEQ.animBeat - clip.start) * PR_BEAT_PX + prKbW();
         prPh.style.left    = phX + 'px';
@@ -748,6 +757,24 @@ function seqAnimatePlayhead() {
         prPh.style.display = 'none';
       }
     }
+    // Light up keyboard rows whose notes are currently sounding in the
+    // focused clip — gives the piano-roll piano the same playback-feedback
+    // as the chord-pad keyboard.
+    let activeMidi = SEQ._prActiveMidi;
+    if (!activeMidi) activeMidi = SEQ._prActiveMidi = new Set();
+    activeMidi.clear();
+    if (insideClip && Array.isArray(clip.notes)) {
+      const rel = SEQ.animBeat - clip.start;
+      for (const n of clip.notes) {
+        const s = n.start || 0;
+        const e = s + (n.beats || 0);
+        if (rel >= s && rel < e) activeMidi.add(n.midi);
+      }
+    }
+    prBody.querySelectorAll('.pr-keyboard-row').forEach(row => {
+      const m = +row.dataset.midi;
+      row.classList.toggle('pr-key-active', activeMidi.has(m));
+    });
   }
   // Keep roll-mode playhead pinned to visible viewport (absolute child scrolls with content)
   {
@@ -926,7 +953,7 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
       const delta = snapped - item.start;
       item.start = snapped;
       item.beats = Math.max(snap, item.beats - delta);
-      seqAutoExtendLoop(item.start + item.beats);
+      if (isNote || isMidi) seqAutoExtendLoop(item.start + item.beats);
       if (ownerL) seqRenderTrack(ownerL);
     };
     resizeL.addEventListener('pointermove', onMove);
@@ -952,7 +979,7 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
       block.style.width = (item.beats * BEAT_PX) + 'px';
       refreshTicks(Math.round(item.beats));
       if (lane) lane.style.minWidth = seqLaneWidth(items) + 'px';
-      seqAutoExtendLoop(item.start + item.beats);
+      if (isNote || isMidi) seqAutoExtendLoop(item.start + item.beats);
     };
     const onUp = () => {
       resize.removeEventListener('pointermove', onMove);
@@ -960,7 +987,7 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
       item.beats = Math.max(snap, Math.round(item.beats / snap) * snap);
       block.style.width = (item.beats * BEAT_PX) + 'px';
       refreshTicks(item.beats);
-      seqAutoExtendLoop(item.start + item.beats);
+      if (isNote || isMidi) seqAutoExtendLoop(item.start + item.beats);
       seqSave();
     };
     resize.addEventListener('pointermove', onMove);
@@ -1009,13 +1036,15 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
       (isMidi ? firstTrackOfKind('free') : isNote ? null : firstTrackOfKind('chord'));
     // Audible preview routed through the owner track's output (MIDI or
     // in-app instrument) so what you hear matches sequencer playback.
-    {
+    // Skipped while playback is running — you're listening to the song.
+    if (!SEQ.playing) {
       const previewMidi = [];
       if (isMidi || isNote) {
         previewMidi.push(item.midi);
       } else {
-        const kr = item.keyRoot !== undefined ? item.keyRoot : state.keys[state.currentTemplate];
-        chordToMidiNotes(kr, state.octave, item.interval, item.q).forEach(m => previewMidi.push(m));
+        const kr  = item.keyRoot !== undefined ? item.keyRoot : state.keys[state.currentTemplate];
+        const oct = item.octave  !== undefined ? item.octave  : state.octave;
+        chordToMidiNotes(kr, oct, item.interval, item.q, item.voicing).forEach(m => previewMidi.push(m));
       }
       if (previewMidi.length && ownerTrack && ownerTrack.output === 'midi') {
         const port = midiPortById(ownerTrack.midiPortId);
@@ -1172,7 +1201,7 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
               if (groupTargetFree) {
                 const kr  = g.item.keyRoot !== undefined ? g.item.keyRoot : state.keys[state.currentTemplate];
                 const oct = g.item.octave  !== undefined ? g.item.octave  : state.octave;
-                const midis = chordToMidiNotes(kr, oct, g.item.interval, g.item.q);
+                const midis = chordToMidiNotes(kr, oct, g.item.interval, g.item.q, g.item.voicing);
                 placed = makeClip({
                   start: newStart, beats: g.item.beats,
                   label: g.item.label || '',
@@ -1200,7 +1229,7 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
             // Convert chord item → free clip with the chord's notes baked in.
             const kr = item.keyRoot !== undefined ? item.keyRoot : state.keys[state.currentTemplate];
             const oct = item.octave !== undefined ? item.octave : state.octave;
-            const midis = chordToMidiNotes(kr, oct, item.interval, item.q);
+            const midis = chordToMidiNotes(kr, oct, item.interval, item.q, item.voicing);
             const clip = makeClip({
               start: item.start, beats: item.beats,
               label: item.label || '',
@@ -1215,11 +1244,13 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
           seqRenderTrack(targetTrack);
           if (ownerTrack) seqResyncTrack(ownerTrack);
           seqResyncTrack(targetTrack);
-          seqAutoExtendLoop(item.start + item.beats);
+          // Loop bounds are user-controlled; only auto-extend for note
+          // / clip placements, never for chord items.
+          if (isNote || isMidi) seqAutoExtendLoop(item.start + item.beats);
         } else {
           items.sort((a, b) => a.start - b.start);
           if (ownerTrack) seqRenderTrack(ownerTrack);
-          seqAutoExtendLoop(item.start + item.beats);
+          if (isNote || isMidi) seqAutoExtendLoop(item.start + item.beats);
         }
       } else if (ownerTrack) {
         seqSelectionToggle(ownerTrack, item, ev.ctrlKey || ev.metaKey || ev.shiftKey);
@@ -1240,9 +1271,111 @@ function seqMakeBlock(item, idx, isNote, isMidi = false) {
         : firstTrackOfKind('chord');
       if (owner && typeof openChordView === 'function') openChordView(owner);
     });
+    // Right-click → small popover to override the per-clip voicing.
+    // Item-level voicing was captured at drop time; this lets the user
+    // change it without affecting the global voicing or other clips.
+    block.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      _showChordBlockMenu(e.clientX, e.clientY, item, block);
+    });
   }
 
   return block;
+}
+
+// Floating right-click menu for chord blocks — per-clip overrides for
+// voicing, octave and bass. Removes itself on outside-click or Esc.
+function _showChordBlockMenu(clientX, clientY, item, block) {
+  document.querySelectorAll('.seq-block-menu').forEach(m => m.remove());
+  const menu = document.createElement('div');
+  menu.className = 'seq-block-menu';
+  // Pre-build option lists.
+  const octaveOpts = ['<option value="">— global —</option>']
+    .concat([1,2,3,4,5,6,7,8].map(o => `<option value="${o}">${o}</option>`))
+    .join('');
+  // Bass merges enabled+octave into a single picker: '' = global,
+  // 'off' = disabled, '0'..'4' = enabled at that octave.
+  const bassOpts = '<option value="">— global —</option>'
+    + '<option value="off">off</option>'
+    + [0,1,2,3,4].map(o => `<option value="${o}">oct ${o}</option>`).join('');
+  menu.innerHTML = `
+    <div class="seq-block-menu-row">
+      <span class="seq-block-menu-label">Voicing</span>
+      <select class="seq-block-menu-voicing">
+        <option value="">— global —</option>
+        <option value="auto">Auto</option>
+        <option value="auto1">Auto 1st</option>
+        <option value="auto2">Auto 2nd</option>
+        <option value="high">High</option>
+        <option value="low">Low</option>
+        <option value="spread">Spread</option>
+        <option value="root">Root</option>
+      </select>
+    </div>
+    <div class="seq-block-menu-row">
+      <span class="seq-block-menu-label">Octave</span>
+      <select class="seq-block-menu-octave">${octaveOpts}</select>
+    </div>
+    <div class="seq-block-menu-row">
+      <span class="seq-block-menu-label">Bass</span>
+      <select class="seq-block-menu-bass">${bassOpts}</select>
+    </div>
+  `;
+  document.body.appendChild(menu);
+  // Position; flip if it'd overflow the viewport.
+  const r = menu.getBoundingClientRect();
+  let left = clientX;
+  let top  = clientY;
+  if (left + r.width  > window.innerWidth  - 8) left = window.innerWidth  - r.width  - 8;
+  if (top  + r.height > window.innerHeight - 8) top  = window.innerHeight - r.height - 8;
+  menu.style.left = left + 'px';
+  menu.style.top  = top  + 'px';
+  const selV = menu.querySelector('.seq-block-menu-voicing');
+  const selO = menu.querySelector('.seq-block-menu-octave');
+  const selB = menu.querySelector('.seq-block-menu-bass');
+  selV.value = item.voicing ?? '';
+  selO.value = item.octave  != null ? String(item.octave) : '';
+  selB.value = (item.bassEnabled === false)
+    ? 'off'
+    : (item.bassOctave != null ? String(item.bassOctave) : '');
+  const onChange = () => {
+    seqCheckpoint();
+    if (selV.value === '') delete item.voicing; else item.voicing = selV.value;
+    if (selO.value === '') delete item.octave;  else item.octave  = +selO.value;
+    if (selB.value === '') {
+      delete item.bassEnabled; delete item.bassOctave;
+    } else if (selB.value === 'off') {
+      item.bassEnabled = false;
+      delete item.bassOctave;
+    } else {
+      item.bassEnabled = true;
+      item.bassOctave  = +selB.value;
+    }
+    seqSave();
+    const laneEl = block.parentElement;
+    const owner  = (laneEl && laneEl.dataset && laneEl.dataset.trackId)
+      ? trackById(laneEl.dataset.trackId) : null;
+    if (owner) {
+      seqRenderTrack(owner);
+      seqResyncTrack(owner);
+    }
+  };
+  selV.addEventListener('change', onChange);
+  selO.addEventListener('change', onChange);
+  selB.addEventListener('change', onChange);
+  setTimeout(() => selV.focus(), 0);
+  const close = () => {
+    menu.remove();
+    document.removeEventListener('mousedown', onOutside, true);
+    document.removeEventListener('keydown',   onKey,     true);
+  };
+  const onOutside = (ev) => { if (!menu.contains(ev.target)) close(); };
+  const onKey     = (ev) => { if (ev.key === 'Escape') close(); };
+  setTimeout(() => {
+    document.addEventListener('mousedown', onOutside, true);
+    document.addEventListener('keydown',   onKey,     true);
+  }, 0);
 }
 
 const SEQ_KEY = 'chord-pad-seq-v1';
@@ -1261,6 +1394,16 @@ function uiPrefsSave() {
       arrBeatPx: BEAT_PX,
       prBeatPx:  PR_BEAT_PX,
       chordviewPxPerBeat: (typeof CHORDVIEW_PX_PER_BEAT !== 'undefined') ? CHORDVIEW_PX_PER_BEAT : null,
+      // Keyboard's own instrument + synth + output routing — kept local
+      // so a project import doesn't change the user's keyboard sound.
+      keyboardTrack: state.keyboardTrack ? {
+        instrument:  state.keyboardTrack.instrument,
+        output:      state.keyboardTrack.output,
+        channel:     state.keyboardTrack.channel,
+        midiPortId:  state.keyboardTrack.midiPortId,
+        volume:      state.keyboardTrack.volume,
+        synth:       state.keyboardTrack.synth,
+      } : null,
     };
     localStorage.setItem(UI_PREFS_KEY, JSON.stringify(blob));
   } catch (_) {}
@@ -1281,6 +1424,15 @@ function uiPrefsLoad() {
     if (typeof d.chordviewTrackId === 'string') SEQ.focusedChordTrackId = d.chordviewTrackId;
     if (typeof d.arrBeatPx === 'number' && d.arrBeatPx >= 8 && d.arrBeatPx <= 160) BEAT_PX = d.arrBeatPx;
     if (typeof d.prBeatPx  === 'number' && d.prBeatPx  >= 8 && d.prBeatPx  <= 200) PR_BEAT_PX  = d.prBeatPx;
+    if (d.keyboardTrack && state.keyboardTrack) {
+      const k = d.keyboardTrack;
+      if (typeof k.instrument === 'string') state.keyboardTrack.instrument = k.instrument;
+      if (k.output === 'instrument' || k.output === 'midi') state.keyboardTrack.output = k.output;
+      if (typeof k.channel === 'number') state.keyboardTrack.channel = k.channel;
+      if (typeof k.midiPortId === 'string') state.keyboardTrack.midiPortId = k.midiPortId;
+      if (typeof k.volume === 'number') state.keyboardTrack.volume = k.volume;
+      if (k.synth && typeof k.synth === 'object') state.keyboardTrack.synth = { ...state.keyboardTrack.synth, ...k.synth };
+    }
     // chordview zoom is restored by chordview.js itself once it has
     // declared its own CHORDVIEW_PX_PER_BEAT (loads after this file).
   } catch (_) {}
@@ -1316,6 +1468,10 @@ function seqProjectSnapshot() {
 }
 function seqSave() {
   try { localStorage.setItem(SEQ_KEY, JSON.stringify(seqProjectSnapshot())); } catch (_) {}
+  // Mirror to UI prefs so things like the keyboard's virtual track —
+  // which isn't part of the project snapshot — also persist whenever
+  // the modal calls seqSave() after a change.
+  uiPrefsSave();
 }
 
 // Trigger a browser download of the current project as a .json file.
@@ -1374,12 +1530,35 @@ function seqImportProject(d) {
   SEQ.selection = [];
   if (SEQ.prSelection) SEQ.prSelection.clear();
   SEQ.focusedClip = null;
+  _dedupClipIds();
   // Rebuild UI from scratch + persist.
   if (typeof rebuildTracksUI === 'function') rebuildTracksUI();
   if (typeof seqRenderAll === 'function') seqRenderAll();
   if (typeof renderPianoRoll === 'function') renderPianoRoll();
   seqSave();
   return true;
+}
+
+// Walk every free-track clip and rewrite any duplicate / missing id
+// to a fresh one. Legacy projects (or bugs in earlier versions) could
+// leave two clips sharing one id — which makes `document.querySelector`
+// pick the wrong block during drag, and makes double-click-to-open-in-
+// piano-roll open the wrong clip. Returns true if any id was rewritten.
+function _dedupClipIds() {
+  const seen = new Set();
+  let fixed = false;
+  for (const tr of SEQ.tracksList) {
+    if (tr.kind !== 'free') continue;
+    for (const clip of tr.items) {
+      if (!clip || typeof clip !== 'object') continue;
+      if (!clip.id || seen.has(clip.id)) {
+        clip.id = newClipId();
+        fixed = true;
+      }
+      seen.add(clip.id);
+    }
+  }
+  return fixed;
 }
 
 function seqLoad() {
@@ -1460,6 +1639,11 @@ function seqInitTrackSynths() {
   for (const tr of SEQ.tracksList) {
     const m = /^tr-(\d+)$/.exec(tr.id || '');
     if (m) _trackIdCounter = Math.max(_trackIdCounter, parseInt(m[1], 10));
+  }
+  // Defensive: ensure every free-track clip has a unique id.
+  const fixed = _dedupClipIds();
+  if (fixed) {
+    try { localStorage.setItem(SEQ_KEY, JSON.stringify(seqProjectSnapshot())); } catch (_) {}
   }
   // Migrate stored chord labels: items dropped before a QUALITY_GLYPH
   // rename (e.g. `Maj7` → `maj7`) keep their old label string in
@@ -1737,7 +1921,7 @@ function seqMakeRollNote(item, idx, topMidi, botMidi, cfg) {
     }
     e.preventDefault();
     block.setPointerCapture(e.pointerId);
-    if (state.audioEnabled) {
+    if (state.audioEnabled && !SEQ.playing) {
       // Use the owning track's instrument if we can resolve it from the lane.
       const laneEl = block.parentElement;
       const ot    = (laneEl && laneEl.dataset && laneEl.dataset.trackId && trackById(laneEl.dataset.trackId)) || null;
@@ -1958,9 +2142,14 @@ function seqTickChordTrack(track, now, bd, horizon) {
     const onDelay  = Math.max(0, (t - now) * 1000);
     const offDelay = Math.max(0, (t + dur * 0.95 - now) * 1000);
     const shift    = item.semitoneShift || 0;
-    const notes    = chordToMidiNotes(item.keyRoot, state.octave, item.interval, item.q).map(n => Math.max(0, Math.min(127, n + shift)));
+    const itemOct  = item.octave !== undefined ? item.octave : state.octave;
+    const notes    = chordToMidiNotes(item.keyRoot, itemOct, item.interval, item.q, item.voicing).map(n => Math.max(0, Math.min(127, n + shift)));
     const bassInt  = item.bassInterval !== undefined ? item.bassInterval : item.interval;
-    const bassNote = state.bassEnabled ? (state.bassOctave + 1) * 12 + (item.keyRoot + bassInt) % 12 : null;
+    // Per-clip overrides for the bass layer. `bassEnabled` and
+    // `bassOctave` on the item win over the global state when set.
+    const bassEnabled = item.bassEnabled ?? state.bassEnabled;
+    const bassOct     = item.bassOctave  ?? state.bassOctave;
+    const bassNote    = bassEnabled ? (bassOct + 1) * 12 + (item.keyRoot + bassInt) % 12 : null;
 
     const audible   = seqTrackAudible(track);
     const vel       = seqTrackVel(track, state.velocity);
@@ -2157,9 +2346,16 @@ function seqAdvanceTrackPending(track, bd) {
 // Generic per-track resync: recomputes pendingIdx / pendingTime / cycleStart
 // so the next note plays at the right time relative to the current clock.
 // For free tracks, indexing is over the flattened note list rather than clips.
-function seqResyncTrack(track) {
+function seqResyncTrack(track, opts) {
   if (!SEQ.playing || !track) return;
   invalidateFreeTrackFlat(track);
+  // jumpInto: include items that started before `now` but haven't
+  // ended yet — set by seqJumpToBeat so a cursor jump INTO a clip
+  // fires it (clamped to 0). For every other path (edits, drops,
+  // drags, resizes) we only schedule items whose start is still
+  // ahead — touching a note/clip during playback never produces a
+  // mid-way attack.
+  const jumpInto = !!(opts && opts.jumpInto);
   const ctxNow = getAudioCtx().currentTime;
   // Cancel any events that haven't started yet for this track so we
   // don't double-fire when the upcoming tick reschedules. Currently-
@@ -2178,7 +2374,11 @@ function seqResyncTrack(track) {
   for (let i = 0; i < list.length; i++) {
     if (!seqItemInRange(list[i])) continue;
     const t = cycleStart + (list[i].start - ls) * bd;
-    if (t > now) {
+    const itemBeats = list[i].beats || 0;
+    const match = jumpInto
+      ? (t + itemBeats * bd > now)
+      : (t > now);
+    if (match) {
       track.cycleStart  = cycleStart;
       track.pendingIdx  = i;
       track.pendingTime = t;
@@ -2195,7 +2395,7 @@ function seqResyncTrack(track) {
   seqResyncAnimLoop();
 }
 
-function seqResyncAll() { for (const t of SEQ.tracksList) seqResyncTrack(t); }
+function seqResyncAll(opts) { for (const t of SEQ.tracksList) seqResyncTrack(t, opts); }
 // Re-anchor playStartTime so that the current visual beat (SEQ.animBeat) maps
 // exactly to the current audio time under the *current* tempo + loop bounds.
 // Without this, any change to tempo or loop-bounds mid-play makes the
@@ -2225,7 +2425,7 @@ function seqReanchorPlayStart() {
 // Throttled resync — call freely from pointermove handlers; only does the
 // expensive seqResyncTrack work every ~80ms per track, so playback follows
 // drag/resize edits without 60Hz reschedule churn.
-function seqResyncTrackThrottled(track) {
+function seqResyncTrackThrottled(track, opts) {
   if (!track || !SEQ.playing) return;
   // ALWAYS invalidate the flat-notes cache — it's cheap (sets a flag)
   // and otherwise the scheduler's 25 ms ticks between throttled resyncs
@@ -2235,17 +2435,17 @@ function seqResyncTrackThrottled(track) {
   const now = performance.now();
   if (track._lastResyncT && now - track._lastResyncT < 80) return;
   track._lastResyncT = now;
-  seqResyncTrack(track);
+  seqResyncTrack(track, opts);
 }
 // Call when something that affects the global time-base changed (loop bounds,
 // tempo): re-anchor, kill stale scheduled timers, then reschedule all tracks.
-function seqLoopBaseChangedResync() {
+function seqLoopBaseChangedResync(opts) {
   if (!SEQ.playing) return;
   seqReanchorPlayStart();
   for (const t of SEQ.tracksList) invalidateFreeTrackFlat(t);
   SEQ.pendingTimers.forEach(id => clearTimeout(id));
   SEQ.pendingTimers.clear();
-  seqResyncAll();
+  seqResyncAll(opts);
   // Metronome state is tied to loop bounds + tempo, so reset it on any
   // base-change so accents land at the right beats from now on.
   metroHalt();
@@ -2291,7 +2491,16 @@ function seqInitPlay(t0) {
   for (const tr of SEQ.tracksList) {
     invalidateFreeTrackFlat(tr);
     const list = tr.kind === 'free' ? freeTrackFlatNotes(tr) : tr.items;
-    const fi = seqFindNextInRange(list, 0);
+    // Find the first item whose start is at-or-after the requested
+    // starting beat (clamped to the loop range when looping). Without
+    // this, seqFindNextInRange(list, 0) would point at item index 0,
+    // and any items before wantStart would fire at t0 (all at once).
+    let fi = -1;
+    for (let i = 0; i < list.length; i++) {
+      const it = list[i];
+      if (SEQ.loop && (it.start < SEQ.loopStart || it.start >= SEQ.loopEnd)) continue;
+      if (it.start >= wantStart) { fi = i; break; }
+    }
     tr.cycleStart  = t0 - offsetFromStart * bd;
     tr.pendingIdx  = fi >= 0 ? fi : 0;
     tr.pendingTime = fi >= 0 ? t0 + (list[fi].start - ls - offsetFromStart) * bd : Infinity;
@@ -2379,7 +2588,12 @@ function seqJumpToBeat(beat) {
         }
       });
     }
-    for (const tr of SEQ.tracksList) tr._scheduled = null;
+    // NOTE: do NOT null `tr._scheduled` here. seqResyncTrack (called
+    // below via seqLoopBaseChangedResync) calls _seqCancelFuture which
+    // walks the existing ledger to send note-off at the same timestamp
+    // for any future-queued MIDI note-ons (you can't unqueue them from
+    // the OS driver). Nulling first means those queued notes still fire
+    // at their original times — which is the "50 notes at once" bug.
   }
   if (typeof resetChordViewLoopIter === 'function') resetChordViewLoopIter();
   // Arrangement playheads (full-height ones + per-lane ones).
@@ -2405,7 +2619,7 @@ function seqJumpToBeat(beat) {
   // audio keeps ticking from where it was. seqLoopBaseChangedResync
   // does the reanchor, clears pending timers, and reschedules each
   // track from the new beat.
-  if (SEQ.playing) seqLoopBaseChangedResync();
+  if (SEQ.playing) seqLoopBaseChangedResync({ jumpInto: true });
   // Bring the new play position into view. Always (independent of the
   // follow-cursor toggle) so clicking a nav button feels responsive —
   // if the target is already on-screen we leave the scroll alone.

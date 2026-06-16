@@ -47,6 +47,18 @@
     <button class="tab" data-tab="minor-harmony">Minor Harmony</button>
     <button class="tab" data-tab="scale-chords">Scale Chords</button>
     <button class="tab" data-tab="chord-library">Chord Library</button>
+    <label class="tab-voicing-wrap" title="Voicing">
+      <i data-lucide="list-music"></i>
+      <select class="tab-voicing-select" id="tab-voicing-select">
+        <option value="auto">Auto</option>
+        <option value="auto1">Auto 1st</option>
+        <option value="auto2">Auto 2nd</option>
+        <option value="high">High</option>
+        <option value="low">Low</option>
+        <option value="spread">Spread</option>
+        <option value="root">Root</option>
+      </select>
+    </label>
     <button class="tab tab-settings" id="chord-pad-settings-btn" title="Chord Pad settings"><i data-lucide="sliders-horizontal"></i></button>
   </nav>
 
@@ -307,6 +319,7 @@
         <span class="chord-analyzer-main" id="chord-analyzer-main"></span>
         <span class="chord-analyzer-alts" id="chord-analyzer-alts"></span>
       </div>
+      <button class="kb-settings-btn" id="kb-settings-btn" title="Keyboard settings"><i data-lucide="sliders-horizontal"></i></button>
     </div>
     <div class="kb-wrap">
       <div class="kb-container" id="kb-container"></div>

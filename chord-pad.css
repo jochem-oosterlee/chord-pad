@@ -314,12 +314,46 @@ option { background: var(--bg); color: var(--text); }
 .tab.active { color: var(--text); background: rgba(255,255,255,0.04); }
 .tab.tab-settings {
   padding: 12px 14px;
-  margin-left: auto;
   border-right: 0;
   border-left: 1px solid var(--panel-edge);
 }
 .tab.tab-settings .lucide { width: 14px; height: 14px; }
 .tab.tab-settings::after { display: none; }
+/* Voicing dropdown lives in the tab row for quick access. Pushed to
+   the right with margin-left:auto so it sits next to the settings
+   button. Styled to match the chord-length wrap in the sequencer
+   toolbar — single bordered pill, icon on the left with a divider,
+   select with no extra chrome on the right. */
+.tab-voicing-wrap {
+  margin-left: auto;
+  margin-right: 8px;
+  align-self: center;
+  display: inline-flex; align-items: center; gap: 0;
+  height: 24px;
+  padding: 0 0 0 6px;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 4px;
+  color: var(--text-dim);
+  background: none;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+.tab-voicing-wrap:hover { border-color: rgba(255,255,255,0.4); color: var(--text); }
+.tab-voicing-wrap > [data-lucide],
+.tab-voicing-wrap svg { width: 13px; height: 13px; color: inherit; pointer-events: none; }
+.tab-voicing-select {
+  border: 0 !important;
+  background: none !important;
+  padding: 0 6px !important;
+  margin: 0 !important;
+  height: 100%;
+  color: inherit;
+  font-size: 11px;
+  min-width: 0;
+  cursor: pointer;
+}
+.tab-voicing-select:focus { outline: none; }
 .tab.active::after {
   content: ''; position: absolute;
   bottom: -1px; left: 0; right: 0;
@@ -1614,6 +1648,19 @@ input[type="range"]::-moz-range-thumb {
   gap: 16px;
   flex-wrap: wrap;
 }
+.kb-settings-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgba(255,255,255,0.40);
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.kb-settings-btn:hover { color: rgba(255,255,255,0.85); border-color: rgba(255,255,255,0.18); }
+.kb-settings-btn [data-lucide] { width: 14px; height: 14px; }
 /* Chord analyzer — live read-out of whatever notes are currently held
    on the keyboard (mouse or external MIDI). Shows the detected name(s). */
 .chord-analyzer {
@@ -2694,6 +2741,13 @@ body.hide-chordview .seq-chordview { display: none !important; }
   color: transparent;
   z-index: 2;
 }
+.pr-keyboard-row.pr-key-active {
+  background: rgba(51, 153, 255, 0.55);
+  box-shadow: 0 0 6px rgba(51, 153, 255, 0.6);
+}
+.pr-keyboard-row.black.pr-key-active {
+  background: rgba(51, 153, 255, 0.75);
+}
 .pr-empty {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
   color: rgba(255,255,255,0.4);
@@ -3527,6 +3581,40 @@ body.hide-chordview .seq-chordview { display: none !important; }
   color: var(--text);
   white-space: nowrap;
 }
+/* Floating right-click menu for chord blocks. */
+.seq-block-menu {
+  position: fixed;
+  background: #16181d;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  padding: 8px 10px;
+  z-index: 300;
+  display: flex; flex-direction: column; gap: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  font-size: 11px;
+  min-width: 160px;
+}
+.seq-block-menu-row {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.seq-block-menu-label {
+  font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-faint, rgba(255,255,255,0.45));
+}
+.seq-block-menu select {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--panel-edge);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 11px;
+  min-width: 0;
+  width: 100%;
+}
+.seq-block-menu select:hover { border-color: var(--accent); }
 .seq-note-block {
   padding: 2px 2px 2px 3px;
   min-width: 0;

@@ -40,6 +40,16 @@ SEQ.pianoRollOpen = true;
 
 function focusedClipObjects() {
   if (!SEQ.focusedClip) return { track: null, clip: null };
+  // Prefer direct refs (set by openPianoRoll) so duplicate clip ids
+  // never cause `find()` to return the wrong clip. Only fall back to
+  // id-based lookup if the refs went stale (e.g. project reload).
+  const refT = SEQ.focusedClip._trackRef;
+  const refC = SEQ.focusedClip._clipRef;
+  if (refT && refC
+      && SEQ.tracksList.indexOf(refT) >= 0
+      && refT.items.indexOf(refC) >= 0) {
+    return { track: refT, clip: refC };
+  }
   const track = trackById(SEQ.focusedClip.trackId);
   if (!track) return { track: null, clip: null };
   const clip = track.items.find(c => c.id === SEQ.focusedClip.clipId);
@@ -69,7 +79,12 @@ function togglePianoRoll() {
 
 function openPianoRoll(track, clip) {
   if (!track || track.kind !== 'free' || !clip) return;
-  SEQ.focusedClip = { trackId: track.id, clipId: clip.id };
+  // Store the direct refs alongside the ids — focusedClipObjects
+  // prefers refs so duplicate clip ids don't open the wrong one.
+  SEQ.focusedClip = {
+    trackId: track.id, clipId: clip.id,
+    _trackRef: track, _clipRef: clip,
+  };
   // Re-center C4 on every open — clear the init flag so renderPianoRoll
   // re-applies the scrollTop.
   const body = document.getElementById('seq-pianoroll-body');
@@ -77,7 +92,13 @@ function openPianoRoll(track, clip) {
   showPianoRoll();
   refreshPianoRollTitle();
   document.querySelectorAll('.seq-clip-block.focused').forEach(el => el.classList.remove('focused'));
-  document.querySelector(`.seq-clip-block[data-clip-id="${clip.id}"]`)?.classList.add('focused');
+  // Add .focused via lane + items-index so duplicate clip ids don't
+  // highlight the wrong block.
+  const lane = document.querySelector(`.seq-lane[data-track-id="${track.id}"]`);
+  if (lane) {
+    const idx = track.items.indexOf(clip);
+    if (idx >= 0) lane.querySelectorAll(':scope > .seq-clip-block')[idx]?.classList.add('focused');
+  }
 }
 
 function closePianoRoll() { hidePianoRoll(); }
@@ -155,6 +176,9 @@ function prSetTool(tool) {
 }
 function prPreviewMidi(track, midi) {
   if (!track) return;
+  // No previews while playback is running — the user is listening
+  // to the song, not auditioning notes.
+  if (SEQ.playing) return;
   const inst = track.instrument || state.instrument;
   const play = () => {
     const node = startAudioNote(midi, state.velocity, null, null, inst);
@@ -675,8 +699,9 @@ function _prMakeNote(track, clip, note, idx, hi) {
     seqCheckpoint();
     // Audible preview while the note is held — routes through the same
     // path as playback (in-app instrument or external MIDI) so you hear
-    // exactly what this note will sound like at playback time.
-    if (track) {
+    // exactly what this note will sound like at playback time. Skipped
+    // during playback (you're listening to the song, not the note).
+    if (track && !SEQ.playing) {
       if (track.output === 'midi') {
         const port = midiPortById(track.midiPortId);
         const vel  = seqTrackVel(track, state.velocity);
@@ -770,23 +795,53 @@ function _prMakeNote(track, clip, note, idx, hi) {
         else effDx = 0;
       }
       const dBeat = effDx / PR_BEAT_PX;
-      // Ctrl/Cmd snaps the vertical step to whole octaves — so dragging
-      // (or alt-cloning) a note up/down jumps in 12-semitone increments.
+      // Ctrl/Cmd has two modes:
+      //  - Single pitch in selection → snap vertical to whole octaves.
+      //  - Multiple distinct pitches → cycle chord inversions. Each
+      //    octave-step up moves the lowest remaining note up by one
+      //    octave, so a CEG selection becomes EGC, then GCE, then a
+      //    full octave up. Going down rotates the highest note down.
       const octaveSnap = ev.ctrlKey || ev.metaKey;
-      const dRow  = octaveSnap
-        ? Math.round(effDy / PR_ROW_H / 12) * 12
-        : Math.round(effDy / PR_ROW_H);
-      // Clamp the group so no member goes below start=0 or out of pitch range.
+      const distinctMidiCount = (() => {
+        const s = new Set();
+        for (const g of group) s.add(g.origMidi);
+        return s.size;
+      })();
+      const invMode = octaveSnap && distinctMidiCount >= 2;
+      // Up on the mouse (effDy < 0) = up in pitch = positive step.
+      const invStep = invMode ? -Math.round(effDy / PR_ROW_H / 12) : 0;
+      const dRow = invMode
+        ? 0
+        : (octaveSnap
+            ? Math.round(effDy / PR_ROW_H / 12) * 12
+            : Math.round(effDy / PR_ROW_H));
       let beatShift = dBeat;
       let rowShift = dRow;
       for (const g of group) {
         beatShift = Math.max(beatShift, -g.origStart);
-        rowShift  = Math.min(rowShift, g.origMidi - 0);
-        rowShift  = Math.max(rowShift, g.origMidi - 127);
+        if (!invMode) {
+          rowShift  = Math.min(rowShift, g.origMidi - 0);
+          rowShift  = Math.max(rowShift, g.origMidi - 127);
+        }
       }
+      // For inversion mode pre-sort by origMidi so each note's shift
+      // depends on its rank in the chord.
+      let sortedRank = null;
+      if (invMode) {
+        const sorted = [...group].sort((a, b) => a.origMidi - b.origMidi);
+        sortedRank = new Map();
+        sorted.forEach((g, i) => sortedRank.set(g, i));
+      }
+      const N = group.length;
       for (const g of group) {
+        let perNote = -rowShift;
+        if (invMode) {
+          const i = sortedRank.get(g);
+          // shift_i(K) = floor((K + N - 1 - i) / N) * 12
+          perNote = Math.floor((invStep + N - 1 - i) / N) * 12;
+        }
         g.n.start = g.origStart + beatShift;
-        g.n.midi  = g.origMidi - rowShift;
+        g.n.midi  = Math.max(0, Math.min(127, g.origMidi + perNote));
         if (g.el) {
           g.el.style.left = (g.n.start * PR_BEAT_PX + prKbW()) + 'px';
           g.el.style.top  = ((body._prHi - g.n.midi) * PR_ROW_H) + 'px';

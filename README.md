@@ -194,6 +194,10 @@ if (s._override?.filterFreq) {
 
 The flag is set in the knob handlers (`setOverride(true)` on pointerdown/wheel, `setOverride(false)` on dblclick which clears + resets to preset default). Switching instruments clears all `_override` flags.
 
+### Reading SF2 defaults into the knobs
+
+When the user picks an SF2 instrument, the knobs are positioned so they reflect what the soundfont actually plays internally. `readSf2Defaults(sf2, presetNumber)` ([audio.js:818-846](js/audio.js#L818)) reads the preset's `AttackVolEnv` / `DecayVolEnv` / `SustainVolEnv` / `ReleaseVolEnv` / `InitialFilterFc` / `InitialFilterQ` generators for a representative MIDI note (C4 with fallbacks), converts to the same linear units used by the preset object (seconds, Hz, 0..1), and the chord-pad and track-FX instrument-change handlers overlay these onto `state.synth` / `track.synth` after applying the generic baseline. Combined with the `_override = {}` reset on the same change, the knob positions and the audio engine agree on the starting state of the preset.
+
 Tremolo and vibrato are different: **always additive**. The SF2 LFO runs as designed (so the Rhodes wobble survives at slider 0), and the user's slider value is added on top. This is by intent — there's no good "remove preset wobble" affordance in modern DAWs either.
 
 ### Global FX bus
@@ -319,16 +323,23 @@ The event ledger ([seq.js:1914-1951](js/seq.js#L1914)) stores `{ startAt, endAt,
 
 ### Cursor jump (`seqJumpToBeat`)
 
-The user clicking a new cursor position needs a hard-cut, not a fade ([seq.js:2351](js/seq.js#L2351)):
+The user clicking a new cursor position needs a hard-cut, not a fade ([seq.js:2541](js/seq.js#L2541)):
 
 1. Direct `oscillator.stop(ctx.currentTime)` on every active node (skip the 500 ms release envelope).
 2. MIDI all-notes-off on every port any track might use (CC#123 on channels 0–15).
-3. Clear `track._scheduled` so pending notes don't fire at old fire times.
+3. `_seqCancelFuture` for every track (selective cancel — keep ringing notes, drop pending ones).
 4. Reanchor `playStartTime` to the new beat via `seqReanchorPlayStart`.
-5. Resync every track via `seqLoopBaseChangedResync` (recompute `cycleStart` / `pendingIdx` / `pendingTime`).
+5. Resync every track via `seqLoopBaseChangedResync({ jumpInto: true })`.
 6. Scroll arrangement + piano-roll viewport to bring the new position into view.
 
-The cursor-jump path is also re-used after loop boundary changes and on manual scrub.
+### Resync modes: strict-future vs jumpInto
+
+`seqResyncTrack(track, opts)` has two modes for picking the next item to schedule:
+
+- **Default — strict-future** (`t > now`). Used by every edit/drop/drag/resize. A clip dropped right on top of the playhead does NOT play in the current cycle; it waits for the next loop iteration. Touching a clip during playback never produces a mid-way attack.
+- **`{ jumpInto: true }`** (`t + itemBeats × bd > now`). Used only by `seqJumpToBeat` (via `seqLoopBaseChangedResync`). Items that started before the jump beat but haven't ended yet still fire, with `onDelay` clamped to 0 — that's what makes "click into a clip and hear it" work for cursor jumps.
+
+The default flipped during development. Previously every resync was loose (jumpInto-style), so edits during playback caused audible re-attacks at the playhead. Now playback is silent until the user clicks an explicit preview UI or jumps the cursor.
 
 ### Undo
 
@@ -349,16 +360,16 @@ Two localStorage blobs ([seq.js:1252-1287](js/seq.js#L1252)):
 
 The split exists because UI prefs are personal (what view did I leave open) while project content is the song itself. A teammate importing a `.json` project shouldn't end up zoomed where you were zoomed.
 
-### Drag-and-drop for chord clips
+### Drag-and-drop for chord clips and free clips
 
-The arrangement supports rich drag patterns ([seq.js:1019-1230](js/seq.js#L1019)):
+The arrangement supports rich drag patterns ([seq.js:1019-1230](js/seq.js#L1019), [chord-pad.js:4481-4630](js/chord-pad.js#L4481)):
 
 - **Simple drag** — move a single chord block within its track or to another chord track. Ghost preview, snap to grid.
-- **Multi-select drag** — select N chord clips (marquee or shift-click), drag any one → the rest move with the same delta. Ghost-per-clip during the drag.
-- **Cross-track drag** — chord track → chord track (move), or chord track → free track (convert to clip with notes baked in via `chordToMidiNotes`).
-- **Alt-drag clone** — Alt held = clone instead of move. The originals stay put, ghosts (= clones) follow the cursor.
+- **Multi-select drag** — select N clips (marquee or shift-click), drag any one → the rest move with the same delta. Ghost-per-clip during the drag.
+- **Cross-track drag** — chord track → chord track (move), or chord track → free track (convert to clip with notes baked in via `chordToMidiNotes`). Free→free across lanes too.
+- **Alt-drag clone** — Alt held = clone instead of move. The originals stay put, ghosts (= clones) follow the cursor. On release, fresh clones are spawned at the drop positions with fresh ids.
 - **Live Alt release** — releasing Alt mid-drag removes the clones and switches to plain move. Pressing Alt again re-clones. Uses `ev.altKey` (live state from pointermove), not `e.altKey` (frozen at pointerdown).
-- **Block-stays, ghost-moves** — the lead block doesn't visually move during the drag; only ghosts do. Commits on release. Avoids the laggy "block trailing cursor" feel.
+- **Block-stays, ghost-moves** — chord blocks AND free clips both keep their `item.start` pinned at the original position during the drag; only the ghost moves. On drop, `item.start` is committed from the ghost's snapped position. Mutating `item.start` live caused the scheduler to re-fire the clip every time the drag crossed the playhead — switching to ghost-only fixed that.
 
 ### Marquee selection
 
@@ -504,9 +515,14 @@ Recording captures live actions during sequenced playback ([chord-pad.js:1993+](
 
 On `playChord`: if recording, add an entry with the current beat. On `releaseChord`: compute duration, push a new clip into `ensureTrackOfKind('chord').items`. Same flow for notes via `kbinput.js`. Each track has its own arm flag; only armed tracks accept their input source.
 
-### Track drag-reorder
+### Track drag-reorder + Alt-duplicate
 
-Track headers are `draggable="true"`. On dragstart, set the dataTransfer payload to the track id; the headers light up `.drop-before` or `.drop-after` based on the cursor's Y in the hovered target. On drop, splice `SEQ.tracksList` and call `rebuildTracksUI` which re-renders both the sidebar labels and the lane DOM order. ([chord-pad.js:3194+](js/chord-pad.js#L3194))
+Track headers are `draggable="true"`. On dragstart, set the dataTransfer payload to the track id; the headers light up `.drop-before` or `.drop-after` based on the cursor's Y in the hovered target. On drop:
+
+- **Plain drop** — splice `SEQ.tracksList` to reorder.
+- **Alt-drop** — deep-clone the source track (`JSON.parse(JSON.stringify(src))`), fresh `id` via `newTrackId()`, fresh `id` per clip via `newClipId()`, drop transient playback state (`_scheduled`, `pendingIdx`, `_flatDirty`, …), and insert at the target slot. Name gets a `" copy"` suffix.
+
+`effectAllowed = 'copyMove'` at dragstart — without it, browsers reject the `'copy'` dropEffect that the dragover sets when Alt is held, and Alt-drop silently falls through to a plain reorder. ([chord-pad.js:3244-3324](js/chord-pad.js#L3244))
 
 ---
 
@@ -535,6 +551,8 @@ The pitch range is **full piano** (A0–C8) — no autosizing. This was a design
 - Resize handles (left + right edges of the note) — drag to stretch/shrink. Snap to grid when snap is on.
 
 **Multi-note selection** is a `Set<note>` (`SEQ.prSelection`) keyed by note object identity. The marquee uses the same snapshot-and-rebuild approach as the arrangement, so notes leave the selection when the rect moves away. Shift+click toggles; click on an unselected note replaces.
+
+**Live keyboard highlighting during playback** ([seq.js, inside `seqAnimatePlayhead`](js/seq.js)) — when the playhead is inside the focused clip, every frame collects the MIDI numbers of notes overlapping the current beat into a reused `SEQ._prActiveMidi` set, then toggles `.pr-key-active` on each `.pr-keyboard-row`. The keyboard column lights up exactly while the corresponding note is sounding, matching what the user hears (same source of truth as the playhead position, so timing is consistent).
 
 **Velocity lane** ([pianoroll.js:410](js/pianoroll.js#L410)) is a thin strip below the piano roll. One vertical bar per note, height = `velocity / 127`. Drag a bar up/down to adjust. When a selection exists, non-selected bars dim and become non-interactive.
 
@@ -671,6 +689,14 @@ The visual cursor is rewound by `outputLatency + visualLatencyMs` so what you se
 ### Per-track event ledger + selective cancel
 
 Notes are scheduled ahead of audio-context time so Web Audio handles sample-accurate timing. But when the user edits a clip or jumps the cursor, we need to cancel only the pending events, not the ones already playing. The `_scheduled` array per track records each scheduled event; `_seqCancelFuture(track, now)` filters by `event.startAt > now` and cancels each (oscillator stop + 1 ms-later note-off for MIDI). openDAW-inspired.
+
+### Playback never produces preview audio
+
+A consistent rule across every interactive surface: while `SEQ.playing` is true, touching a clip / note / keyboard column / pad block emits no audio of its own — you're listening to the song, not auditioning. Concretely:
+
+- Click previews in `seqMakeBlock` (chord-arrangement), `seqMakeClipBlock` (free-clip), `seqMakeRollNote` (mini-roll in arrangement), `prPreviewMidi` (piano-roll keyboard column), and the piano-roll note-grab handler are all gated on `!SEQ.playing`.
+- Drags / drops / resizes go through `seqResyncTrack` in its default strict-future mode (see Resync modes), so a clip dropped on top of the playhead doesn't fire mid-way — it waits for the next loop cycle.
+- The hard-stop helper used by free-clip multi-note previews (`hardStop(node)`) cancels `env.gain`, disconnects the env node, and stops every oscillator at `ctx.currentTime` — necessary because `stopAudioNote`'s 500 ms release does nothing for nodes scheduled to *start* in the future.
 
 ### Treadmill rendering for chord view
 

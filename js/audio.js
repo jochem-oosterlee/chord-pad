@@ -817,6 +817,38 @@ function sf2Gen(keyData, id) {
   return typeof g === 'object' ? g.value : g;
 }
 
+// Read the SF2 preset's volume envelope + filter generators for a
+// representative MIDI note and return them as plain linear values
+// (seconds / Hz / 0..1) — same units as the synth preset object so
+// applySynthPreset / track FX sliders can show them directly.
+// Returns null when the preset has no key data we can read.
+function readSf2Defaults(sf2, presetNumber) {
+  if (!sf2 || presetNumber == null) return null;
+  let keyData = null;
+  for (const m of [60, 72, 48, 84, 36]) {
+    try { keyData = sf2.getKeyData(m, 0, presetNumber); } catch (_) {}
+    if (keyData) break;
+  }
+  if (!keyData) return null;
+  const g = (id) => sf2Gen(keyData, id);
+  const out = {};
+  const att = g(SF2G.AttackVolEnv);
+  if (att  != null) out.attack  = Math.min(timecentsToSec(att), 4);
+  const dec = g(SF2G.DecayVolEnv);
+  if (dec  != null) out.decay   = Math.min(timecentsToSec(dec), 8);
+  const sus = g(SF2G.SustainVolEnv);
+  // SF2 sustain is in centibels of attenuation (0 = full, 1000 = -100dB).
+  if (sus  != null) out.sustain = Math.max(0, 1 - Math.min(sus, 1000) / 1000);
+  const rel = g(SF2G.ReleaseVolEnv);
+  if (rel  != null) out.release = Math.min(timecentsToSec(rel), 6);
+  const fc  = g(SF2G.InitialFilterFc);
+  if (fc   != null) out.filterFreq = Math.min(20000, Math.max(20, absoluteCentsToHz(fc)));
+  const fq  = g(SF2G.InitialFilterQ);
+  // Centibels → linear Q.
+  if (fq   != null) out.filterQ = Math.max(0.001, Math.pow(10, fq / 200));
+  return out;
+}
+
 // SF2 absolute-cents → Hz: f = 8.176 * 2^(cents/1200)
 function absoluteCentsToHz(cents) { return 8.176 * Math.pow(2, cents / 1200); }
 // Timecents → seconds, clamped to a sane minimum

@@ -200,7 +200,18 @@ const kbActive = new Map(); // midi → audioNode
 
 function kbNoteOn(midi, sendMidi = true) {
   if (kbActive.has(midi)) return;
-  const node = startAudioNote(midi, state.velocity);
+  // Route through the keyboard's own synth + instrument (set via the
+  // keyboard panel's settings cog). Falls back to the chord-pad voice
+  // if the virtual keyboard track isn't initialised yet.
+  let node = null;
+  const kbTrack = state.keyboardTrack;
+  if (kbTrack && kbTrack.synth && typeof withSynth === 'function') {
+    withSynth(kbTrack.synth, () => {
+      node = startAudioNote(midi, state.velocity, null, null, kbTrack.instrument);
+    });
+  } else {
+    node = startAudioNote(midi, state.velocity);
+  }
   if (sendMidi) sendNoteOn(midi, state.velocity);
   kbActive.set(midi, node);
   document.querySelector(`.kb-key[data-midi="${midi}"]`)?.classList.add('active');
